@@ -1,0 +1,356 @@
+package main
+
+import (
+	"image"
+	"image/color"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"gioui.org/f32"
+	"gioui.org/font"
+	"gioui.org/io/pointer"
+	"gioui.org/layout"
+	"gioui.org/op"
+	"gioui.org/op/clip"
+	"gioui.org/op/paint"
+	"gioui.org/unit"
+	"gioui.org/widget"
+	"gioui.org/widget/material"
+)
+
+func setPhase(p string) {
+	ui.mu.Lock()
+	ui.phase = p
+	ui.mu.Unlock()
+	if gioWin != nil {
+		gioWin.Invalidate()
+	}
+}
+
+func setTab(t int) {
+	ui.mu.Lock()
+	ui.tab = t
+	ui.mu.Unlock()
+	if gioWin != nil {
+		gioWin.Invalidate()
+	}
+}
+
+func parseRelays(text string) []string {
+	var out []string
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if !strings.Contains(line, "://") {
+			line = "wss://" + line
+		}
+		out = append(out, line)
+	}
+	return out
+}
+
+func launchNapp(napp Napp) {
+	id := napp.ID
+	if id == "" {
+		id = "unknown"
+	}
+	appDir := filepath.Join(verdanaDir, "napps", id)
+	os.MkdirAll(appDir, 0755)
+	select {
+	case openReqCh <- openReq{napp: napp, dir: appDir}:
+	default:
+	}
+}
+
+func layoutLogin(gtx layout.Context, th *material.Theme, ed *widget.Editor, btn *widget.Clickable, loginErr string) layout.Dimensions {
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			t := material.H5(th, "Log in to Verdana")
+			t.Font.Weight = font.Bold
+			return t.Layout(gtx)
+		}),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			l := material.Body2(th, "Paste your nsec or a bunker:// URL")
+			l.Color = color.NRGBA{R: 0x66, G: 0x66, B: 0x66, A: 0xff}
+			return l.Layout(gtx)
+		}),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return editorBox(gtx, th, ed, "nsec1... or bunker://...")
+		}),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			pointer.CursorPointer.Add(gtx.Ops)
+			return material.Button(th, btn, "Log in").Layout(gtx)
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if loginErr == "" {
+				return layout.Dimensions{}
+			}
+			return layout.Inset{Top: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				l := material.Body2(th, loginErr)
+				l.Color = color.NRGBA{R: 0xcc, G: 0x22, B: 0x22, A: 0xff}
+				return l.Layout(gtx)
+			})
+		}),
+	)
+}
+
+func layoutMain(gtx layout.Context, th *material.Theme, tabNappsBtn, tabDiscoBtn *widget.Clickable, tab int, installedList, discoveryList *widget.List, relaysEd *widget.Editor, fetchBtn *widget.Clickable, runBtns, actionBtns []widget.Clickable, profName, profPic, fetchErr string, fetching bool, installed, discovery []Napp, installedSet, busy map[string]bool) layout.Dimensions {
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layoutProfile(gtx, th, profName, profPic)
+		}),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layoutTabs(gtx, th, tabNappsBtn, tabDiscoBtn, tab, len(installed), len(discovery))
+		}),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
+		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			if tab == 0 {
+				return layoutNappsTab(gtx, th, installedList, runBtns, installed)
+			}
+			return layoutDiscoveryTab(gtx, th, discoveryList, relaysEd, fetchBtn, actionBtns,
+				fetchErr, fetching, discovery, installedSet, busy)
+		}),
+	)
+}
+
+func layoutTabs(gtx layout.Context, th *material.Theme, nappsBtn, discoBtn *widget.Clickable, tab, nInstalled, nDiscovery int) layout.Dimensions {
+	tabBtn := func(gtx layout.Context, btn *widget.Clickable, label string, active bool) layout.Dimensions {
+		pointer.CursorPointer.Add(gtx.Ops)
+		b := material.Button(th, btn, label)
+		if active {
+			b.Background = th.Palette.ContrastBg
+		} else {
+			b.Background = color.NRGBA{R: 0xe8, G: 0xe8, B: 0xe8, A: 0xff}
+			b.Color = color.NRGBA{R: 0x33, G: 0x33, B: 0x33, A: 0xff}
+		}
+		return b.Layout(gtx)
+	}
+	return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return tabBtn(gtx, nappsBtn, "Napps", tab == 0)
+		}),
+		layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return tabBtn(gtx, discoBtn, "Discovery", tab == 1)
+		}),
+	)
+}
+
+func layoutNappsTab(gtx layout.Context, th *material.Theme, list *widget.List, runBtns []widget.Clickable, installed []Napp) layout.Dimensions {
+	if len(installed) == 0 {
+		l := material.Body2(th, "No napps installed yet. Find some in the Discovery tab.")
+		l.Color = color.NRGBA{R: 0x99, G: 0x99, B: 0x99, A: 0xff}
+		return l.Layout(gtx)
+	}
+	return material.List(th, list).Layout(gtx, len(installed), func(gtx layout.Context, i int) layout.Dimensions {
+		var btn *widget.Clickable
+		if i < len(runBtns) {
+			btn = &runBtns[i]
+		}
+		return renderNappCard(gtx, th, btn, "Run", installed[i])
+	})
+}
+
+func layoutDiscoveryTab(gtx layout.Context, th *material.Theme, list *widget.List, relaysEd *widget.Editor, fetchBtn *widget.Clickable, actionBtns []widget.Clickable, fetchErr string, fetching bool, discovery []Napp, installedSet, busy map[string]bool) layout.Dimensions {
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			l := material.Body2(th, "Relays (one per line)")
+			l.Color = color.NRGBA{R: 0x66, G: 0x66, B: 0x66, A: 0xff}
+			return l.Layout(gtx)
+		}),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return editorBox(gtx, th, relaysEd, "relay.example.com")
+		}),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					pointer.CursorPointer.Add(gtx.Ops)
+					label := "Fetch napps"
+					if fetching {
+						label = "Fetching\u2026"
+					}
+					return material.Button(th, fetchBtn, label).Layout(gtx)
+				}),
+				layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					if fetchErr == "" {
+						return layout.Dimensions{}
+					}
+					l := material.Body2(th, fetchErr)
+					l.Color = color.NRGBA{R: 0xcc, G: 0x22, B: 0x22, A: 0xff}
+					return l.Layout(gtx)
+				}),
+			)
+		}),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
+		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			if len(discovery) == 0 {
+				msg := "No napps yet. Click \"Fetch napps\"."
+				if fetching {
+					msg = "Searching relays\u2026"
+				}
+				l := material.Body2(th, msg)
+				l.Color = color.NRGBA{R: 0x99, G: 0x99, B: 0x99, A: 0xff}
+				return l.Layout(gtx)
+			}
+			return material.List(th, list).Layout(gtx, len(discovery), func(gtx layout.Context, i int) layout.Dimensions {
+				var btn *widget.Clickable
+				if i < len(actionBtns) {
+					btn = &actionBtns[i]
+				}
+				n := discovery[i]
+				label := "Install"
+				if installedSet[n.ID] {
+					label = "Uninstall"
+				}
+				if busy[n.ID] {
+					label = "Working\u2026"
+				}
+				return renderNappCard(gtx, th, btn, label, n)
+			})
+		}),
+	)
+}
+
+func layoutProfile(gtx layout.Context, th *material.Theme, name, pic string) layout.Dimensions {
+	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return avatar(gtx, pic, 48)
+		}),
+		layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
+		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			t := material.H6(th, name)
+			t.Font.Weight = font.Bold
+			return t.Layout(gtx)
+		}),
+	)
+}
+
+func avatar(gtx layout.Context, url string, size int) layout.Dimensions {
+	px := gtx.Dp(unit.Dp(size))
+	sq := image.Point{X: px, Y: px}
+	defer clip.RRect{Rect: image.Rectangle{Max: sq}, NW: 6, NE: 6, SW: 6, SE: 6}.Push(gtx.Ops).Pop()
+	if imgOp, ok := getImage(url); ok {
+		isz := imgOp.Size()
+		if isz.X > 0 && isz.Y > 0 {
+			scale := float32(px) / float32(isz.X)
+			if s := float32(px) / float32(isz.Y); s > scale {
+				scale = s
+			}
+			defer op.Affine(f32.Affine2D{}.Scale(f32.Pt(0, 0), f32.Pt(scale, scale))).Push(gtx.Ops).Pop()
+		}
+		imgOp.Add(gtx.Ops)
+		paint.PaintOp{}.Add(gtx.Ops)
+	} else {
+		paint.Fill(gtx.Ops, color.NRGBA{R: 0xdd, G: 0xdd, B: 0xdd, A: 0xff})
+	}
+	return layout.Dimensions{Size: sq}
+}
+
+func editorBox(gtx layout.Context, th *material.Theme, ed *widget.Editor, hint string) layout.Dimensions {
+	border := widget.Border{
+		Color:        color.NRGBA{R: 0xcc, G: 0xcc, B: 0xcc, A: 0xff},
+		CornerRadius: unit.Dp(6),
+		Width:        unit.Dp(1),
+	}
+	return border.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return material.Editor(th, ed, hint).Layout(gtx)
+		})
+	})
+}
+
+func renderNappCard(gtx layout.Context, th *material.Theme, btn *widget.Clickable, btnLabel string, napp Napp) layout.Dimensions {
+	authorName, authorPic := authorMeta(napp.Author)
+	return layout.Inset{Bottom: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		sz := gtx.Constraints.Max
+		macro := op.Record(gtx.Ops)
+		dims := layout.Inset{
+			Top: unit.Dp(12), Bottom: unit.Dp(12),
+			Left: unit.Dp(12), Right: unit.Dp(12),
+		}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					if napp.Icon == "" {
+						return layout.Dimensions{}
+					}
+					return layout.Inset{Right: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						return avatar(gtx, napp.Icon, 40)
+					})
+				}),
+				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							label := material.Body1(th, napp.Name)
+							label.Font.Weight = font.Bold
+							return label.Layout(gtx)
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							if napp.Description == "" {
+								return layout.Dimensions{}
+							}
+							return layout.Inset{Top: unit.Dp(2)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+								l := material.Body2(th, napp.Description)
+								l.Color = color.NRGBA{R: 0x66, G: 0x66, B: 0x66, A: 0xff}
+								return l.Layout(gtx)
+							})
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return layout.Inset{Top: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+								return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+									layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+										return avatar(gtx, authorPic, 18)
+									}),
+									layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
+									layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+										name := authorName
+										if name == "" {
+											name = napp.Author
+											if len(name) > 12 {
+												name = name[:12] + "\u2026"
+											}
+										}
+										c := material.Caption(th, name)
+										c.Color = color.NRGBA{R: 0x88, G: 0x88, B: 0x88, A: 0xff}
+										return c.Layout(gtx)
+									}),
+								)
+							})
+						}),
+					)
+				}),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					if btn == nil {
+						return layout.Dimensions{}
+					}
+					return layout.Inset{Left: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						pointer.CursorPointer.Add(gtx.Ops)
+						b := material.Button(th, btn, btnLabel)
+						b.TextSize = unit.Sp(13)
+						b.Inset = layout.UniformInset(unit.Dp(8))
+						return b.Layout(gtx)
+					})
+				}),
+			)
+		})
+		call := macro.Stop()
+
+		bg := clip.RRect{
+			Rect: image.Rectangle{Max: image.Point{X: sz.X, Y: dims.Size.Y}},
+			NW:   8, NE: 8, SW: 8, SE: 8,
+		}
+		defer bg.Push(gtx.Ops).Pop()
+		paint.Fill(gtx.Ops, color.NRGBA{R: 0xf2, G: 0xf2, B: 0xf2, A: 0xff})
+		call.Add(gtx.Ops)
+		return dims
+	})
+}
