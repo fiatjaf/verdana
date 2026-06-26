@@ -3,12 +3,15 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"image"
 	"image/color"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"fiatjaf.com/nostr"
@@ -52,10 +55,29 @@ type openReq struct {
 	dir  string
 }
 
-var openReqCh = make(chan openReq)
+var openReqCh = make(chan openReq, 16)
 
+// wireMsg is the newline/whitespace-delimited JSON protocol exchanged between
+// the parent launcher process and each child napp-window process.
+//
+//	child -> parent : {"t":"rpc",  "id":N, "method":..., "params":...}
+//	parent -> child : {"t":"resp", "id":N, "result":<json>, "error":...}
+//	parent -> child : {"t":"eval", "code":"..."}
+type wireMsg struct {
+	T      string          `json:"t"`
+	ID     int             `json:"id,omitempty"`
+	Method string          `json:"method,omitempty"`
+	Params string          `json:"params,omitempty"`
+	Result json.RawMessage `json:"result,omitempty"`
+	Error  string          `json:"error,omitempty"`
+	Code   string          `json:"code,omitempty"`
+}
+
+// childInfo is the parent's handle to one running child napp-window process.
 type childInfo struct {
-	w     webview.WebView
+	cmd   *exec.Cmd     // the child process, so it can be killed on parent exit
+	enc   *json.Encoder // writes to the child's stdin
+	encMu sync.Mutex
 	subs  map[int]context.CancelFunc
 	subMu sync.Mutex
 }
@@ -63,7 +85,8 @@ type childInfo struct {
 var (
 	mu         sync.Mutex
 	children   []*childInfo
-	verdanaDir string
+	verdanaDir string // parent: root Verdana data dir
+	nappDir    string // child: this napp's data dir (from VERDANA_NAPP_DIR)
 )
 
 func initSystem(dataDir string) func() {
@@ -91,6 +114,14 @@ func initSystem(dataDir string) func() {
 }
 
 func main() {
+	// Child mode: this process hosts exactly one napp webview window. Closing
+	// that window (which terminates the shared GTK loop) only exits this child,
+	// leaving the parent launcher and any other napp windows untouched.
+	if nappID := os.Getenv("VERDANA_NAPP_ID"); nappID != "" {
+		childMain(nappID)
+		return
+	}
+
 	dataDir, err := app.DataDir()
 	if err != nil {
 		panic("no data dir: " + err.Error())
@@ -103,6 +134,23 @@ func main() {
 	go gioMain()
 	go webviewServer()
 	app.Main()
+
+	// app.Main returns once the Gio launcher window is destroyed; make sure no
+	// napp child windows are left orphaned.
+	killAllChildren()
+}
+
+// killAllChildren terminates every running napp-window child process. Called
+// when the parent launcher exits so no windows are left orphaned.
+func killAllChildren() {
+	mu.Lock()
+	snapshot := append([]*childInfo(nil), children...)
+	mu.Unlock()
+	for _, ci := range snapshot {
+		if ci.cmd != nil && ci.cmd.Process != nil {
+			ci.cmd.Process.Kill()
+		}
+	}
 }
 
 func gioMain() {
@@ -128,7 +176,10 @@ func gioMain() {
 					napp := napps[i]
 					appDir := filepath.Join(verdanaDir, "napps", napp.ID)
 					os.MkdirAll(appDir, 0755)
-					openReqCh <- openReq{napp: napp, dir: appDir}
+					select {
+					case openReqCh <- openReq{napp: napp, dir: appDir}:
+					default:
+					}
 				}
 			}
 
@@ -191,64 +242,215 @@ func renderCard(gtx layout.Context, th *material.Theme, btn *widget.Clickable, n
 	})
 }
 
+// webviewServer (parent process) launches one independent child process per
+// open request. It never touches a webview directly, so it does not need to
+// lock an OS thread.
 func webviewServer() {
-	runtime.LockOSThread()
-
-	req := <-openReqCh
-
-	master := newChild(verdanaDir, req)
-	master.Run()
-	closeMaster(master)
+	for req := range openReqCh {
+		go launchChild(req)
+	}
 }
 
-func newChild(verdanaDir string, req openReq) webview.WebView {
-	w := webview.New(false)
-	w.SetTitle(req.napp.Name)
-	w.SetSize(600, 450, webview.HintNone)
+// launchChild spawns a child process that hosts a single napp window, wires up
+// its stdin/stdout pipes, and pumps RPC requests through the existing bridge
+// handlers until the child's window is closed (stdout EOF).
+func launchChild(req openReq) {
+	exe, err := os.Executable()
+	if err != nil {
+		exe = os.Args[0]
+	}
+	cmd := exec.Command(exe)
+	cmd.Env = append(os.Environ(),
+		"VERDANA_NAPP_ID="+req.napp.ID,
+		"VERDANA_NAPP_DIR="+req.dir,
+	)
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return
+	}
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		return
+	}
 
-	ci := &childInfo{w: w, subs: make(map[int]context.CancelFunc)}
+	ci := &childInfo{
+		cmd:  cmd,
+		enc:  json.NewEncoder(stdin),
+		subs: make(map[int]context.CancelFunc),
+	}
 	mu.Lock()
 	children = append(children, ci)
 	mu.Unlock()
 
-	_ = w.Bind("__bridge_rpc", bridgeRPC(w, ci, verdanaDir))
-	w.Init(bridgeJS)
-
-	w.SetHtml(nappHTML(req.napp))
-
-	return w
-}
-
-func closeMaster(master webview.WebView) {
-	mu.Lock()
-	for _, ci := range children {
-		if ci.w != master {
-			ci.subMu.Lock()
-			for _, cancel := range ci.subs {
-				cancel()
-			}
-			ci.subMu.Unlock()
-			ci.w.Destroy()
+	dec := json.NewDecoder(stdout)
+	for {
+		var m wireMsg
+		if err := dec.Decode(&m); err != nil {
+			break // EOF: the child window was closed / process exited
+		}
+		if m.T == "rpc" {
+			m := m
+			go handleChildRPC(ci, m)
 		}
 	}
 
-	for i := range children {
-		if children[i].w == master {
-			children[i].subMu.Lock()
-			for _, cancel := range children[i].subs {
-				cancel()
-			}
-			children[i].subMu.Unlock()
+	cleanupChild(ci)
+	cmd.Wait()
+}
+
+// handleChildRPC answers a single RPC request from a child using the shared
+// bridge handlers, then writes the response back over the child's stdin pipe.
+func handleChildRPC(ci *childInfo, m wireMsg) {
+	result, err := bridgeRPC(ci)(m.Method, m.Params)
+	resp := wireMsg{T: "resp", ID: m.ID}
+	if err != nil {
+		resp.Error = err.Error()
+	} else if raw, mErr := json.Marshal(result); mErr != nil {
+		resp.Error = mErr.Error()
+	} else {
+		resp.Result = raw
+	}
+	ci.send(resp)
+}
+
+func (ci *childInfo) send(m wireMsg) {
+	ci.encMu.Lock()
+	defer ci.encMu.Unlock()
+	ci.enc.Encode(m)
+}
+
+// eval pushes JavaScript to be executed inside the child's webview.
+func (ci *childInfo) eval(code string) {
+	ci.send(wireMsg{T: "eval", Code: code})
+}
+
+// cleanupChild cancels only this child's feed subscriptions and removes it from
+// the registry. Other children and the parent launcher are unaffected.
+func cleanupChild(ci *childInfo) {
+	ci.subMu.Lock()
+	for _, cancel := range ci.subs {
+		cancel()
+	}
+	ci.subs = make(map[int]context.CancelFunc)
+	ci.subMu.Unlock()
+
+	mu.Lock()
+	for i, c := range children {
+		if c == ci {
+			children = append(children[:i], children[i+1:]...)
 			break
 		}
 	}
-	children = nil
 	mu.Unlock()
-
-	master.Destroy()
 }
 
-func bridgeRPC(w webview.WebView, ci *childInfo, verdanaDir string) func(string, string) (any, error) {
+// ---- child process side ----
+
+var (
+	childOutMu     sync.Mutex
+	childEnc       *json.Encoder // writes to parent over stdout
+	childPendingMu sync.Mutex
+	childPending   = make(map[int]chan wireMsg)
+	childReqSerial atomic.Int64
+)
+
+// childMain hosts a single napp webview window and forwards every bridge RPC to
+// the parent process over stdout, resolving the JS promises from the parent's
+// responses read on stdin. When the window is closed, Run returns and the
+// process exits, terminating only this window. The napp's data directory is
+// provided via VERDANA_NAPP_DIR.
+func childMain(nappID string) {
+	nappDir = os.Getenv("VERDANA_NAPP_DIR")
+
+	runtime.LockOSThread()
+
+	var napp Napp
+	for _, n := range napps {
+		if n.ID == nappID {
+			napp = n
+			break
+		}
+	}
+
+	childEnc = json.NewEncoder(os.Stdout)
+
+	w := webview.New(false)
+	w.SetTitle(napp.Name)
+	w.SetSize(600, 450, webview.HintNone)
+	_ = w.Bind("__bridge_rpc", childRPC)
+	w.Init(bridgeJS)
+	w.SetHtml(nappHTML(napp))
+
+	go childReader(w)
+
+	w.Run()
+	w.Destroy()
+	os.Exit(0)
+}
+
+// childRPC is the bound __bridge_rpc callback. It forwards the call to the
+// parent and blocks the calling goroutine until the matching response arrives.
+// The independent childReader goroutine guarantees responses are always
+// delivered, so this cannot deadlock. The returned json.RawMessage is
+// re-marshaled verbatim by the binding, so the JS promise resolves identically
+// to the parent computing the value in-process.
+func childRPC(method string, params string) (any, error) {
+	id := int(childReqSerial.Add(1))
+	ch := make(chan wireMsg, 1)
+	childPendingMu.Lock()
+	childPending[id] = ch
+	childPendingMu.Unlock()
+
+	childWriteMsg(wireMsg{T: "rpc", ID: id, Method: method, Params: params})
+
+	resp := <-ch
+	childPendingMu.Lock()
+	delete(childPending, id)
+	childPendingMu.Unlock()
+
+	if resp.Error != "" {
+		return nil, errors.New(resp.Error)
+	}
+	return resp.Result, nil
+}
+
+// childReader routes parent responses to the waiting RPC goroutines and runs
+// eval pushes on the webview's UI thread via Dispatch. On stdin EOF (parent
+// gone) it terminates the window.
+func childReader(w webview.WebView) {
+	dec := json.NewDecoder(os.Stdin)
+	for {
+		var m wireMsg
+		if err := dec.Decode(&m); err != nil {
+			break
+		}
+		switch m.T {
+		case "resp":
+			childPendingMu.Lock()
+			ch := childPending[m.ID]
+			childPendingMu.Unlock()
+			if ch != nil {
+				ch <- m
+			}
+		case "eval":
+			code := m.Code
+			w.Dispatch(func() { w.Eval(code) })
+		}
+	}
+	w.Terminate()
+}
+
+func childWriteMsg(m wireMsg) {
+	childOutMu.Lock()
+	defer childOutMu.Unlock()
+	childEnc.Encode(m)
+}
+
+func bridgeRPC(ci *childInfo) func(string, string) (any, error) {
 	return func(method string, params string) (any, error) {
 		switch method {
 		case "getPublicKey":
@@ -272,7 +474,7 @@ func bridgeRPC(w webview.WebView, ci *childInfo, verdanaDir string) func(string,
 		case "napp.action":
 			return nappAction(params)
 		case "napp.feeds.profile", "napp.feeds.following", "napp.feeds.inbox":
-			return feedSubscribe(w, ci, method, params)
+			return feedSubscribe(ci, method, params)
 		case "napp.feeds.cancel":
 			return feedCancel(ci, params)
 		case "napp.loadBlossomServers":
@@ -359,7 +561,7 @@ func nappAction(params string) (any, error) {
 	return nil, nil
 }
 
-func feedSubscribe(w webview.WebView, ci *childInfo, method string, params string) (any, error) {
+func feedSubscribe(ci *childInfo, method string, params string) (any, error) {
 	var p struct {
 		Pubkey     string           `json:"pubkey"`
 		Source     string           `json:"source"`
@@ -376,12 +578,12 @@ func feedSubscribe(w webview.WebView, ci *childInfo, method string, params strin
 	ci.subs[p.CallbackId] = cancel
 	ci.subMu.Unlock()
 
-	go feedPump(ctx, w, method, p)
+	go feedPump(ctx, ci, method, p)
 
 	return nil, nil
 }
 
-func feedPump(ctx context.Context, w webview.WebView, method string, p struct {
+func feedPump(ctx context.Context, ci *childInfo, method string, p struct {
 	Pubkey     string           `json:"pubkey"`
 	Source     string           `json:"source"`
 	Kinds      []nostr.Kind     `json:"kinds"`
@@ -396,7 +598,7 @@ func feedPump(ctx context.Context, w webview.WebView, method string, p struct {
 		case <-ctx.Done():
 			return
 		case <-time.After(30 * time.Second):
-			w.Eval("")
+			ci.eval("")
 		}
 	}
 }
