@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"image"
@@ -9,11 +11,13 @@ import (
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -41,13 +45,24 @@ import (
 	_ "github.com/abemedia/go-webview/embedded"
 )
 
+// NappPath is one downloadable asset of a napp: its absolute in-app path and
+// the sha256 hash used to fetch (from a blossom server) and verify the blob.
+type NappPath struct {
+	Path   string `json:"path"`
+	Sha256 string `json:"sha256"`
+}
+
 type Napp struct {
-	ID          string
-	Name        string
-	Description string
-	Icon        string
-	Author      string
-	Actions     []string
+	ID          string          `json:"id"` // pubkey[:16] + "~" + d
+	D           string          `json:"d"`
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	Icon        string          `json:"icon"`
+	Author      string          `json:"author"` // pubkey hex
+	Actions     []string        `json:"actions"`
+	CreatedAt   nostr.Timestamp `json:"created_at"`
+	Paths       []NappPath      `json:"paths"`
+	Servers     []string        `json:"servers"` // blossom server hints
 }
 
 var sys *sdk.System
@@ -59,18 +74,27 @@ var defaultRelays = []string{
 	"relay.nostrapps.com/public",
 }
 
+// defaultBlossomServers are tried (after any per-napp "server" hints) when
+// downloading a napp's path-tag assets by sha256.
+var defaultBlossomServers = []string{
+	"https://blossom.primal.net",
+	"https://cdn.satellite.earth",
+}
+
 // AppState is the persisted launcher configuration. It is stored as JSON in
 // state.json inside the Verdana data dir. nostr.SecretKey marshals to/from hex
 // automatically.
 type AppState struct {
-	ClientKey nostr.SecretKey `json:"client_key"`
-	Login     string          `json:"login"` // nsec or bunker:// URL
-	Relays    []string        `json:"relays"`
+	ClientKey      nostr.SecretKey `json:"client_key"`
+	Login          string          `json:"login"` // nsec or bunker:// URL
+	Relays         []string        `json:"relays"`
+	InstalledNapps map[string]Napp `json:"installed_napps"` // id -> metadata
 }
 
 var (
 	state     AppState
 	statePath string
+	stateMu   sync.Mutex // guards state mutations + saveState marshal
 )
 
 func loadState() {
@@ -84,6 +108,9 @@ func loadState() {
 	}
 	if len(state.Relays) == 0 {
 		state.Relays = append([]string(nil), defaultRelays...)
+	}
+	if state.InstalledNapps == nil {
+		state.InstalledNapps = make(map[string]Napp)
 	}
 	saveState()
 }
@@ -99,17 +126,20 @@ func saveState() {
 // ---- live UI state (read in the frame handler, published from goroutines) ----
 
 type uiState struct {
-	mu       sync.Mutex
-	phase    string // "loading" | "login" | "main"
-	loginErr string
-	profName string
-	profPic  string
-	fetchErr string
-	fetching bool
-	napps    []Napp // published by replacement, never mutated in place
+	mu        sync.Mutex
+	phase     string // "loading" | "login" | "main"
+	tab       int    // 0 = napps (installed), 1 = discovery
+	loginErr  string
+	profName  string
+	profPic   string
+	fetchErr  string
+	fetching  bool
+	discovery []Napp          // fetched results; published by replacement
+	installed []Napp          // installed-napps snapshot; published by replacement
+	busy      map[string]bool // id -> install/uninstall in progress
 }
 
-var ui = uiState{phase: "loading"}
+var ui = uiState{phase: "loading", busy: make(map[string]bool)}
 
 var (
 	userKeyer  nostr.Keyer
@@ -198,6 +228,7 @@ func main() {
 	defer closer()
 
 	loadState()
+	refreshInstalled()
 
 	go gioMain()
 	go webviewServer()
@@ -235,16 +266,21 @@ func gioMain() {
 
 	// Widgets are only ever touched from this (UI) goroutine.
 	var (
-		loginEd  widget.Editor
-		loginBtn widget.Clickable
-		relaysEd widget.Editor
-		fetchBtn widget.Clickable
-		mainList widget.List
-		runBtns  []widget.Clickable
+		loginEd       widget.Editor
+		loginBtn      widget.Clickable
+		relaysEd      widget.Editor
+		fetchBtn      widget.Clickable
+		tabNappsBtn   widget.Clickable
+		tabDiscoBtn   widget.Clickable
+		installedList widget.List
+		discoveryList widget.List
+		runBtns       []widget.Clickable // installed tab
+		actionBtns    []widget.Clickable // discovery tab
 	)
 	loginEd.SingleLine = true
 	relaysEd.SingleLine = false
-	mainList.Axis = layout.Vertical
+	installedList.Axis = layout.Vertical
+	discoveryList.Axis = layout.Vertical
 	relaysEd.SetText(strings.Join(state.Relays, "\n"))
 
 	// Kick off auto-login if we already have credentials stored.
@@ -262,13 +298,24 @@ func gioMain() {
 
 			ui.mu.Lock()
 			phase := ui.phase
+			tab := ui.tab
 			loginErr := ui.loginErr
 			profName := ui.profName
 			profPic := ui.profPic
 			fetchErr := ui.fetchErr
 			fetching := ui.fetching
-			nappsSnap := ui.napps
+			discoverySnap := ui.discovery
+			installedSnap := ui.installed
+			busySnap := make(map[string]bool, len(ui.busy))
+			for k, v := range ui.busy {
+				busySnap[k] = v
+			}
 			ui.mu.Unlock()
+
+			installedSet := make(map[string]bool, len(installedSnap))
+			for _, n := range installedSnap {
+				installedSet[n.ID] = true
+			}
 
 			layout.UniformInset(unit.Dp(16)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				switch phase {
@@ -282,21 +329,51 @@ func gioMain() {
 					}
 					return layoutLogin(gtx, th, &loginEd, &loginBtn, loginErr)
 				case "main":
+					if tabNappsBtn.Clicked(gtx) {
+						setTab(0)
+					}
+					if tabDiscoBtn.Clicked(gtx) {
+						setTab(1)
+					}
 					if fetchBtn.Clicked(gtx) {
+						stateMu.Lock()
 						state.Relays = parseRelays(relaysEd.Text())
 						saveState()
-						go doFetch(state.Relays)
+						relays := append([]string(nil), state.Relays...)
+						stateMu.Unlock()
+						go doFetch(relays)
 					}
-					for len(runBtns) < len(nappsSnap) {
+					for len(runBtns) < len(installedSnap) {
 						runBtns = append(runBtns, widget.Clickable{})
 					}
-					for i := range nappsSnap {
-						if runBtns[i].Clicked(gtx) {
-							launchNapp(nappsSnap[i])
+					for len(actionBtns) < len(discoverySnap) {
+						actionBtns = append(actionBtns, widget.Clickable{})
+					}
+					if tab == 0 {
+						for i := range installedSnap {
+							if runBtns[i].Clicked(gtx) {
+								launchNapp(installedSnap[i])
+							}
+						}
+					} else {
+						for i := range discoverySnap {
+							if actionBtns[i].Clicked(gtx) {
+								n := discoverySnap[i]
+								if busySnap[n.ID] {
+									continue // already installing/uninstalling
+								}
+								if installedSet[n.ID] {
+									go uninstallNapp(n.ID)
+								} else {
+									go installNapp(n)
+								}
+							}
 						}
 					}
-					return layoutMain(gtx, th, &mainList, &relaysEd, &fetchBtn, runBtns,
-						profName, profPic, fetchErr, fetching, nappsSnap)
+					return layoutMain(gtx, th, &tabNappsBtn, &tabDiscoBtn, tab,
+						&installedList, &discoveryList, &relaysEd, &fetchBtn,
+						runBtns, actionBtns, profName, profPic, fetchErr, fetching,
+						installedSnap, discoverySnap, installedSet, busySnap)
 				default: // loading
 					return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 						return material.Body1(th, "Loading\u2026").Layout(gtx)
@@ -315,6 +392,15 @@ func gioMain() {
 func setPhase(p string) {
 	ui.mu.Lock()
 	ui.phase = p
+	ui.mu.Unlock()
+	if gioWin != nil {
+		gioWin.Invalidate()
+	}
+}
+
+func setTab(t int) {
+	ui.mu.Lock()
+	ui.tab = t
 	ui.mu.Unlock()
 	if gioWin != nil {
 		gioWin.Invalidate()
@@ -424,7 +510,7 @@ func doFetch(relays []string) {
 	ui.mu.Lock()
 	ui.fetching = true
 	ui.fetchErr = ""
-	ui.napps = nil
+	ui.discovery = nil
 	ui.mu.Unlock()
 	gioWin.Invalidate()
 
@@ -446,7 +532,7 @@ func doFetch(relays []string) {
 		collected = append(collected, nappFromEvent(re.Event))
 
 		ui.mu.Lock()
-		ui.napps = append([]Napp(nil), collected...)
+		ui.discovery = append([]Napp(nil), collected...)
 		ui.mu.Unlock()
 		gioWin.Invalidate()
 	}
@@ -465,22 +551,179 @@ func tagValue(tags nostr.Tags, key string) string {
 }
 
 func nappFromEvent(evt nostr.Event) Napp {
+	pubkey := evt.PubKey.Hex()
+	d := evt.Tags.GetD()
 	n := Napp{
-		ID:          evt.Tags.GetD(),
+		D:           d,
+		ID:          pubkey[:16] + "~" + d,
 		Name:        tagValue(evt.Tags, "title"),
 		Description: tagValue(evt.Tags, "description"),
 		Icon:        tagValue(evt.Tags, "icon"),
-		Author:      evt.PubKey.Hex(),
+		Author:      pubkey,
+		CreatedAt:   evt.CreatedAt,
 	}
 	if n.Name == "" {
-		n.Name = n.ID
+		n.Name = d
 	}
 	for t := range evt.Tags.FindAll("action") {
 		if len(t) > 1 {
 			n.Actions = append(n.Actions, t[1])
 		}
 	}
+	for t := range evt.Tags.FindAll("path") {
+		if len(t) > 2 {
+			n.Paths = append(n.Paths, NappPath{Path: t[1], Sha256: t[2]})
+		}
+	}
+	for t := range evt.Tags.FindAll("server") {
+		if len(t) > 1 {
+			n.Servers = append(n.Servers, t[1])
+		}
+	}
 	return n
+}
+
+// ---- install / uninstall ----
+
+// nappBaseDir is the on-disk directory where an installed napp's assets live.
+func nappBaseDir(id string) string {
+	return filepath.Join(verdanaDir, "napps", id)
+}
+
+// refreshInstalled publishes a sorted snapshot of state.InstalledNapps into the
+// UI state and invalidates the window.
+func refreshInstalled() {
+	stateMu.Lock()
+	list := make([]Napp, 0, len(state.InstalledNapps))
+	for _, n := range state.InstalledNapps {
+		list = append(list, n)
+	}
+	stateMu.Unlock()
+	sort.Slice(list, func(i, j int) bool { return list[i].Name < list[j].Name })
+
+	ui.mu.Lock()
+	ui.installed = list
+	ui.mu.Unlock()
+	if gioWin != nil {
+		gioWin.Invalidate()
+	}
+}
+
+func setBusy(id string, busy bool) {
+	ui.mu.Lock()
+	if busy {
+		ui.busy[id] = true
+	} else {
+		delete(ui.busy, id)
+	}
+	ui.mu.Unlock()
+	if gioWin != nil {
+		gioWin.Invalidate()
+	}
+}
+
+func setFetchErr(msg string) {
+	ui.mu.Lock()
+	ui.fetchErr = msg
+	ui.mu.Unlock()
+	if gioWin != nil {
+		gioWin.Invalidate()
+	}
+}
+
+// installNapp downloads and sha256-verifies every path asset of the napp into
+// its on-disk directory, then records the metadata in persistent + in-memory
+// installed state.
+func installNapp(n Napp) {
+	setBusy(n.ID, true)
+	defer setBusy(n.ID, false)
+
+	base := nappBaseDir(n.ID)
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	servers := append(append([]string(nil), n.Servers...), defaultBlossomServers...)
+	for _, p := range n.Paths {
+		data, err := downloadBlob(ctx, servers, p.Sha256)
+		if err != nil {
+			os.RemoveAll(base)
+			setFetchErr("install failed: " + err.Error())
+			return
+		}
+		dest := filepath.Join(base, filepath.FromSlash(strings.TrimPrefix(p.Path, "/")))
+		if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
+			setFetchErr("install failed: " + err.Error())
+			return
+		}
+		if err := os.WriteFile(dest, data, 0644); err != nil {
+			setFetchErr("install failed: " + err.Error())
+			return
+		}
+	}
+
+	stateMu.Lock()
+	if state.InstalledNapps == nil {
+		state.InstalledNapps = make(map[string]Napp)
+	}
+	state.InstalledNapps[n.ID] = n
+	saveState()
+	stateMu.Unlock()
+
+	refreshInstalled()
+}
+
+// uninstallNapp removes a napp's on-disk assets and its installed-state entry.
+func uninstallNapp(id string) {
+	setBusy(id, true)
+	defer setBusy(id, false)
+
+	os.RemoveAll(nappBaseDir(id))
+
+	stateMu.Lock()
+	delete(state.InstalledNapps, id)
+	saveState()
+	stateMu.Unlock()
+
+	refreshInstalled()
+}
+
+// downloadBlob fetches a blob by sha256 from the first server that returns it
+// with a matching hash.
+func downloadBlob(ctx context.Context, servers []string, sha string) ([]byte, error) {
+	var lastErr error = errors.New("no servers")
+	for _, srv := range servers {
+		srv = strings.TrimRight(srv, "/")
+		if !strings.Contains(srv, "://") {
+			srv = "https://" + srv
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, srv+"/"+sha, nil)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		data, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if resp.StatusCode != http.StatusOK {
+			lastErr = errors.New(srv + ": status " + resp.Status)
+			continue
+		}
+		sum := sha256.Sum256(data)
+		if hex.EncodeToString(sum[:]) != sha {
+			lastErr = errors.New(srv + ": sha256 mismatch")
+			continue
+		}
+		return data, nil
+	}
+	return nil, errors.New("could not fetch/verify " + sha + ": " + lastErr.Error())
 }
 
 // ---- async image loader ----
@@ -493,6 +736,50 @@ type imgEntry struct {
 }
 
 var imgCache sync.Map // url -> *imgEntry
+
+// authorEntry caches one author's profile name + picture, fetched lazily.
+type authorEntry struct {
+	once  sync.Once
+	name  string
+	pic   string
+	ready atomic.Bool
+}
+
+var authorCache sync.Map // pubkey hex -> *authorEntry
+
+// authorMeta returns the cached display name + picture URL for an author,
+// kicking off a background metadata fetch on first request.
+func authorMeta(pubkeyHex string) (string, string) {
+	if pubkeyHex == "" {
+		return "", ""
+	}
+	v, _ := authorCache.LoadOrStore(pubkeyHex, &authorEntry{})
+	e := v.(*authorEntry)
+	e.once.Do(func() {
+		go func() {
+			pk, err := nostr.PubKeyFromHex(pubkeyHex)
+			if err != nil {
+				return
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			pm := sys.FetchProfileMetadata(ctx, pk)
+			e.name = pm.Name
+			if e.name == "" {
+				e.name = pm.DisplayName
+			}
+			e.pic = pm.Picture
+			e.ready.Store(true)
+			if gioWin != nil {
+				gioWin.Invalidate()
+			}
+		}()
+	})
+	if e.ready.Load() {
+		return e.name, e.pic
+	}
+	return "", ""
+}
 
 // getImage returns the decoded image op for a URL, kicking off a background
 // fetch on first request and invalidating the window once it is ready.
@@ -566,12 +853,66 @@ func layoutLogin(gtx layout.Context, th *material.Theme, ed *widget.Editor, btn 
 	)
 }
 
-func layoutMain(gtx layout.Context, th *material.Theme, list *widget.List, relaysEd *widget.Editor, fetchBtn *widget.Clickable, runBtns []widget.Clickable, profName, profPic, fetchErr string, fetching bool, napps []Napp) layout.Dimensions {
+func layoutMain(gtx layout.Context, th *material.Theme, tabNappsBtn, tabDiscoBtn *widget.Clickable, tab int, installedList, discoveryList *widget.List, relaysEd *widget.Editor, fetchBtn *widget.Clickable, runBtns, actionBtns []widget.Clickable, profName, profPic, fetchErr string, fetching bool, installed, discovery []Napp, installedSet, busy map[string]bool) layout.Dimensions {
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layoutProfile(gtx, th, profName, profPic)
 		}),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layoutTabs(gtx, th, tabNappsBtn, tabDiscoBtn, tab, len(installed), len(discovery))
+		}),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
+		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			if tab == 0 {
+				return layoutNappsTab(gtx, th, installedList, runBtns, installed)
+			}
+			return layoutDiscoveryTab(gtx, th, discoveryList, relaysEd, fetchBtn, actionBtns,
+				fetchErr, fetching, discovery, installedSet, busy)
+		}),
+	)
+}
+
+func layoutTabs(gtx layout.Context, th *material.Theme, nappsBtn, discoBtn *widget.Clickable, tab, nInstalled, nDiscovery int) layout.Dimensions {
+	tabBtn := func(gtx layout.Context, btn *widget.Clickable, label string, active bool) layout.Dimensions {
+		pointer.CursorPointer.Add(gtx.Ops)
+		b := material.Button(th, btn, label)
+		if active {
+			b.Background = th.Palette.ContrastBg
+		} else {
+			b.Background = color.NRGBA{R: 0xe8, G: 0xe8, B: 0xe8, A: 0xff}
+			b.Color = color.NRGBA{R: 0x33, G: 0x33, B: 0x33, A: 0xff}
+		}
+		return b.Layout(gtx)
+	}
+	return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return tabBtn(gtx, nappsBtn, "Napps", tab == 0)
+		}),
+		layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return tabBtn(gtx, discoBtn, "Discovery", tab == 1)
+		}),
+	)
+}
+
+func layoutNappsTab(gtx layout.Context, th *material.Theme, list *widget.List, runBtns []widget.Clickable, installed []Napp) layout.Dimensions {
+	if len(installed) == 0 {
+		l := material.Body2(th, "No napps installed yet. Find some in the Discovery tab.")
+		l.Color = color.NRGBA{R: 0x99, G: 0x99, B: 0x99, A: 0xff}
+		return l.Layout(gtx)
+	}
+	return material.List(th, list).Layout(gtx, len(installed), func(gtx layout.Context, i int) layout.Dimensions {
+		var btn *widget.Clickable
+		if i < len(runBtns) {
+			btn = &runBtns[i]
+		}
+		return renderNappCard(gtx, th, btn, "Run", installed[i])
+	})
+}
+
+func layoutDiscoveryTab(gtx layout.Context, th *material.Theme, list *widget.List, relaysEd *widget.Editor, fetchBtn *widget.Clickable, actionBtns []widget.Clickable, fetchErr string, fetching bool, discovery []Napp, installedSet, busy map[string]bool) layout.Dimensions {
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			l := material.Body2(th, "Relays (one per line)")
 			l.Color = color.NRGBA{R: 0x66, G: 0x66, B: 0x66, A: 0xff}
@@ -605,7 +946,7 @@ func layoutMain(gtx layout.Context, th *material.Theme, list *widget.List, relay
 		}),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			if len(napps) == 0 {
+			if len(discovery) == 0 {
 				msg := "No napps yet. Click \"Fetch napps\"."
 				if fetching {
 					msg = "Searching relays\u2026"
@@ -614,12 +955,20 @@ func layoutMain(gtx layout.Context, th *material.Theme, list *widget.List, relay
 				l.Color = color.NRGBA{R: 0x99, G: 0x99, B: 0x99, A: 0xff}
 				return l.Layout(gtx)
 			}
-			return material.List(th, list).Layout(gtx, len(napps), func(gtx layout.Context, i int) layout.Dimensions {
+			return material.List(th, list).Layout(gtx, len(discovery), func(gtx layout.Context, i int) layout.Dimensions {
 				var btn *widget.Clickable
-				if i < len(runBtns) {
-					btn = &runBtns[i]
+				if i < len(actionBtns) {
+					btn = &actionBtns[i]
 				}
-				return renderNappCard(gtx, th, btn, napps[i])
+				n := discovery[i]
+				label := "Install"
+				if installedSet[n.ID] {
+					label = "Uninstall"
+				}
+				if busy[n.ID] {
+					label = "Working\u2026"
+				}
+				return renderNappCard(gtx, th, btn, label, n)
 			})
 		}),
 	)
@@ -676,7 +1025,8 @@ func editorBox(gtx layout.Context, th *material.Theme, ed *widget.Editor, hint s
 	})
 }
 
-func renderNappCard(gtx layout.Context, th *material.Theme, btn *widget.Clickable, napp Napp) layout.Dimensions {
+func renderNappCard(gtx layout.Context, th *material.Theme, btn *widget.Clickable, btnLabel string, napp Napp) layout.Dimensions {
+	authorName, authorPic := authorMeta(napp.Author)
 	return layout.Inset{Bottom: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		sz := gtx.Constraints.Max
 		macro := op.Record(gtx.Ops)
@@ -710,6 +1060,28 @@ func renderNappCard(gtx layout.Context, th *material.Theme, btn *widget.Clickabl
 								return l.Layout(gtx)
 							})
 						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return layout.Inset{Top: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+								return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+									layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+										return avatar(gtx, authorPic, 18)
+									}),
+									layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
+									layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+										name := authorName
+										if name == "" {
+											name = napp.Author
+											if len(name) > 12 {
+												name = name[:12] + "\u2026"
+											}
+										}
+										c := material.Caption(th, name)
+										c.Color = color.NRGBA{R: 0x88, G: 0x88, B: 0x88, A: 0xff}
+										return c.Layout(gtx)
+									}),
+								)
+							})
+						}),
 					)
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -718,7 +1090,7 @@ func renderNappCard(gtx layout.Context, th *material.Theme, btn *widget.Clickabl
 					}
 					return layout.Inset{Left: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 						pointer.CursorPointer.Add(gtx.Ops)
-						b := material.Button(th, btn, "Run")
+						b := material.Button(th, btn, btnLabel)
 						b.TextSize = unit.Sp(13)
 						b.Inset = layout.UniformInset(unit.Dp(8))
 						return b.Layout(gtx)
