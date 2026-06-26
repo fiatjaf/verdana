@@ -14,288 +14,288 @@ func bridgeRPC(ci *childInfo) func(string, string) (any, error) {
 	return func(method string, params string) (any, error) {
 		switch method {
 		case "getPublicKey":
-			return getPublicKey()
+			if userKeyer == nil {
+				return "", errors.New("not logged in")
+			}
+			if userPubkey != (nostr.PubKey{}) {
+				return userPubkey.Hex(), nil
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			pk, err := userKeyer.GetPublicKey(ctx)
+			if err != nil {
+				return "", err
+			}
+			return pk.Hex(), nil
 		case "signEvent":
-			return signEvent(params)
+			if userKeyer == nil {
+				return nil, errors.New("not logged in")
+			}
+			var evt nostr.Event
+			if err := json.Unmarshal([]byte(params), &evt); err != nil {
+				return nil, err
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if err := userKeyer.SignEvent(ctx, &evt); err != nil {
+				return nil, err
+			}
+			return evt, nil
 		case "nip04.encrypt", "nip04.decrypt":
-			return nip04crypt(method, params)
+			if userKeyer == nil {
+				return "", errors.New("not logged in")
+			}
+			var p struct {
+				Pubkey     string `json:"pubkey"`
+				Plaintext  string `json:"plaintext"`
+				Ciphertext string `json:"ciphertext"`
+			}
+			if err := json.Unmarshal([]byte(params), &p); err != nil {
+				return "", err
+			}
+			pk, err := nostr.PubKeyFromHex(p.Pubkey)
+			if err != nil {
+				return "", err
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if strings.HasSuffix(method, ".encrypt") {
+				return userKeyer.Nip04Encrypt(ctx, p.Plaintext, pk)
+			}
+			return userKeyer.Nip04Decrypt(ctx, p.Ciphertext, pk)
 		case "nip44.encrypt", "nip44.decrypt":
-			return nip44crypt(method, params)
+			if userKeyer == nil {
+				return "", errors.New("not logged in")
+			}
+			var p struct {
+				Pubkey     string `json:"pubkey"`
+				Plaintext  string `json:"plaintext"`
+				Ciphertext string `json:"ciphertext"`
+			}
+			if err := json.Unmarshal([]byte(params), &p); err != nil {
+				return "", err
+			}
+			pk, err := nostr.PubKeyFromHex(p.Pubkey)
+			if err != nil {
+				return "", err
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if strings.HasSuffix(method, ".encrypt") {
+				return userKeyer.Encrypt(ctx, p.Plaintext, pk)
+			}
+			return userKeyer.Decrypt(ctx, p.Ciphertext, pk)
 		case "nostrdb.add":
-			return nostrdbAdd(params)
+			if sys == nil {
+				return false, errors.New("system not ready")
+			}
+			var p struct {
+				Event nostr.Event `json:"event"`
+			}
+			if err := json.Unmarshal([]byte(params), &p); err != nil {
+				return false, err
+			}
+			if err := sys.Store.SaveEvent(p.Event); err != nil {
+				return false, err
+			}
+			return true, nil
 		case "nostrdb.query":
-			return nostrdbQuery(params)
+			out := []nostr.Event{}
+			if sys == nil {
+				return out, nil
+			}
+			var p struct {
+				Filters []nostr.Filter `json:"filters"`
+			}
+			if err := json.Unmarshal([]byte(params), &p); err != nil {
+				return nil, err
+			}
+			seen := make(map[nostr.ID]bool)
+			for _, f := range p.Filters {
+				max := f.Limit
+				if max <= 0 {
+					max = 500
+				}
+				for evt := range sys.Store.QueryEvents(f, max) {
+					if !seen[evt.ID] {
+						seen[evt.ID] = true
+						out = append(out, evt)
+					}
+				}
+			}
+			return out, nil
 		case "nostrdb.count":
-			return nostrdbCount(params)
+			if sys == nil {
+				return 0, nil
+			}
+			var p struct {
+				Filters []nostr.Filter `json:"filters"`
+			}
+			if err := json.Unmarshal([]byte(params), &p); err != nil {
+				return 0, err
+			}
+			var total int
+			for _, f := range p.Filters {
+				c, err := sys.Store.CountEvents(f)
+				if err != nil {
+					return 0, err
+				}
+				total += int(c)
+			}
+			return total, nil
 		case "nostrdb.event":
-			return nostrdbEvent(params)
+			if sys == nil {
+				return nil, nil
+			}
+			var p struct {
+				ID string `json:"id"`
+			}
+			if err := json.Unmarshal([]byte(params), &p); err != nil {
+				return nil, err
+			}
+			id, err := nostr.IDFromHex(p.ID)
+			if err != nil {
+				return nil, nil
+			}
+			for evt := range sys.Store.QueryEvents(nostr.Filter{IDs: []nostr.ID{id}}, 1) {
+				return evt, nil
+			}
+			return nil, nil
 		case "nostrdb.replaceable":
-			return nostrdbReplaceable(params)
+			if sys == nil {
+				return nil, nil
+			}
+			var p struct {
+				Kind       int    `json:"kind"`
+				Author     string `json:"author"`
+				Identifier string `json:"identifier"`
+			}
+			if err := json.Unmarshal([]byte(params), &p); err != nil {
+				return nil, err
+			}
+			pk, err := nostr.PubKeyFromHex(p.Author)
+			if err != nil {
+				return nil, nil
+			}
+			f := nostr.Filter{
+				Kinds:   []nostr.Kind{nostr.Kind(p.Kind)},
+				Authors: []nostr.PubKey{pk},
+			}
+			if p.Identifier != "" {
+				f.Tags = nostr.TagMap{"d": []string{p.Identifier}}
+			}
+			var newest *nostr.Event
+			for evt := range sys.Store.QueryEvents(f, 10) {
+				if newest == nil || evt.CreatedAt > newest.CreatedAt {
+					e := evt
+					newest = &e
+				}
+			}
+			if newest == nil {
+				return nil, nil
+			}
+			return *newest, nil
 		case "napp.action":
-			return nappAction(params)
+			return nil, nil
 		case "napp.feeds.profile", "napp.feeds.following", "napp.feeds.inbox":
-			return feedSubscribe(ci, method, params)
+			var p struct {
+				Pubkey     string           `json:"pubkey"`
+				Source     string           `json:"source"`
+				Kinds      []nostr.Kind     `json:"kinds"`
+				CallbackId int              `json:"callbackId"`
+				Since      *nostr.Timestamp `json:"since"`
+				Until      *nostr.Timestamp `json:"until"`
+				Limit      int              `json:"limit"`
+			}
+			json.Unmarshal([]byte(params), &p)
+			ctx, cancel := context.WithCancel(context.Background())
+			ci.subMu.Lock()
+			ci.subs[p.CallbackId] = cancel
+			ci.subMu.Unlock()
+			go feedPump(ctx, ci, method, p)
+			return nil, nil
 		case "napp.feeds.cancel":
-			return feedCancel(ci, params)
+			var p struct {
+				CallbackId int `json:"callbackId"`
+			}
+			json.Unmarshal([]byte(params), &p)
+			ci.subMu.Lock()
+			if cancel, ok := ci.subs[p.CallbackId]; ok {
+				cancel()
+				delete(ci.subs, p.CallbackId)
+			}
+			ci.subMu.Unlock()
+			return nil, nil
 		case "napp.loadBlossomServers":
-			return emptyList(), nil
+			return []any{}, nil
 		case "napp.loadBookmarks":
-			return emptyList(), nil
+			return []any{}, nil
 		case "napp.loadEmojis":
-			return emptyList(), nil
+			return []any{}, nil
 		case "napp.loadFavoriteRelays":
-			return emptyList(), nil
+			return []any{}, nil
 		case "napp.loadFavoriteScrolls":
-			return emptyList(), nil
+			return []any{}, nil
 		case "napp.loadFollowsList":
-			return loadFollowsList(params)
+			var p struct {
+				Pubkey string `json:"pubkey"`
+			}
+			json.Unmarshal([]byte(params), &p)
+			if sys == nil || p.Pubkey == "" {
+				return []any{}, nil
+			}
+			pk, err := nostr.PubKeyFromHex(p.Pubkey)
+			if err != nil {
+				return []any{}, nil
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			list := sys.FetchFollowList(ctx, pk)
+			return list, nil
 		case "napp.loadMuteList":
-			return loadMuteList(params)
+			var p struct {
+				Pubkey string `json:"pubkey"`
+			}
+			json.Unmarshal([]byte(params), &p)
+			if sys == nil || p.Pubkey == "" {
+				return []any{}, nil
+			}
+			pk, err := nostr.PubKeyFromHex(p.Pubkey)
+			if err != nil {
+				return []any{}, nil
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			list := sys.FetchMuteList(ctx, pk)
+			return list, nil
 		case "napp.loadPins":
-			return emptyList(), nil
+			return []any{}, nil
 		case "napp.loadRelayList":
-			return emptyList(), nil
+			return []any{}, nil
 		case "napp.loadWikiAuthors":
-			return emptyList(), nil
+			return []any{}, nil
 		case "napp.loadWikiRelays":
-			return emptyList(), nil
+			return []any{}, nil
 		case "napp.loadEmojiSets":
-			return emptySets(), nil
+			return map[string]any{}, nil
 		case "napp.loadFollowPacks":
-			return emptySets(), nil
+			return map[string]any{}, nil
 		case "napp.loadFollowSets":
-			return emptySets(), nil
+			return map[string]any{}, nil
 		case "napp.loadRelaySets":
-			return emptySets(), nil
+			return map[string]any{}, nil
 		case "napp.loadRelayInfo":
-			return loadRelayInfo(params)
+			return nil, nil
 		case "napp.loadNostrUser":
-			return loadNostrUser(params)
+			return nil, nil
 		case "napp.loadEvent":
-			return loadEvent(params)
+			return nil, nil
 		case "napp.publish":
-			return publish(params)
+			return nil, nil
 		default:
 			return nil, nil
 		}
 	}
-}
-
-func getPublicKey() (string, error) {
-	if userKeyer == nil {
-		return "", errors.New("not logged in")
-	}
-	if userPubkey != (nostr.PubKey{}) {
-		return userPubkey.Hex(), nil
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pk, err := userKeyer.GetPublicKey(ctx)
-	if err != nil {
-		return "", err
-	}
-	return pk.Hex(), nil
-}
-
-func signEvent(params string) (any, error) {
-	if userKeyer == nil {
-		return nil, errors.New("not logged in")
-	}
-	var evt nostr.Event
-	if err := json.Unmarshal([]byte(params), &evt); err != nil {
-		return nil, err
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	if err := userKeyer.SignEvent(ctx, &evt); err != nil {
-		return nil, err
-	}
-	return evt, nil
-}
-
-func nip04crypt(method string, params string) (string, error) {
-	return cryptHelper(method, params, false)
-}
-
-func nip44crypt(method string, params string) (string, error) {
-	return cryptHelper(method, params, true)
-}
-
-func cryptHelper(method string, params string, nip44 bool) (string, error) {
-	if userKeyer == nil {
-		return "", errors.New("not logged in")
-	}
-	var p struct {
-		Pubkey     string `json:"pubkey"`
-		Plaintext  string `json:"plaintext"`
-		Ciphertext string `json:"ciphertext"`
-	}
-	if err := json.Unmarshal([]byte(params), &p); err != nil {
-		return "", err
-	}
-	pk, err := nostr.PubKeyFromHex(p.Pubkey)
-	if err != nil {
-		return "", err
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	encrypt := strings.HasSuffix(method, ".encrypt")
-	switch {
-	case nip44 && encrypt:
-		return userKeyer.Encrypt(ctx, p.Plaintext, pk)
-	case nip44 && !encrypt:
-		return userKeyer.Decrypt(ctx, p.Ciphertext, pk)
-	case !nip44 && encrypt:
-		return userKeyer.Nip04Encrypt(ctx, p.Plaintext, pk)
-	default:
-		return userKeyer.Nip04Decrypt(ctx, p.Ciphertext, pk)
-	}
-}
-
-func nostrdbAdd(params string) (bool, error) {
-	if sys == nil {
-		return false, errors.New("system not ready")
-	}
-	var p struct {
-		Event nostr.Event `json:"event"`
-	}
-	if err := json.Unmarshal([]byte(params), &p); err != nil {
-		return false, err
-	}
-	if err := sys.Store.SaveEvent(p.Event); err != nil {
-		return false, err
-	}
-	return true, nil
-}
-
-func nostrdbQuery(params string) (any, error) {
-	out := []nostr.Event{}
-	if sys == nil {
-		return out, nil
-	}
-	var p struct {
-		Filters []nostr.Filter `json:"filters"`
-	}
-	if err := json.Unmarshal([]byte(params), &p); err != nil {
-		return nil, err
-	}
-	seen := make(map[nostr.ID]bool)
-	for _, f := range p.Filters {
-		max := f.Limit
-		if max <= 0 {
-			max = 500
-		}
-		for evt := range sys.Store.QueryEvents(f, max) {
-			if !seen[evt.ID] {
-				seen[evt.ID] = true
-				out = append(out, evt)
-			}
-		}
-	}
-	return out, nil
-}
-
-func nostrdbCount(params string) (int, error) {
-	if sys == nil {
-		return 0, nil
-	}
-	var p struct {
-		Filters []nostr.Filter `json:"filters"`
-	}
-	if err := json.Unmarshal([]byte(params), &p); err != nil {
-		return 0, err
-	}
-	var total int
-	for _, f := range p.Filters {
-		c, err := sys.Store.CountEvents(f)
-		if err != nil {
-			return 0, err
-		}
-		total += int(c)
-	}
-	return total, nil
-}
-
-func nostrdbEvent(params string) (any, error) {
-	if sys == nil {
-		return nil, nil
-	}
-	var p struct {
-		ID string `json:"id"`
-	}
-	if err := json.Unmarshal([]byte(params), &p); err != nil {
-		return nil, err
-	}
-	id, err := nostr.IDFromHex(p.ID)
-	if err != nil {
-		return nil, nil
-	}
-	for evt := range sys.Store.QueryEvents(nostr.Filter{IDs: []nostr.ID{id}}, 1) {
-		return evt, nil
-	}
-	return nil, nil
-}
-
-func nostrdbReplaceable(params string) (any, error) {
-	if sys == nil {
-		return nil, nil
-	}
-	var p struct {
-		Kind       int    `json:"kind"`
-		Author     string `json:"author"`
-		Identifier string `json:"identifier"`
-	}
-	if err := json.Unmarshal([]byte(params), &p); err != nil {
-		return nil, err
-	}
-	pk, err := nostr.PubKeyFromHex(p.Author)
-	if err != nil {
-		return nil, nil
-	}
-	f := nostr.Filter{
-		Kinds:   []nostr.Kind{nostr.Kind(p.Kind)},
-		Authors: []nostr.PubKey{pk},
-	}
-	if p.Identifier != "" {
-		f.Tags = nostr.TagMap{"d": []string{p.Identifier}}
-	}
-	var newest *nostr.Event
-	for evt := range sys.Store.QueryEvents(f, 10) {
-		if newest == nil || evt.CreatedAt > newest.CreatedAt {
-			e := evt
-			newest = &e
-		}
-	}
-	if newest == nil {
-		return nil, nil
-	}
-	return *newest, nil
-}
-
-func nappAction(params string) (any, error) {
-	return nil, nil
-}
-
-func feedSubscribe(ci *childInfo, method string, params string) (any, error) {
-	var p struct {
-		Pubkey     string           `json:"pubkey"`
-		Source     string           `json:"source"`
-		Kinds      []nostr.Kind     `json:"kinds"`
-		CallbackId int              `json:"callbackId"`
-		Since      *nostr.Timestamp `json:"since"`
-		Until      *nostr.Timestamp `json:"until"`
-		Limit      int              `json:"limit"`
-	}
-	json.Unmarshal([]byte(params), &p)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	ci.subMu.Lock()
-	ci.subs[p.CallbackId] = cancel
-	ci.subMu.Unlock()
-
-	go feedPump(ctx, ci, method, p)
-
-	return nil, nil
 }
 
 func feedPump(ctx context.Context, ci *childInfo, method string, p struct {
@@ -316,80 +316,6 @@ func feedPump(ctx context.Context, ci *childInfo, method string, p struct {
 			ci.eval("")
 		}
 	}
-}
-
-func feedCancel(ci *childInfo, params string) (any, error) {
-	var p struct {
-		CallbackId int `json:"callbackId"`
-	}
-	json.Unmarshal([]byte(params), &p)
-	ci.subMu.Lock()
-	if cancel, ok := ci.subs[p.CallbackId]; ok {
-		cancel()
-		delete(ci.subs, p.CallbackId)
-	}
-	ci.subMu.Unlock()
-	return nil, nil
-}
-
-func emptyList() any {
-	return []any{}
-}
-
-func emptySets() any {
-	return map[string]any{}
-}
-
-func loadFollowsList(params string) (any, error) {
-	var p struct {
-		Pubkey string `json:"pubkey"`
-	}
-	json.Unmarshal([]byte(params), &p)
-	if sys == nil || p.Pubkey == "" {
-		return emptyList(), nil
-	}
-	pk, err := nostr.PubKeyFromHex(p.Pubkey)
-	if err != nil {
-		return emptyList(), nil
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	list := sys.FetchFollowList(ctx, pk)
-	return list, nil
-}
-
-func loadMuteList(params string) (any, error) {
-	var p struct {
-		Pubkey string `json:"pubkey"`
-	}
-	json.Unmarshal([]byte(params), &p)
-	if sys == nil || p.Pubkey == "" {
-		return emptyList(), nil
-	}
-	pk, err := nostr.PubKeyFromHex(p.Pubkey)
-	if err != nil {
-		return emptyList(), nil
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	list := sys.FetchMuteList(ctx, pk)
-	return list, nil
-}
-
-func loadRelayInfo(params string) (any, error) {
-	return nil, nil
-}
-
-func loadNostrUser(params string) (any, error) {
-	return nil, nil
-}
-
-func loadEvent(params string) (any, error) {
-	return nil, nil
-}
-
-func publish(params string) (any, error) {
-	return nil, nil
 }
 
 const bridgeJS = `;(() => {
