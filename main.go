@@ -6,19 +6,26 @@ import (
 	"errors"
 	"image"
 	"image/color"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"fiatjaf.com/nostr"
 	"fiatjaf.com/nostr/eventstore/lmdb"
+	"fiatjaf.com/nostr/keyer"
 	"fiatjaf.com/nostr/sdk"
 	bolt_kv "fiatjaf.com/nostr/sdk/kvstore/bbolt"
 	"gioui.org/app"
+	"gioui.org/f32"
 	"gioui.org/font"
 	"gioui.org/font/gofont"
 	"gioui.org/io/pointer"
@@ -38,17 +45,76 @@ type Napp struct {
 	ID          string
 	Name        string
 	Description string
-}
-
-var napps = []Napp{
-	{ID: "hello-world", Name: "Hello World", Description: "Simple hello world demo"},
-	{ID: "counter", Name: "Counter", Description: "Increment and decrement counter"},
-	{ID: "chat", Name: "Chat", Description: "Anonymous chat room"},
-	{ID: "draw", Name: "Drawing Board", Description: "Collaborative drawing canvas"},
-	{ID: "notes", Name: "Notes", Description: "Shared sticky notes"},
+	Icon        string
+	Author      string
+	Actions     []string
 }
 
 var sys *sdk.System
+
+// ---- persistent app state ----
+
+var defaultRelays = []string{
+	"relay.nostrapps.com",
+	"relay.nostrapps.com/public",
+}
+
+// AppState is the persisted launcher configuration. It is stored as JSON in
+// state.json inside the Verdana data dir. nostr.SecretKey marshals to/from hex
+// automatically.
+type AppState struct {
+	ClientKey nostr.SecretKey `json:"client_key"`
+	Login     string          `json:"login"` // nsec or bunker:// URL
+	Relays    []string        `json:"relays"`
+}
+
+var (
+	state     AppState
+	statePath string
+)
+
+func loadState() {
+	statePath = filepath.Join(verdanaDir, "state.json")
+	data, err := os.ReadFile(statePath)
+	if err == nil {
+		json.Unmarshal(data, &state)
+	}
+	if state.ClientKey == (nostr.SecretKey{}) {
+		state.ClientKey = nostr.Generate()
+	}
+	if len(state.Relays) == 0 {
+		state.Relays = append([]string(nil), defaultRelays...)
+	}
+	saveState()
+}
+
+func saveState() {
+	data, err := json.MarshalIndent(&state, "", "  ")
+	if err != nil {
+		return
+	}
+	os.WriteFile(statePath, data, 0600)
+}
+
+// ---- live UI state (read in the frame handler, published from goroutines) ----
+
+type uiState struct {
+	mu       sync.Mutex
+	phase    string // "loading" | "login" | "main"
+	loginErr string
+	profName string
+	profPic  string
+	fetchErr string
+	fetching bool
+	napps    []Napp // published by replacement, never mutated in place
+}
+
+var ui = uiState{phase: "loading"}
+
+var (
+	userKeyer  nostr.Keyer
+	userPubkey nostr.PubKey
+)
 
 type openReq struct {
 	napp Napp
@@ -131,6 +197,8 @@ func main() {
 	closer := initSystem(verdanaDir)
 	defer closer()
 
+	loadState()
+
 	go gioMain()
 	go webviewServer()
 	app.Main()
@@ -153,17 +221,38 @@ func killAllChildren() {
 	}
 }
 
+// gioWin is the launcher window; goroutines call gioWin.Invalidate() after
+// publishing new UI state.
+var gioWin *app.Window
+
 func gioMain() {
-	var nappList widget.List
-	nappList.Axis = layout.Vertical
-
-	installBtns := make([]widget.Clickable, len(napps))
-
 	th := material.NewTheme()
 	th.Shaper = text.NewShaper(text.WithCollection(gofont.Collection()))
 
 	w := new(app.Window)
-	w.Option(app.Title("Verdana"), app.Size(unit.Dp(520), unit.Dp(500)))
+	w.Option(app.Title("Verdana"), app.Size(unit.Dp(560), unit.Dp(640)))
+	gioWin = w
+
+	// Widgets are only ever touched from this (UI) goroutine.
+	var (
+		loginEd  widget.Editor
+		loginBtn widget.Clickable
+		relaysEd widget.Editor
+		fetchBtn widget.Clickable
+		mainList widget.List
+		runBtns  []widget.Clickable
+	)
+	loginEd.SingleLine = true
+	relaysEd.SingleLine = false
+	mainList.Axis = layout.Vertical
+	relaysEd.SetText(strings.Join(state.Relays, "\n"))
+
+	// Kick off auto-login if we already have credentials stored.
+	if strings.TrimSpace(state.Login) != "" {
+		go doLogin(state.Login)
+	} else {
+		setPhase("login")
+	}
 
 	var ops op.Ops
 	for {
@@ -171,25 +260,48 @@ func gioMain() {
 		case app.FrameEvent:
 			gtx := app.NewContext(&ops, e)
 
-			for i := range installBtns {
-				if installBtns[i].Clicked(gtx) {
-					napp := napps[i]
-					appDir := filepath.Join(verdanaDir, "napps", napp.ID)
-					os.MkdirAll(appDir, 0755)
-					select {
-					case openReqCh <- openReq{napp: napp, dir: appDir}:
-					default:
-					}
-				}
-			}
+			ui.mu.Lock()
+			phase := ui.phase
+			loginErr := ui.loginErr
+			profName := ui.profName
+			profPic := ui.profPic
+			fetchErr := ui.fetchErr
+			fetching := ui.fetching
+			nappsSnap := ui.napps
+			ui.mu.Unlock()
 
-			layout.Inset{
-				Top: unit.Dp(16), Bottom: unit.Dp(16),
-				Left: unit.Dp(16), Right: unit.Dp(16),
-			}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return material.List(th, &nappList).Layout(gtx, len(napps), func(gtx layout.Context, i int) layout.Dimensions {
-					return renderCard(gtx, th, &installBtns[i], napps[i])
-				})
+			layout.UniformInset(unit.Dp(16)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				switch phase {
+				case "login":
+					if loginBtn.Clicked(gtx) {
+						in := strings.TrimSpace(loginEd.Text())
+						if in != "" {
+							setPhase("loading")
+							go doLogin(in)
+						}
+					}
+					return layoutLogin(gtx, th, &loginEd, &loginBtn, loginErr)
+				case "main":
+					if fetchBtn.Clicked(gtx) {
+						state.Relays = parseRelays(relaysEd.Text())
+						saveState()
+						go doFetch(state.Relays)
+					}
+					for len(runBtns) < len(nappsSnap) {
+						runBtns = append(runBtns, widget.Clickable{})
+					}
+					for i := range nappsSnap {
+						if runBtns[i].Clicked(gtx) {
+							launchNapp(nappsSnap[i])
+						}
+					}
+					return layoutMain(gtx, th, &mainList, &relaysEd, &fetchBtn, runBtns,
+						profName, profPic, fetchErr, fetching, nappsSnap)
+				default: // loading
+					return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						return material.Body1(th, "Loading\u2026").Layout(gtx)
+					})
+				}
 			})
 
 			e.Frame(gtx.Ops)
@@ -200,45 +312,431 @@ func gioMain() {
 	}
 }
 
-func renderCard(gtx layout.Context, th *material.Theme, btn *widget.Clickable, napp Napp) layout.Dimensions {
+func setPhase(p string) {
+	ui.mu.Lock()
+	ui.phase = p
+	ui.mu.Unlock()
+	if gioWin != nil {
+		gioWin.Invalidate()
+	}
+}
+
+// parseRelays splits the relay textarea into one address per line, trimming
+// whitespace, dropping empties, and prepending wss:// when no scheme is given.
+func parseRelays(text string) []string {
+	var out []string
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if !strings.Contains(line, "://") {
+			line = "wss://" + line
+		}
+		out = append(out, line)
+	}
+	return out
+}
+
+func launchNapp(napp Napp) {
+	id := napp.ID
+	if id == "" {
+		id = "unknown"
+	}
+	appDir := filepath.Join(verdanaDir, "napps", id)
+	os.MkdirAll(appDir, 0755)
+	select {
+	case openReqCh <- openReq{napp: napp, dir: appDir}:
+	default:
+	}
+}
+
+// ---- login & data goroutines ----
+
+// doLogin builds a Keyer from an nsec or bunker:// input, fetches our own
+// profile metadata, persists the login, and moves the UI to the main phase.
+func doLogin(input string) {
+	setPhase("loading")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	k, err := keyer.New(ctx, sys.Pool, input, &keyer.SignerOptions{
+		BunkerClientSecretKey: state.ClientKey,
+		BunkerAuthHandler:     func(url string) { /* TODO: surface bunker auth url */ },
+	})
+	if err != nil {
+		ui.mu.Lock()
+		ui.loginErr = err.Error()
+		ui.phase = "login"
+		ui.mu.Unlock()
+		gioWin.Invalidate()
+		return
+	}
+
+	pk, err := k.GetPublicKey(ctx)
+	if err != nil {
+		ui.mu.Lock()
+		ui.loginErr = err.Error()
+		ui.phase = "login"
+		ui.mu.Unlock()
+		gioWin.Invalidate()
+		return
+	}
+
+	userKeyer = k
+	userPubkey = pk
+
+	if state.Login != input {
+		state.Login = input
+		saveState()
+	}
+
+	pm := sys.FetchProfileMetadata(ctx, pk)
+	name := pm.Name
+	if name == "" {
+		name = pm.DisplayName
+	}
+	if name == "" {
+		name = pk.Hex()
+	}
+
+	ui.mu.Lock()
+	ui.loginErr = ""
+	ui.profName = name
+	ui.profPic = pm.Picture
+	ui.phase = "main"
+	ui.mu.Unlock()
+	gioWin.Invalidate()
+
+	// Auto-fetch napps from the stored relays right away.
+	go doFetch(state.Relays)
+}
+
+// doFetch queries the given relays for kind 35128 napp-definition events and
+// publishes them (deduped by event id) to the UI as they arrive.
+func doFetch(relays []string) {
+	urls := relays
+	if len(urls) == 0 {
+		urls = parseRelays(strings.Join(defaultRelays, "\n"))
+	}
+
+	ui.mu.Lock()
+	ui.fetching = true
+	ui.fetchErr = ""
+	ui.napps = nil
+	ui.mu.Unlock()
+	gioWin.Invalidate()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	seen := make(map[nostr.ID]bool)
+	var collected []Napp
+
+	ch := sys.Pool.FetchMany(ctx, urls,
+		nostr.Filter{Kinds: []nostr.Kind{35128}},
+		nostr.SubscriptionOptions{},
+	)
+	for re := range ch {
+		if seen[re.ID] {
+			continue
+		}
+		seen[re.ID] = true
+		collected = append(collected, nappFromEvent(re.Event))
+
+		ui.mu.Lock()
+		ui.napps = append([]Napp(nil), collected...)
+		ui.mu.Unlock()
+		gioWin.Invalidate()
+	}
+
+	ui.mu.Lock()
+	ui.fetching = false
+	ui.mu.Unlock()
+	gioWin.Invalidate()
+}
+
+func tagValue(tags nostr.Tags, key string) string {
+	if t := tags.Find(key); len(t) > 1 {
+		return t[1]
+	}
+	return ""
+}
+
+func nappFromEvent(evt nostr.Event) Napp {
+	n := Napp{
+		ID:          evt.Tags.GetD(),
+		Name:        tagValue(evt.Tags, "title"),
+		Description: tagValue(evt.Tags, "description"),
+		Icon:        tagValue(evt.Tags, "icon"),
+		Author:      evt.PubKey.Hex(),
+	}
+	if n.Name == "" {
+		n.Name = n.ID
+	}
+	for t := range evt.Tags.FindAll("action") {
+		if len(t) > 1 {
+			n.Actions = append(n.Actions, t[1])
+		}
+	}
+	return n
+}
+
+// ---- async image loader ----
+
+type imgEntry struct {
+	once   sync.Once
+	op     paint.ImageOp
+	ready  atomic.Bool
+	failed atomic.Bool
+}
+
+var imgCache sync.Map // url -> *imgEntry
+
+// getImage returns the decoded image op for a URL, kicking off a background
+// fetch on first request and invalidating the window once it is ready.
+func getImage(url string) (paint.ImageOp, bool) {
+	if url == "" {
+		return paint.ImageOp{}, false
+	}
+	v, _ := imgCache.LoadOrStore(url, &imgEntry{})
+	e := v.(*imgEntry)
+	e.once.Do(func() {
+		go func() {
+			client := http.Client{Timeout: 15 * time.Second}
+			resp, err := client.Get(url)
+			if err != nil {
+				e.failed.Store(true)
+				return
+			}
+			defer resp.Body.Close()
+			img, _, err := image.Decode(resp.Body)
+			if err != nil {
+				e.failed.Store(true)
+				return
+			}
+			e.op = paint.NewImageOp(img)
+			e.ready.Store(true)
+			if gioWin != nil {
+				gioWin.Invalidate()
+			}
+		}()
+	})
+	if e.ready.Load() {
+		return e.op, true
+	}
+	return paint.ImageOp{}, false
+}
+
+// ---- layout helpers ----
+
+func layoutLogin(gtx layout.Context, th *material.Theme, ed *widget.Editor, btn *widget.Clickable, loginErr string) layout.Dimensions {
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			t := material.H5(th, "Log in to Verdana")
+			t.Font.Weight = font.Bold
+			return t.Layout(gtx)
+		}),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			l := material.Body2(th, "Paste your nsec or a bunker:// URL")
+			l.Color = color.NRGBA{R: 0x66, G: 0x66, B: 0x66, A: 0xff}
+			return l.Layout(gtx)
+		}),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return editorBox(gtx, th, ed, "nsec1... or bunker://...")
+		}),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			pointer.CursorPointer.Add(gtx.Ops)
+			return material.Button(th, btn, "Log in").Layout(gtx)
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if loginErr == "" {
+				return layout.Dimensions{}
+			}
+			return layout.Inset{Top: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				l := material.Body2(th, loginErr)
+				l.Color = color.NRGBA{R: 0xcc, G: 0x22, B: 0x22, A: 0xff}
+				return l.Layout(gtx)
+			})
+		}),
+	)
+}
+
+func layoutMain(gtx layout.Context, th *material.Theme, list *widget.List, relaysEd *widget.Editor, fetchBtn *widget.Clickable, runBtns []widget.Clickable, profName, profPic, fetchErr string, fetching bool, napps []Napp) layout.Dimensions {
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layoutProfile(gtx, th, profName, profPic)
+		}),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			l := material.Body2(th, "Relays (one per line)")
+			l.Color = color.NRGBA{R: 0x66, G: 0x66, B: 0x66, A: 0xff}
+			return l.Layout(gtx)
+		}),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return editorBox(gtx, th, relaysEd, "relay.example.com")
+		}),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					pointer.CursorPointer.Add(gtx.Ops)
+					label := "Fetch napps"
+					if fetching {
+						label = "Fetching\u2026"
+					}
+					return material.Button(th, fetchBtn, label).Layout(gtx)
+				}),
+				layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					if fetchErr == "" {
+						return layout.Dimensions{}
+					}
+					l := material.Body2(th, fetchErr)
+					l.Color = color.NRGBA{R: 0xcc, G: 0x22, B: 0x22, A: 0xff}
+					return l.Layout(gtx)
+				}),
+			)
+		}),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
+		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			if len(napps) == 0 {
+				msg := "No napps yet. Click \"Fetch napps\"."
+				if fetching {
+					msg = "Searching relays\u2026"
+				}
+				l := material.Body2(th, msg)
+				l.Color = color.NRGBA{R: 0x99, G: 0x99, B: 0x99, A: 0xff}
+				return l.Layout(gtx)
+			}
+			return material.List(th, list).Layout(gtx, len(napps), func(gtx layout.Context, i int) layout.Dimensions {
+				var btn *widget.Clickable
+				if i < len(runBtns) {
+					btn = &runBtns[i]
+				}
+				return renderNappCard(gtx, th, btn, napps[i])
+			})
+		}),
+	)
+}
+
+func layoutProfile(gtx layout.Context, th *material.Theme, name, pic string) layout.Dimensions {
+	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return avatar(gtx, pic, 48)
+		}),
+		layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
+		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			t := material.H6(th, name)
+			t.Font.Weight = font.Bold
+			return t.Layout(gtx)
+		}),
+	)
+}
+
+// avatar draws a square clipped image for the given URL, or a grey placeholder
+// while it loads / on failure. The image is scaled to cover the square box.
+func avatar(gtx layout.Context, url string, size int) layout.Dimensions {
+	px := gtx.Dp(unit.Dp(size))
+	sq := image.Point{X: px, Y: px}
+	defer clip.RRect{Rect: image.Rectangle{Max: sq}, NW: 6, NE: 6, SW: 6, SE: 6}.Push(gtx.Ops).Pop()
+	if imgOp, ok := getImage(url); ok {
+		isz := imgOp.Size()
+		if isz.X > 0 && isz.Y > 0 {
+			// scale to cover the square box
+			scale := float32(px) / float32(isz.X)
+			if s := float32(px) / float32(isz.Y); s > scale {
+				scale = s
+			}
+			defer op.Affine(f32.Affine2D{}.Scale(f32.Pt(0, 0), f32.Pt(scale, scale))).Push(gtx.Ops).Pop()
+		}
+		imgOp.Add(gtx.Ops)
+		paint.PaintOp{}.Add(gtx.Ops)
+	} else {
+		paint.Fill(gtx.Ops, color.NRGBA{R: 0xdd, G: 0xdd, B: 0xdd, A: 0xff})
+	}
+	return layout.Dimensions{Size: sq}
+}
+
+func editorBox(gtx layout.Context, th *material.Theme, ed *widget.Editor, hint string) layout.Dimensions {
+	border := widget.Border{
+		Color:        color.NRGBA{R: 0xcc, G: 0xcc, B: 0xcc, A: 0xff},
+		CornerRadius: unit.Dp(6),
+		Width:        unit.Dp(1),
+	}
+	return border.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return material.Editor(th, ed, hint).Layout(gtx)
+		})
+	})
+}
+
+func renderNappCard(gtx layout.Context, th *material.Theme, btn *widget.Clickable, napp Napp) layout.Dimensions {
 	return layout.Inset{Bottom: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		sz := gtx.Constraints.Max
-		defer clip.RRect{
-			Rect: image.Rectangle{Max: sz},
-			NW:   8, NE: 8, SW: 8, SE: 8,
-		}.Push(gtx.Ops).Pop()
-		paint.Fill(gtx.Ops, color.NRGBA{R: 0xf0, G: 0xf0, B: 0xf0, A: 0xff})
-
-		return layout.Inset{
+		macro := op.Record(gtx.Ops)
+		dims := layout.Inset{
 			Top: unit.Dp(12), Bottom: unit.Dp(12),
-			Left: unit.Dp(16), Right: unit.Dp(16),
+			Left: unit.Dp(12), Right: unit.Dp(12),
 		}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-							label := material.H6(th, napp.Name)
+					if napp.Icon == "" {
+						return layout.Dimensions{}
+					}
+					return layout.Inset{Right: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						return avatar(gtx, napp.Icon, 40)
+					})
+				}),
+				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							label := material.Body1(th, napp.Name)
 							label.Font.Weight = font.Bold
 							return label.Layout(gtx)
 						}),
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							pointer.CursorPointer.Add(gtx.Ops)
-							b := material.Button(th, btn, "Install")
-							b.TextSize = unit.Sp(12)
-							b.Inset = layout.UniformInset(unit.Dp(6))
-							return b.Layout(gtx)
+							if napp.Description == "" {
+								return layout.Dimensions{}
+							}
+							return layout.Inset{Top: unit.Dp(2)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+								l := material.Body2(th, napp.Description)
+								l.Color = color.NRGBA{R: 0x66, G: 0x66, B: 0x66, A: 0xff}
+								return l.Layout(gtx)
+							})
 						}),
 					)
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return layout.Inset{Top: unit.Dp(4)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						label := material.Body2(th, napp.Description)
-						label.Color = color.NRGBA{R: 0x66, G: 0x66, B: 0x66, A: 0xff}
-						return label.Layout(gtx)
+					if btn == nil {
+						return layout.Dimensions{}
+					}
+					return layout.Inset{Left: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						pointer.CursorPointer.Add(gtx.Ops)
+						b := material.Button(th, btn, "Run")
+						b.TextSize = unit.Sp(13)
+						b.Inset = layout.UniformInset(unit.Dp(8))
+						return b.Layout(gtx)
 					})
 				}),
 			)
 		})
+		call := macro.Stop()
+
+		// background behind the recorded content
+		bg := clip.RRect{
+			Rect: image.Rectangle{Max: image.Point{X: sz.X, Y: dims.Size.Y}},
+			NW:   8, NE: 8, SW: 8, SE: 8,
+		}
+		defer bg.Push(gtx.Ops).Pop()
+		paint.Fill(gtx.Ops, color.NRGBA{R: 0xf2, G: 0xf2, B: 0xf2, A: 0xff})
+		call.Add(gtx.Ops)
+		return dims
 	})
 }
 
@@ -263,6 +761,8 @@ func launchChild(req openReq) {
 	cmd.Env = append(os.Environ(),
 		"VERDANA_NAPP_ID="+req.napp.ID,
 		"VERDANA_NAPP_DIR="+req.dir,
+		"VERDANA_NAPP_NAME="+req.napp.Name,
+		"VERDANA_NAPP_DESC="+req.napp.Description,
 	)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -368,12 +868,13 @@ func childMain(nappID string) {
 
 	runtime.LockOSThread()
 
-	var napp Napp
-	for _, n := range napps {
-		if n.ID == nappID {
-			napp = n
-			break
-		}
+	napp := Napp{
+		ID:          nappID,
+		Name:        os.Getenv("VERDANA_NAPP_NAME"),
+		Description: os.Getenv("VERDANA_NAPP_DESC"),
+	}
+	if napp.Name == "" {
+		napp.Name = nappID
 	}
 
 	childEnc = json.NewEncoder(os.Stdout)
@@ -522,11 +1023,35 @@ func bridgeRPC(ci *childInfo) func(string, string) (any, error) {
 }
 
 func getPublicKey() (string, error) {
-	return "", nil
+	if userKeyer == nil {
+		return "", errors.New("not logged in")
+	}
+	if userPubkey != (nostr.PubKey{}) {
+		return userPubkey.Hex(), nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	pk, err := userKeyer.GetPublicKey(ctx)
+	if err != nil {
+		return "", err
+	}
+	return pk.Hex(), nil
 }
 
 func signEvent(params string) (any, error) {
-	return nil, nil
+	if userKeyer == nil {
+		return nil, errors.New("not logged in")
+	}
+	var evt nostr.Event
+	if err := json.Unmarshal([]byte(params), &evt); err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := userKeyer.SignEvent(ctx, &evt); err != nil {
+		return nil, err
+	}
+	return evt, nil
 }
 
 func nip04crypt(method string, params string) (string, error) {
