@@ -3,8 +3,13 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"net"
+	"net/http"
 	"os"
+	"path"
+	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -40,15 +45,63 @@ func childMain(nappID string) {
 	w := webview.New(false)
 	w.SetTitle(napp.Name)
 	w.SetSize(600, 450, webview.HintNone)
-	_ = w.Bind("__bridge_rpc", childRPC)
-	w.Init(bridgeJS)
-	w.SetHtml(nappHTML(napp))
+	_ = w.Bind("__bridge_rpc", childRPCBound)
+	w.Init(bridgeJS) // must run before Navigate/SetHtml
+
+	if url := startNappServer(nappDir); url != "" {
+		w.Navigate(url)
+	} else {
+		w.SetHtml(nappHTML(napp))
+	}
 
 	go childReader(w)
 
 	w.Run()
 	w.Destroy()
 	os.Exit(0)
+}
+
+// startNappServer serves the installed napp files (rooted at the napp's data
+// directory) over an ephemeral loopback HTTP port and returns the URL to
+// navigate to. It returns "" when there is nothing installed to serve, in
+// which case the caller falls back to a placeholder page.
+func startNappServer(root string) string {
+	if root == "" {
+		return ""
+	}
+	if _, err := os.Stat(filepath.Join(root, "index.html")); err != nil {
+		return ""
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return ""
+	}
+	fs := http.FileServer(http.Dir(root))
+	handler := http.HandlerFunc(func(wr http.ResponseWriter, r *http.Request) {
+		clean := filepath.Join(root, filepath.FromSlash(path.Clean("/"+r.URL.Path)))
+		if st, statErr := os.Stat(clean); statErr != nil || st.IsDir() {
+			// SPA-style fallback: extensionless unknown routes -> index.html
+			if r.URL.Path != "/" && !strings.Contains(path.Base(r.URL.Path), ".") {
+				http.ServeFile(wr, r, filepath.Join(root, "index.html"))
+				return
+			}
+		}
+		fs.ServeHTTP(wr, r)
+	})
+	go http.Serve(ln, handler)
+	return "http://" + ln.Addr().String() + "/"
+}
+
+// childRPCBound is the function bound into the webview. go-webview panics when
+// a bound function returns a nil error (it blindly type-asserts the second
+// return value to error), so we expose a single-return wrapper: on success it
+// returns the raw result, on failure an error envelope the JS bridge unwraps.
+func childRPCBound(method string, params string) any {
+	result, err := childRPC(method, params)
+	if err != nil {
+		return map[string]any{"__bridge_error": err.Error()}
+	}
+	return result
 }
 
 func childRPC(method string, params string) (any, error) {

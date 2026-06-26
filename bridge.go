@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"fiatjaf.com/nostr"
@@ -113,31 +114,162 @@ func signEvent(params string) (any, error) {
 }
 
 func nip04crypt(method string, params string) (string, error) {
-	return "", nil
+	return cryptHelper(method, params, false)
 }
 
 func nip44crypt(method string, params string) (string, error) {
-	return "", nil
+	return cryptHelper(method, params, true)
+}
+
+func cryptHelper(method string, params string, nip44 bool) (string, error) {
+	if userKeyer == nil {
+		return "", errors.New("not logged in")
+	}
+	var p struct {
+		Pubkey     string `json:"pubkey"`
+		Plaintext  string `json:"plaintext"`
+		Ciphertext string `json:"ciphertext"`
+	}
+	if err := json.Unmarshal([]byte(params), &p); err != nil {
+		return "", err
+	}
+	pk, err := nostr.PubKeyFromHex(p.Pubkey)
+	if err != nil {
+		return "", err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	encrypt := strings.HasSuffix(method, ".encrypt")
+	switch {
+	case nip44 && encrypt:
+		return userKeyer.Encrypt(ctx, p.Plaintext, pk)
+	case nip44 && !encrypt:
+		return userKeyer.Decrypt(ctx, p.Ciphertext, pk)
+	case !nip44 && encrypt:
+		return userKeyer.Nip04Encrypt(ctx, p.Plaintext, pk)
+	default:
+		return userKeyer.Nip04Decrypt(ctx, p.Ciphertext, pk)
+	}
 }
 
 func nostrdbAdd(params string) (bool, error) {
+	if sys == nil {
+		return false, errors.New("system not ready")
+	}
+	var p struct {
+		Event nostr.Event `json:"event"`
+	}
+	if err := json.Unmarshal([]byte(params), &p); err != nil {
+		return false, err
+	}
+	if err := sys.Store.SaveEvent(p.Event); err != nil {
+		return false, err
+	}
 	return true, nil
 }
 
 func nostrdbQuery(params string) (any, error) {
-	return []any{}, nil
+	out := []nostr.Event{}
+	if sys == nil {
+		return out, nil
+	}
+	var p struct {
+		Filters []nostr.Filter `json:"filters"`
+	}
+	if err := json.Unmarshal([]byte(params), &p); err != nil {
+		return nil, err
+	}
+	seen := make(map[nostr.ID]bool)
+	for _, f := range p.Filters {
+		max := f.Limit
+		if max <= 0 {
+			max = 500
+		}
+		for evt := range sys.Store.QueryEvents(f, max) {
+			if !seen[evt.ID] {
+				seen[evt.ID] = true
+				out = append(out, evt)
+			}
+		}
+	}
+	return out, nil
 }
 
 func nostrdbCount(params string) (int, error) {
-	return 0, nil
+	if sys == nil {
+		return 0, nil
+	}
+	var p struct {
+		Filters []nostr.Filter `json:"filters"`
+	}
+	if err := json.Unmarshal([]byte(params), &p); err != nil {
+		return 0, err
+	}
+	var total int
+	for _, f := range p.Filters {
+		c, err := sys.Store.CountEvents(f)
+		if err != nil {
+			return 0, err
+		}
+		total += int(c)
+	}
+	return total, nil
 }
 
 func nostrdbEvent(params string) (any, error) {
+	if sys == nil {
+		return nil, nil
+	}
+	var p struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal([]byte(params), &p); err != nil {
+		return nil, err
+	}
+	id, err := nostr.IDFromHex(p.ID)
+	if err != nil {
+		return nil, nil
+	}
+	for evt := range sys.Store.QueryEvents(nostr.Filter{IDs: []nostr.ID{id}}, 1) {
+		return evt, nil
+	}
 	return nil, nil
 }
 
 func nostrdbReplaceable(params string) (any, error) {
-	return nil, nil
+	if sys == nil {
+		return nil, nil
+	}
+	var p struct {
+		Kind       int    `json:"kind"`
+		Author     string `json:"author"`
+		Identifier string `json:"identifier"`
+	}
+	if err := json.Unmarshal([]byte(params), &p); err != nil {
+		return nil, err
+	}
+	pk, err := nostr.PubKeyFromHex(p.Author)
+	if err != nil {
+		return nil, nil
+	}
+	f := nostr.Filter{
+		Kinds:   []nostr.Kind{nostr.Kind(p.Kind)},
+		Authors: []nostr.PubKey{pk},
+	}
+	if p.Identifier != "" {
+		f.Tags = nostr.TagMap{"d": []string{p.Identifier}}
+	}
+	var newest *nostr.Event
+	for evt := range sys.Store.QueryEvents(f, 10) {
+		if newest == nil || evt.CreatedAt > newest.CreatedAt {
+			e := evt
+			newest = &e
+		}
+	}
+	if newest == nil {
+		return nil, nil
+	}
+	return *newest, nil
 }
 
 func nappAction(params string) (any, error) {
@@ -275,7 +407,9 @@ function rpc(method, params) {
       const p = pending.get(id);
       if (!p) return;
       pending.delete(id);
-      p.resolve(JSON.parse(result));
+      const val = (typeof result === 'string') ? JSON.parse(result) : result;
+      if (val && val.__bridge_error) { p.reject(new Error(val.__bridge_error)); return; }
+      p.resolve(val);
     }).catch(err => {
       const p = pending.get(id);
       if (!p) return;

@@ -154,7 +154,7 @@ func layoutNappsTab(gtx layout.Context, th *material.Theme, list *widget.List, r
 		if i < len(runBtns) {
 			btn = &runBtns[i]
 		}
-		return renderNappCard(gtx, th, btn, "Run", installed[i])
+		return renderNappCard(gtx, th, btn, "Open", installed[i])
 	})
 }
 
