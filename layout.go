@@ -17,6 +17,7 @@ import (
 	"gioui.org/unit"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
+	"github.com/rs/zerolog/log"
 )
 
 func setPhase(p string) {
@@ -57,11 +58,13 @@ func launchNapp(napp Napp) {
 	if id == "" {
 		id = "unknown"
 	}
+	log.Info().Str("napp", id).Str("name", napp.Name).Msg("launch napp from UI")
 	appDir := filepath.Join(verdanaDir, "napps", id)
 	os.MkdirAll(appDir, 0755)
 	select {
 	case openReqCh <- openReq{napp: napp, dir: appDir}:
 	default:
+		log.Warn().Str("napp", id).Msg("open request channel full, dropping")
 	}
 }
 

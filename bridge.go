@@ -4,14 +4,43 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
 	"fiatjaf.com/nostr"
+	"fiatjaf.com/nostr/sdk"
+	"github.com/rs/zerolog/log"
 )
+
+// fetchListArgs parses a {pubkey} params blob and returns the pubkey plus a
+// short-lived context for the various napp.load* list/set fetches. ok is false
+// when the system isn't ready or the pubkey is missing/invalid, in which case
+// the caller should return an empty result.
+func fetchListArgs(params string) (pk nostr.PubKey, ctx context.Context, cancel context.CancelFunc, ok bool) {
+	if sys == nil {
+		return pk, nil, func() {}, false
+	}
+	var p struct {
+		Pubkey string `json:"pubkey"`
+	}
+	json.Unmarshal([]byte(params), &p)
+	if p.Pubkey == "" {
+		log.Debug().Msg("fetchListArgs: no pubkey in params")
+		return pk, nil, func() {}, false
+	}
+	pk, err := nostr.PubKeyFromHex(p.Pubkey)
+	if err != nil {
+		log.Debug().Err(err).Msg("fetchListArgs: invalid pubkey")
+		return pk, nil, func() {}, false
+	}
+	ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+	return pk, ctx, cancel, true
+}
 
 func bridgeRPC(ci *childInfo) func(string, string) (any, error) {
 	return func(method string, params string) (any, error) {
+		log.Debug().Str("method", method).Int("pid", ci.cmd.Process.Pid).Msg("bridge rpc call")
 		switch method {
 		case "getPublicKey":
 			if userKeyer == nil {
@@ -227,71 +256,203 @@ func bridgeRPC(ci *childInfo) func(string, string) (any, error) {
 			ci.subMu.Unlock()
 			return nil, nil
 		case "napp.loadBlossomServers":
-			return []any{}, nil
+			pk, ctx, cancel, ok := fetchListArgs(params)
+			if !ok {
+				return []any{}, nil
+			}
+			defer cancel()
+			return sys.FetchBlossomServerList(ctx, pk).Items, nil
 		case "napp.loadBookmarks":
-			return []any{}, nil
+			pk, ctx, cancel, ok := fetchListArgs(params)
+			if !ok {
+				return []any{}, nil
+			}
+			defer cancel()
+			return sys.FetchBookmarkList(ctx, pk).Items, nil
 		case "napp.loadEmojis":
+			// no corresponding sys.Fetch method
 			return []any{}, nil
 		case "napp.loadFavoriteRelays":
-			return []any{}, nil
-		case "napp.loadFavoriteScrolls":
+			// no corresponding sys.Fetch method
 			return []any{}, nil
 		case "napp.loadFollowsList":
-			var p struct {
-				Pubkey string `json:"pubkey"`
-			}
-			json.Unmarshal([]byte(params), &p)
-			if sys == nil || p.Pubkey == "" {
+			pk, ctx, cancel, ok := fetchListArgs(params)
+			if !ok {
 				return []any{}, nil
 			}
-			pk, err := nostr.PubKeyFromHex(p.Pubkey)
-			if err != nil {
-				return []any{}, nil
-			}
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			list := sys.FetchFollowList(ctx, pk)
-			return list, nil
+			return sys.FetchFollowList(ctx, pk).Items, nil
 		case "napp.loadMuteList":
-			var p struct {
-				Pubkey string `json:"pubkey"`
-			}
-			json.Unmarshal([]byte(params), &p)
-			if sys == nil || p.Pubkey == "" {
+			pk, ctx, cancel, ok := fetchListArgs(params)
+			if !ok {
 				return []any{}, nil
 			}
-			pk, err := nostr.PubKeyFromHex(p.Pubkey)
-			if err != nil {
-				return []any{}, nil
-			}
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			list := sys.FetchMuteList(ctx, pk)
-			return list, nil
+			return sys.FetchMuteList(ctx, pk).Items, nil
 		case "napp.loadPins":
-			return []any{}, nil
+			pk, ctx, cancel, ok := fetchListArgs(params)
+			if !ok {
+				return []any{}, nil
+			}
+			defer cancel()
+			return sys.FetchPinList(ctx, pk).Items, nil
 		case "napp.loadRelayList":
-			return []any{}, nil
+			pk, ctx, cancel, ok := fetchListArgs(params)
+			if !ok {
+				return []any{}, nil
+			}
+			defer cancel()
+			return sys.FetchRelayList(ctx, pk).Items, nil
 		case "napp.loadWikiAuthors":
-			return []any{}, nil
+			pk, ctx, cancel, ok := fetchListArgs(params)
+			if !ok {
+				return []any{}, nil
+			}
+			defer cancel()
+			return sys.FetchGoodWikiAuthorList(ctx, pk).Items, nil
 		case "napp.loadWikiRelays":
-			return []any{}, nil
+			pk, ctx, cancel, ok := fetchListArgs(params)
+			if !ok {
+				return []any{}, nil
+			}
+			defer cancel()
+			return sys.FetchGoodWikiRelayList(ctx, pk).Items, nil
 		case "napp.loadEmojiSets":
-			return map[string]any{}, nil
-		case "napp.loadFollowPacks":
+			// no corresponding sys.Fetch method
 			return map[string]any{}, nil
 		case "napp.loadFollowSets":
-			return map[string]any{}, nil
+			pk, ctx, cancel, ok := fetchListArgs(params)
+			if !ok {
+				return map[string]any{}, nil
+			}
+			defer cancel()
+			return sys.FetchFollowSets(ctx, pk).Sets, nil
 		case "napp.loadRelaySets":
-			return map[string]any{}, nil
+			pk, ctx, cancel, ok := fetchListArgs(params)
+			if !ok {
+				return map[string]any{}, nil
+			}
+			defer cancel()
+			return sys.FetchRelaySets(ctx, pk).Sets, nil
 		case "napp.loadRelayInfo":
+			// no corresponding sys.Fetch method
 			return nil, nil
 		case "napp.loadNostrUser":
-			return nil, nil
+			if sys == nil {
+				return nil, nil
+			}
+			var p struct {
+				Pubkey string `json:"pubkey"`
+				Input  string `json:"input"`
+				Code   string `json:"code"`
+			}
+			json.Unmarshal([]byte(params), &p)
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if p.Pubkey != "" {
+				pk, err := nostr.PubKeyFromHex(p.Pubkey)
+				if err != nil {
+					return nil, nil
+				}
+				return sys.FetchProfileMetadata(ctx, pk), nil
+			}
+			input := p.Input
+			if input == "" {
+				input = p.Code
+			}
+			if input == "" {
+				return nil, nil
+			}
+			pm, err := sys.FetchProfileFromInput(ctx, input)
+			if err != nil {
+				return nil, nil
+			}
+			return pm, nil
 		case "napp.loadEvent":
-			return nil, nil
+			if sys == nil {
+				return nil, nil
+			}
+			var p struct {
+				Code string `json:"code"`
+			}
+			json.Unmarshal([]byte(params), &p)
+			if p.Code == "" {
+				return nil, nil
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			evt, _, err := sys.FetchSpecificEventFromInput(ctx, p.Code, sdk.FetchSpecificEventParameters{SaveToLocalStore: true})
+			if err != nil || evt == nil {
+				return nil, nil
+			}
+			return *evt, nil
 		case "napp.publish":
-			return nil, nil
+			if sys == nil {
+				return nil, errors.New("system not ready")
+			}
+			var p struct {
+				Event  nostr.Event `json:"event"`
+				Relays []string    `json:"relays"`
+			}
+			if err := json.Unmarshal([]byte(params), &p); err != nil {
+				return nil, err
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+
+			log.Debug().Str("kind", fmt.Sprint(p.Event.Kind)).Int("relays", len(p.Relays)).Msg("publishing event")
+
+			seen := make(map[string]bool)
+			var targets []string
+			addRelay := func(url string) {
+				url = strings.TrimSpace(url)
+				if url == "" {
+					return
+				}
+				norm := nostr.NormalizeURL(url)
+				if norm == "" || seen[norm] {
+					return
+				}
+				seen[norm] = true
+				targets = append(targets, norm)
+			}
+
+			for _, url := range p.Relays {
+				addRelay(url)
+			}
+			for _, url := range sys.FetchOutboxRelays(ctx, p.Event.PubKey, 3) {
+				addRelay(url)
+			}
+			for _, key := range []string{"p", "P"} {
+				for tag := range p.Event.Tags.FindAll(key) {
+					pk, err := nostr.PubKeyFromHex(tag[1])
+					if err != nil {
+						continue
+					}
+					for _, url := range sys.FetchInboxRelays(ctx, pk, 3) {
+						addRelay(url)
+					}
+				}
+			}
+
+			if len(targets) == 0 {
+				return nil, errors.New("no relays to publish to")
+			}
+
+			log.Debug().Strs("targets", targets).Msg("publishing to relays")
+
+			results := []map[string]any{}
+			for res := range sys.Pool.PublishMany(ctx, targets, p.Event) {
+				r := map[string]any{"relay": res.RelayURL, "success": res.Error == nil}
+				if res.Error != nil {
+					r["error"] = res.Error.Error()
+					log.Warn().Str("relay", res.RelayURL).Err(res.Error).Msg("publish to relay failed")
+				} else {
+					log.Debug().Str("relay", res.RelayURL).Msg("publish to relay succeeded")
+				}
+				results = append(results, r)
+			}
+			return results, nil
 		default:
 			return nil, nil
 		}
@@ -432,7 +593,6 @@ window.napp = {
     loadBookmarks: (pubkey, hints, refresh, def) => rpc('napp.loadBookmarks', {pubkey, hints, refreshStyle: refresh, defaultItems: def}),
     loadEmojis: (pubkey, hints, refresh, def) => rpc('napp.loadEmojis', {pubkey, hints, refreshStyle: refresh, defaultItems: def}),
     loadFavoriteRelays: (pubkey, hints, refresh, def) => rpc('napp.loadFavoriteRelays', {pubkey, hints, refreshStyle: refresh, defaultItems: def}),
-    loadFavoriteScrolls: (pubkey, hints, refresh, def) => rpc('napp.loadFavoriteScrolls', {pubkey, hints, refreshStyle: refresh, defaultItems: def}),
     loadFollowsList: (pubkey, hints, refresh, def) => rpc('napp.loadFollowsList', {pubkey, hints, refreshStyle: refresh, defaultItems: def}),
     loadMuteList: (pubkey, hints, refresh, def) => rpc('napp.loadMuteList', {pubkey, hints, refreshStyle: refresh, defaultItems: def}),
     loadPins: (pubkey, hints, refresh, def) => rpc('napp.loadPins', {pubkey, hints, refreshStyle: refresh, defaultItems: def}),
@@ -440,7 +600,6 @@ window.napp = {
     loadWikiAuthors: (pubkey, hints, refresh, def) => rpc('napp.loadWikiAuthors', {pubkey, hints, refreshStyle: refresh, defaultItems: def}),
     loadWikiRelays: (pubkey, hints, refresh, def) => rpc('napp.loadWikiRelays', {pubkey, hints, refreshStyle: refresh, defaultItems: def}),
     loadEmojiSets: (pubkey, hints, force) => rpc('napp.loadEmojiSets', {pubkey, hints, forceUpdate: force}),
-    loadFollowPacks: (pubkey, hints, force) => rpc('napp.loadFollowPacks', {pubkey, hints, forceUpdate: force}),
     loadFollowSets: (pubkey, hints, force) => rpc('napp.loadFollowSets', {pubkey, hints, forceUpdate: force}),
     loadRelaySets: (pubkey, hints, force) => rpc('napp.loadRelaySets', {pubkey, hints, forceUpdate: force}),
     loadRelayInfo: (url, refresh) => rpc('napp.loadRelayInfo', {url, refreshStyle: refresh}),

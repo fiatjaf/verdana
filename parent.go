@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
+
+	"github.com/rs/zerolog/log"
 )
 
 func webviewServer() {
@@ -14,6 +16,7 @@ func webviewServer() {
 }
 
 func launchChild(req openReq) {
+	log.Info().Str("napp", req.napp.ID).Str("name", req.napp.Name).Msg("launching child")
 	exe, err := os.Executable()
 	if err != nil {
 		exe = os.Args[0]
@@ -27,16 +30,20 @@ func launchChild(req openReq) {
 	)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
+		log.Error().Err(err).Str("napp", req.napp.ID).Msg("child stdin pipe failed")
 		return
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		log.Error().Err(err).Str("napp", req.napp.ID).Msg("child stdout pipe failed")
 		return
 	}
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
+		log.Error().Err(err).Str("napp", req.napp.ID).Msg("child start failed")
 		return
 	}
+	log.Info().Str("napp", req.napp.ID).Int("pid", cmd.Process.Pid).Msg("child started")
 
 	ci := &childInfo{
 		cmd:  cmd,
@@ -51,6 +58,7 @@ func launchChild(req openReq) {
 	for {
 		var m wireMsg
 		if err := dec.Decode(&m); err != nil {
+			log.Debug().Str("napp", req.napp.ID).Err(err).Msg("child stdout decode ended")
 			break
 		}
 		if m.T == "rpc" {
@@ -64,11 +72,14 @@ func launchChild(req openReq) {
 }
 
 func handleChildRPC(ci *childInfo, m wireMsg) {
+	log.Debug().Str("method", m.Method).Int("rpc_id", m.ID).Msg("child rpc call")
 	result, err := bridgeRPC(ci)(m.Method, m.Params)
 	resp := wireMsg{T: "resp", ID: m.ID}
 	if err != nil {
+		log.Debug().Str("method", m.Method).Err(err).Msg("child rpc error")
 		resp.Error = err.Error()
 	} else if raw, mErr := json.Marshal(result); mErr != nil {
+		log.Error().Str("method", m.Method).Err(mErr).Msg("child rpc marshal error")
 		resp.Error = mErr.Error()
 	} else {
 		resp.Result = raw

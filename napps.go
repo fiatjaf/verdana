@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/rs/zerolog/log"
 )
 
 func nappBaseDir(id string) string {
@@ -58,6 +60,7 @@ func setFetchErr(msg string) {
 }
 
 func installNapp(n Napp) {
+	log.Info().Str("napp", n.ID).Str("name", n.Name).Msg("installing napp")
 	setBusy(n.ID, true)
 	defer setBusy(n.ID, false)
 
@@ -69,16 +72,19 @@ func installNapp(n Napp) {
 	for _, p := range n.Paths {
 		data, err := downloadBlob(ctx, servers, p.Sha256)
 		if err != nil {
+			log.Error().Err(err).Str("napp", n.ID).Str("sha256", p.Sha256).Msg("install failed")
 			os.RemoveAll(base)
 			setFetchErr("install failed: " + err.Error())
 			return
 		}
 		dest := filepath.Join(base, filepath.FromSlash(strings.TrimPrefix(p.Path, "/")))
 		if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
+			log.Error().Err(err).Str("napp", n.ID).Msg("install mkdir failed")
 			setFetchErr("install failed: " + err.Error())
 			return
 		}
 		if err := os.WriteFile(dest, data, 0644); err != nil {
+			log.Error().Err(err).Str("napp", n.ID).Msg("install write failed")
 			setFetchErr("install failed: " + err.Error())
 			return
 		}
@@ -93,9 +99,11 @@ func installNapp(n Napp) {
 	stateMu.Unlock()
 
 	refreshInstalled()
+	log.Info().Str("napp", n.ID).Str("name", n.Name).Msg("install complete")
 }
 
 func uninstallNapp(id string) {
+	log.Info().Str("napp", id).Msg("uninstalling napp")
 	setBusy(id, true)
 	defer setBusy(id, false)
 
@@ -107,9 +115,11 @@ func uninstallNapp(id string) {
 	stateMu.Unlock()
 
 	refreshInstalled()
+	log.Info().Str("napp", id).Msg("uninstall complete")
 }
 
 func downloadBlob(ctx context.Context, servers []string, sha string) ([]byte, error) {
+	log.Debug().Str("sha256", sha).Int("servers", len(servers)).Msg("downloading blob")
 	var lastErr error = errors.New("no servers")
 	for _, srv := range servers {
 		srv = strings.TrimRight(srv, "/")
@@ -123,6 +133,7 @@ func downloadBlob(ctx context.Context, servers []string, sha string) ([]byte, er
 		}
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
+			log.Debug().Str("server", srv).Err(err).Msg("blob download failed")
 			lastErr = err
 			continue
 		}
@@ -141,6 +152,7 @@ func downloadBlob(ctx context.Context, servers []string, sha string) ([]byte, er
 			lastErr = errors.New(srv + ": sha256 mismatch")
 			continue
 		}
+		log.Debug().Str("server", srv).Msg("blob downloaded and verified")
 		return data, nil
 	}
 	return nil, errors.New("could not fetch/verify " + sha + ": " + lastErr.Error())

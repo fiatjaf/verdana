@@ -15,12 +15,16 @@ import (
 	"gioui.org/unit"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 )
 
-var sys *sdk.System
-var ui = uiState{phase: "loading", busy: make(map[string]bool)}
-var openReqCh = make(chan openReq, 16)
-var gioWin *app.Window
+var (
+	sys       *sdk.System
+	ui        = uiState{phase: "loading", busy: make(map[string]bool)}
+	openReqCh = make(chan openReq, 16)
+	gioWin    *app.Window
+)
 
 var (
 	mu         sync.Mutex
@@ -29,6 +33,9 @@ var (
 )
 
 func main() {
+	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+	log.Info().Strs("args", os.Args).Msg("starting verdana")
+
 	if nappID := os.Getenv("VERDANA_NAPP_ID"); nappID != "" {
 		childMain(nappID)
 		return
@@ -36,7 +43,7 @@ func main() {
 
 	dataDir, err := app.DataDir()
 	if err != nil {
-		panic("no data dir: " + err.Error())
+		log.Fatal().Err(err).Msg("no data dir")
 	}
 	verdanaDir = filepath.Join(dataDir, "Verdana")
 	os.MkdirAll(verdanaDir, 0755)
@@ -62,6 +69,7 @@ func killAllChildren() {
 			ci.cmd.Process.Kill()
 		}
 	}
+	log.Info().Int("count", len(snapshot)).Msg("killed all child processes")
 }
 
 func gioMain() {

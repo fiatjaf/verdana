@@ -6,6 +6,7 @@ import (
 
 	"fiatjaf.com/nostr"
 	"fiatjaf.com/nostr/keyer"
+	"github.com/rs/zerolog/log"
 )
 
 var (
@@ -14,6 +15,7 @@ var (
 )
 
 func doLogin(input string) {
+	log.Info().Msg("starting login")
 	setPhase("loading")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -24,6 +26,7 @@ func doLogin(input string) {
 		BunkerAuthHandler:     func(url string) {},
 	})
 	if err != nil {
+		log.Error().Err(err).Msg("login failed")
 		ui.mu.Lock()
 		ui.loginErr = err.Error()
 		ui.phase = "login"
@@ -34,6 +37,7 @@ func doLogin(input string) {
 
 	pk, err := k.GetPublicKey(ctx)
 	if err != nil {
+		log.Error().Err(err).Msg("get public key failed")
 		ui.mu.Lock()
 		ui.loginErr = err.Error()
 		ui.phase = "login"
@@ -67,5 +71,6 @@ func doLogin(input string) {
 	ui.mu.Unlock()
 	gioWin.Invalidate()
 
+	log.Info().Str("pubkey", pk.Hex()).Str("name", name).Msg("login successful")
 	go doFetch(state.Relays)
 }

@@ -15,15 +15,16 @@ import (
 
 	"github.com/abemedia/go-webview"
 	_ "github.com/abemedia/go-webview/embedded"
+	"github.com/rs/zerolog/log"
 )
 
 var (
-	nappDir         string
-	childOutMu      sync.Mutex
-	childEnc        *json.Encoder
-	childPendingMu  sync.Mutex
-	childPending    = make(map[int]chan wireMsg)
-	childReqSerial  atomic.Int64
+	nappDir        string
+	childOutMu     sync.Mutex
+	childEnc       *json.Encoder
+	childPendingMu sync.Mutex
+	childPending   = make(map[int]chan wireMsg)
+	childReqSerial atomic.Int64
 )
 
 func childMain(nappID string) {
@@ -40,6 +41,7 @@ func childMain(nappID string) {
 		napp.Name = nappID
 	}
 
+	log.Info().Str("napp", nappID).Str("name", napp.Name).Msg("child process started")
 	childEnc = json.NewEncoder(os.Stdout)
 
 	w := webview.New(false)
@@ -49,8 +51,10 @@ func childMain(nappID string) {
 	w.Init(bridgeJS) // must run before Navigate/SetHtml
 
 	if url := startNappServer(nappDir); url != "" {
+		log.Info().Str("napp", nappID).Str("url", url).Msg("serving napp files")
 		w.Navigate(url)
 	} else {
+		log.Debug().Str("napp", nappID).Msg("no napp files, showing placeholder")
 		w.SetHtml(nappHTML(napp))
 	}
 
@@ -61,26 +65,23 @@ func childMain(nappID string) {
 	os.Exit(0)
 }
 
-// startNappServer serves the installed napp files (rooted at the napp's data
-// directory) over an ephemeral loopback HTTP port and returns the URL to
-// navigate to. It returns "" when there is nothing installed to serve, in
-// which case the caller falls back to a placeholder page.
 func startNappServer(root string) string {
 	if root == "" {
 		return ""
 	}
 	if _, err := os.Stat(filepath.Join(root, "index.html")); err != nil {
+		log.Debug().Str("root", root).Msg("no index.html found for napp")
 		return ""
 	}
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
+		log.Error().Err(err).Str("root", root).Msg("failed to listen for napp server")
 		return ""
 	}
 	fs := http.FileServer(http.Dir(root))
 	handler := http.HandlerFunc(func(wr http.ResponseWriter, r *http.Request) {
 		clean := filepath.Join(root, filepath.FromSlash(path.Clean("/"+r.URL.Path)))
 		if st, statErr := os.Stat(clean); statErr != nil || st.IsDir() {
-			// SPA-style fallback: extensionless unknown routes -> index.html
 			if r.URL.Path != "/" && !strings.Contains(path.Base(r.URL.Path), ".") {
 				http.ServeFile(wr, r, filepath.Join(root, "index.html"))
 				return

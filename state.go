@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"fiatjaf.com/nostr"
+	"github.com/rs/zerolog/log"
 )
 
 var defaultRelays = []string{
@@ -30,9 +31,12 @@ func loadState() {
 	data, err := os.ReadFile(statePath)
 	if err == nil {
 		json.Unmarshal(data, &state)
+	} else {
+		log.Debug().Err(err).Msg("no existing state file, using defaults")
 	}
 	if state.ClientKey == (nostr.SecretKey{}) {
 		state.ClientKey = nostr.Generate()
+		log.Debug().Msg("generated new client key")
 	}
 	if len(state.Relays) == 0 {
 		state.Relays = append([]string(nil), defaultRelays...)
@@ -41,12 +45,16 @@ func loadState() {
 		state.InstalledNapps = make(map[string]Napp)
 	}
 	saveState()
+	log.Info().Int("napps", len(state.InstalledNapps)).Msg("state loaded")
 }
 
 func saveState() {
 	data, err := json.MarshalIndent(&state, "", "  ")
 	if err != nil {
+		log.Error().Err(err).Msg("failed to marshal state")
 		return
 	}
-	os.WriteFile(statePath, data, 0600)
+	if err := os.WriteFile(statePath, data, 0600); err != nil {
+		log.Error().Err(err).Msg("failed to write state file")
+	}
 }

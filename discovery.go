@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"fiatjaf.com/nostr"
+	"github.com/rs/zerolog/log"
 )
 
 func doFetch(relays []string) {
@@ -13,6 +14,8 @@ func doFetch(relays []string) {
 	if len(urls) == 0 {
 		urls = parseRelays(defaultRelays[0] + "\n" + defaultRelays[1])
 	}
+
+	log.Info().Strs("relays", urls).Msg("fetching napps from relays")
 
 	ui.mu.Lock()
 	ui.fetching = true
@@ -45,6 +48,8 @@ func doFetch(relays []string) {
 	}
 
 	sort.Slice(collected, func(i, j int) bool { return collected[i].Name < collected[j].Name })
+
+	log.Info().Int("count", len(collected)).Msg("fetch complete")
 
 	ui.mu.Lock()
 	ui.fetching = false
