@@ -95,6 +95,10 @@ func (ci *childInfo) eval(code string) {
 }
 
 func childExePath() string {
+	path, err := extractChild()
+	if err == nil && path != "" {
+		return path
+	}
 	exe, err := os.Executable()
 	if err == nil {
 		dir := filepath.Dir(exe)
