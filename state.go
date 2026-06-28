@@ -7,7 +7,6 @@ import (
 	"sync"
 
 	"fiatjaf.com/nostr"
-	"github.com/rs/zerolog/log"
 )
 
 var defaultRelays = []string{

@@ -6,7 +6,6 @@ import (
 
 	"fiatjaf.com/nostr"
 	"fiatjaf.com/nostr/keyer"
-	"github.com/rs/zerolog/log"
 )
 
 var (

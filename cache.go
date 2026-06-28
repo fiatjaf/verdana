@@ -10,7 +10,6 @@ import (
 
 	"fiatjaf.com/nostr"
 	"gioui.org/op/paint"
-	"github.com/rs/zerolog/log"
 )
 
 type imgEntry struct {

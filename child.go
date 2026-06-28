@@ -1,6 +1,7 @@
 package main
 
 import (
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"net"
@@ -15,8 +16,10 @@ import (
 
 	"github.com/abemedia/go-webview"
 	_ "github.com/abemedia/go-webview/embedded"
-	"github.com/rs/zerolog/log"
 )
+
+//go:embed bridge.js
+var bridgeJS string
 
 var (
 	nappDir        string
@@ -44,19 +47,14 @@ func childMain(nappID string) {
 	log.Info().Str("napp", nappID).Str("name", napp.Name).Msg("child process started")
 	childEnc = json.NewEncoder(os.Stdout)
 
-	w := webview.New(false)
+	w := webview.New(os.Getenv("WEBVIEW_DEBUG") == "true")
 	w.SetTitle(napp.Name)
 	w.SetSize(600, 450, webview.HintNone)
 	_ = w.Bind("__bridge_rpc", childRPCBound)
 	w.Init(bridgeJS) // must run before Navigate/SetHtml
 
-	if url := startNappServer(nappDir); url != "" {
-		log.Info().Str("napp", nappID).Str("url", url).Msg("serving napp files")
-		w.Navigate(url)
-	} else {
-		log.Debug().Str("napp", nappID).Msg("no napp files, showing placeholder")
-		w.SetHtml(nappHTML(napp))
-	}
+	url := startNappServer(nappDir)
+	w.Navigate(url)
 
 	go childReader(w)
 
@@ -97,15 +95,15 @@ func startNappServer(root string) string {
 // a bound function returns a nil error (it blindly type-asserts the second
 // return value to error), so we expose a single-return wrapper: on success it
 // returns the raw result, on failure an error envelope the JS bridge unwraps.
-func childRPCBound(method string, params string) any {
+func childRPCBound(method string, params string) string {
 	result, err := childRPC(method, params)
 	if err != nil {
-		return map[string]any{"__bridge_error": err.Error()}
+		return `{"__bridge_error": "` + err.Error() + `"}`
 	}
-	return result
+	return string(result)
 }
 
-func childRPC(method string, params string) (any, error) {
+func childRPC(method string, params string) (json.RawMessage, error) {
 	id := int(childReqSerial.Add(1))
 	ch := make(chan wireMsg, 1)
 	childPendingMu.Lock()
@@ -152,23 +150,4 @@ func childWriteMsg(m wireMsg) {
 	childOutMu.Lock()
 	defer childOutMu.Unlock()
 	childEnc.Encode(m)
-}
-
-func nappHTML(napp Napp) string {
-	return `<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<style>
-body { font-family: sans-serif; padding: 2em; background: #fafafa; }
-h1 { color: #333; }
-p { color: #666; line-height: 1.5; }
-</style>
-</head>
-<body>
-<h1>` + napp.Name + `</h1>
-<p>` + napp.Description + `</p>
-<p>App ID: ` + napp.ID + `</p>
-</body>
-</html>`
 }

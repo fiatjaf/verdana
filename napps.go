@@ -12,8 +12,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/rs/zerolog/log"
 )
 
 func nappBaseDir(id string) string {

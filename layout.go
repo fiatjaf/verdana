@@ -17,7 +17,6 @@ import (
 	"gioui.org/unit"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
-	"github.com/rs/zerolog/log"
 )
 
 func setPhase(p string) {

@@ -6,7 +6,6 @@ import (
 	lmdb "fiatjaf.com/nostr/eventstore/lmdb"
 	"fiatjaf.com/nostr/sdk"
 	bolt_kv "fiatjaf.com/nostr/sdk/kvstore/bbolt"
-	"github.com/rs/zerolog/log"
 )
 
 func initSystem(dataDir string) func() {

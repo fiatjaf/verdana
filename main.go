@@ -16,7 +16,6 @@ import (
 	"gioui.org/widget"
 	"gioui.org/widget/material"
 	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
 )
 
 var (
@@ -24,6 +23,7 @@ var (
 	ui        = uiState{phase: "loading", busy: make(map[string]bool)}
 	openReqCh = make(chan openReq, 16)
 	gioWin    *app.Window
+	log       zerolog.Logger
 )
 
 var (
@@ -33,8 +33,12 @@ var (
 )
 
 func main() {
-	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
-	log.Info().Strs("args", os.Args).Msg("starting verdana")
+	pid := os.Getpid()
+	log = zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr}).With().
+		Int("_", pid).
+		Timestamp().
+		Logger()
+	log.Info().Msg("starting verdana")
 
 	if nappID := os.Getenv("VERDANA_NAPP_ID"); nappID != "" {
 		childMain(nappID)

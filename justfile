@@ -1,2 +1,2 @@
 run:
-    go build && ./verdana
+    go build && WEBVIEW_DEBUG=true ./verdana

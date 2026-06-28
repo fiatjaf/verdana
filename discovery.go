@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"fiatjaf.com/nostr"
-	"github.com/rs/zerolog/log"
 )
 
 func doFetch(relays []string) {

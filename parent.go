@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
-
-	"github.com/rs/zerolog/log"
 )
 
 func webviewServer() {
@@ -72,11 +70,11 @@ func launchChild(req openReq) {
 }
 
 func handleChildRPC(ci *childInfo, m wireMsg) {
-	log.Debug().Str("method", m.Method).Int("rpc_id", m.ID).Msg("child rpc call")
+	log.Info().Str("method", m.Method).Int("rpc_id", m.ID).Msg("child rpc call")
 	result, err := bridgeRPC(ci)(m.Method, m.Params)
 	resp := wireMsg{T: "resp", ID: m.ID}
 	if err != nil {
-		log.Debug().Str("method", m.Method).Err(err).Msg("child rpc error")
+		log.Warn().Str("method", m.Method).Err(err).Msg("child rpc error")
 		resp.Error = err.Error()
 	} else if raw, mErr := json.Marshal(result); mErr != nil {
 		log.Error().Str("method", m.Method).Err(mErr).Msg("child rpc marshal error")
@@ -84,6 +82,7 @@ func handleChildRPC(ci *childInfo, m wireMsg) {
 	} else {
 		resp.Result = raw
 	}
+	log.Info().Int("id", m.ID).Any("resp", resp).Msg("child rpc result")
 	ci.send(resp)
 }
 
