@@ -33,7 +33,7 @@ require (
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/puzpuzpuz/xsync/v3 v3.5.1 // indirect
-	github.com/rs/zerolog v1.35.1 // indirect
+	github.com/rs/zerolog v1.35.1
 	github.com/templexxx/cpu v0.0.1 // indirect
 	github.com/templexxx/xhex v0.0.0-20200614015412-aed53437177b // indirect
 	github.com/tidwall/gjson v1.18.0 // indirect
@@ -54,6 +54,7 @@ require (
 require (
 	github.com/abemedia/go-webview v0.0.0-20250327021345-7b06ad397f16
 	github.com/ebitengine/purego v0.8.2 // indirect
+	github.com/rs/zerolog v1.35.1
 )
 
 replace fiatjaf.com/nostr => ../nostrlib

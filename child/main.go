@@ -16,47 +16,70 @@ import (
 
 	"github.com/abemedia/go-webview"
 	_ "github.com/abemedia/go-webview/embedded"
+	"github.com/rs/zerolog"
 )
 
 //go:embed bridge.js
 var bridgeJS string
 
+type wireMsg struct {
+	T      string          `json:"t"`
+	ID     int             `json:"id,omitempty"`
+	Method string          `json:"method,omitempty"`
+	Params string          `json:"params,omitempty"`
+	Result json.RawMessage `json:"result,omitempty"`
+	Error  string          `json:"error,omitempty"`
+	Code   string          `json:"code,omitempty"`
+}
+
+type nappMeta struct {
+	ID          string
+	Name        string
+	Description string
+	Dir         string
+}
+
 var (
-	nappDir        string
-	childOutMu     sync.Mutex
-	childEnc       *json.Encoder
-	childPendingMu sync.Mutex
-	childPending   = make(map[int]chan wireMsg)
-	childReqSerial atomic.Int64
+	meta           nappMeta
+	outMu          sync.Mutex
+	outEnc         *json.Encoder
+	pendingMu      sync.Mutex
+	pending        = make(map[int]chan wireMsg)
+	reqSerial      atomic.Int64
+	log            zerolog.Logger
 )
 
-func childMain(nappID string) {
-	nappDir = os.Getenv("VERDANA_NAPP_DIR")
+func main() {
+	log = zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr}).With().
+		Int("_", os.Getpid()).
+		Timestamp().
+		Logger()
 
-	runtime.LockOSThread()
-
-	napp := Napp{
-		ID:          nappID,
+	meta = nappMeta{
+		ID:          os.Getenv("VERDANA_NAPP_ID"),
+		Dir:         os.Getenv("VERDANA_NAPP_DIR"),
 		Name:        os.Getenv("VERDANA_NAPP_NAME"),
 		Description: os.Getenv("VERDANA_NAPP_DESC"),
 	}
-	if napp.Name == "" {
-		napp.Name = nappID
+	if meta.Name == "" {
+		meta.Name = meta.ID
 	}
 
-	log.Info().Str("napp", nappID).Str("name", napp.Name).Msg("child process started")
-	childEnc = json.NewEncoder(os.Stdout)
+	log.Info().Str("napp", meta.ID).Str("name", meta.Name).Msg("child process started")
+	outEnc = json.NewEncoder(os.Stdout)
+
+	runtime.LockOSThread()
 
 	w := webview.New(os.Getenv("WEBVIEW_DEBUG") == "true")
-	w.SetTitle(napp.Name)
+	w.SetTitle(meta.Name)
 	w.SetSize(600, 450, webview.HintNone)
-	_ = w.Bind("__bridge_rpc", childRPCBound)
-	w.Init(bridgeJS) // must run before Navigate/SetHtml
+	_ = w.Bind("__bridge_rpc", rpcBound)
+	w.Init(bridgeJS)
 
-	url := startNappServer(nappDir)
+	url := startNappServer(meta.Dir)
 	w.Navigate(url)
 
-	go childReader(w)
+	go reader(w)
 
 	w.Run()
 	w.Destroy()
@@ -91,31 +114,27 @@ func startNappServer(root string) string {
 	return "http://" + ln.Addr().String() + "/"
 }
 
-// childRPCBound is the function bound into the webview. go-webview panics when
-// a bound function returns a nil error (it blindly type-asserts the second
-// return value to error), so we expose a single-return wrapper: on success it
-// returns the raw result, on failure an error envelope the JS bridge unwraps.
-func childRPCBound(method string, params string) string {
-	result, err := childRPC(method, params)
+func rpcBound(method string, params string) string {
+	result, err := rpc(method, params)
 	if err != nil {
 		return `{"__bridge_error": "` + err.Error() + `"}`
 	}
 	return string(result)
 }
 
-func childRPC(method string, params string) (json.RawMessage, error) {
-	id := int(childReqSerial.Add(1))
+func rpc(method string, params string) (json.RawMessage, error) {
+	id := int(reqSerial.Add(1))
 	ch := make(chan wireMsg, 1)
-	childPendingMu.Lock()
-	childPending[id] = ch
-	childPendingMu.Unlock()
+	pendingMu.Lock()
+	pending[id] = ch
+	pendingMu.Unlock()
 
-	childWriteMsg(wireMsg{T: "rpc", ID: id, Method: method, Params: params})
+	writeMsg(wireMsg{T: "rpc", ID: id, Method: method, Params: params})
 
 	resp := <-ch
-	childPendingMu.Lock()
-	delete(childPending, id)
-	childPendingMu.Unlock()
+	pendingMu.Lock()
+	delete(pending, id)
+	pendingMu.Unlock()
 
 	if resp.Error != "" {
 		return nil, errors.New(resp.Error)
@@ -123,7 +142,7 @@ func childRPC(method string, params string) (json.RawMessage, error) {
 	return resp.Result, nil
 }
 
-func childReader(w webview.WebView) {
+func reader(w webview.WebView) {
 	dec := json.NewDecoder(os.Stdin)
 	for {
 		var m wireMsg
@@ -132,9 +151,9 @@ func childReader(w webview.WebView) {
 		}
 		switch m.T {
 		case "resp":
-			childPendingMu.Lock()
-			ch := childPending[m.ID]
-			childPendingMu.Unlock()
+			pendingMu.Lock()
+			ch := pending[m.ID]
+			pendingMu.Unlock()
 			if ch != nil {
 				ch <- m
 			}
@@ -146,8 +165,8 @@ func childReader(w webview.WebView) {
 	w.Terminate()
 }
 
-func childWriteMsg(m wireMsg) {
-	childOutMu.Lock()
-	defer childOutMu.Unlock()
-	childEnc.Encode(m)
+func writeMsg(m wireMsg) {
+	outMu.Lock()
+	defer outMu.Unlock()
+	outEnc.Encode(m)
 }

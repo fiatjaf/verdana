@@ -40,11 +40,6 @@ func main() {
 		Logger()
 	log.Info().Msg("starting verdana")
 
-	if nappID := os.Getenv("VERDANA_NAPP_ID"); nappID != "" {
-		childMain(nappID)
-		return
-	}
-
 	dataDir, err := app.DataDir()
 	if err != nil {
 		log.Fatal().Err(err).Msg("no data dir")

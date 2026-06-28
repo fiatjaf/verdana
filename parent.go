@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
+	"path/filepath"
 )
 
 func webviewServer() {
@@ -15,11 +16,8 @@ func webviewServer() {
 
 func launchChild(req openReq) {
 	log.Info().Str("napp", req.napp.ID).Str("name", req.napp.Name).Msg("launching child")
-	exe, err := os.Executable()
-	if err != nil {
-		exe = os.Args[0]
-	}
-	cmd := exec.Command(exe)
+	childExe := childExePath()
+	cmd := exec.Command(childExe)
 	cmd.Env = append(os.Environ(),
 		"VERDANA_NAPP_ID="+req.napp.ID,
 		"VERDANA_NAPP_DIR="+req.dir,
@@ -94,6 +92,22 @@ func (ci *childInfo) send(m wireMsg) {
 
 func (ci *childInfo) eval(code string) {
 	ci.send(wireMsg{T: "eval", Code: code})
+}
+
+func childExePath() string {
+	exe, err := os.Executable()
+	if err == nil {
+		dir := filepath.Dir(exe)
+		candidate := filepath.Join(dir, "child", "child")
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	}
+	try := "./child/child"
+	if _, err := os.Stat(try); err == nil {
+		return try
+	}
+	return "child/child"
 }
 
 func cleanupChild(ci *childInfo) {
