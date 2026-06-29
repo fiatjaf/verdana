@@ -123,7 +123,7 @@ window.napp = {
     loadFollowSets: (pubkey, hints, force) => rpc('napp.loadFollowSets', {pubkey, hints, forceUpdate: force}),
     loadRelaySets: (pubkey, hints, force) => rpc('napp.loadRelaySets', {pubkey, hints, forceUpdate: force}),
     loadRelayInfo: (url, refresh) => rpc('napp.loadRelayInfo', {url, refreshStyle: refresh}),
-    loadNostrUser: req => rpc('napp.loadNostrUser', req),
+    loadNostrUser: ref => rpc('napp.loadNostrUser', typeof ref === 'string' ? ref : ref.pubkey),
     loadEvent: (code, relays, author) => rpc('napp.loadEvent', {code, relays, author}),
     publish: (event, relays) => rpc('napp.publish', {event, relays})
   }

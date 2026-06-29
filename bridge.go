@@ -300,18 +300,18 @@ func bridgeRPC(ci *childInfo) func(string, string) (any, error) {
 			return sys.FetchGoodWikiRelayList(ctx, pk).Items, nil
 		case "napp.loadEmojiSets":
 			// no corresponding sys.Fetch method
-			return map[string]any{}, nil
+			return struct{}{}, nil
 		case "napp.loadFollowSets":
 			pk, ctx, cancel, ok := fetchListArgs(params)
 			if !ok {
-				return map[string]any{}, nil
+				return struct{}{}, nil
 			}
 			defer cancel()
 			return sys.FetchFollowSets(ctx, pk).Sets, nil
 		case "napp.loadRelaySets":
 			pk, ctx, cancel, ok := fetchListArgs(params)
 			if !ok {
-				return map[string]any{}, nil
+				return struct{}{}, nil
 			}
 			defer cancel()
 			return sys.FetchRelaySets(ctx, pk).Sets, nil
@@ -319,13 +319,45 @@ func bridgeRPC(ci *childInfo) func(string, string) (any, error) {
 			// no corresponding sys.Fetch method
 			return nil, nil
 		case "napp.loadNostrUser":
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-			pm, err := sys.FetchProfileFromInput(ctx, params)
-			if err != nil {
+			// The JS bridge sends a bare JSON string (the npub/nprofile/nip05/hex
+			// reference). FetchProfileFromInput wants that bare input.
+			var input string
+			if err := json.Unmarshal([]byte(params), &input); err != nil {
+				log.Debug().Str("params", params).Err(err).Msg("loadNostrUser: invalid params")
 				return nil, nil
 			}
-			return pm, nil
+			input = strings.TrimSpace(input)
+			if input == "" {
+				log.Debug().Str("params", params).Msg("loadNostrUser: empty input")
+				return nil, nil
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			pm, err := sys.FetchProfileFromInput(ctx, input)
+			if err != nil {
+				log.Debug().Str("input", input).Err(err).Msg("loadNostrUser: fetch failed")
+				return nil, nil
+			}
+			user := struct {
+				Pubkey      string               `json:"pubkey"`
+				Npub        string               `json:"npub"`
+				ShortName   string               `json:"shortName"`
+				Metadata    sdk.ProfileMetadata  `json:"metadata"`
+				Image       string               `json:"image,omitempty"`
+				LastUpdated nostr.Timestamp       `json:"lastUpdated,omitempty"`
+			}{
+				Pubkey:    pm.PubKey.Hex(),
+				Npub:      pm.Npub(),
+				ShortName: pm.ShortName(),
+				Metadata:  pm,
+			}
+			if pm.Picture != "" {
+				user.Image = pm.Picture
+			}
+			if pm.Event != nil {
+				user.LastUpdated = pm.Event.CreatedAt
+			}
+			return user, nil
 		case "napp.loadEvent":
 			var p struct {
 				Code string `json:"code"`
@@ -393,11 +425,19 @@ func bridgeRPC(ci *childInfo) func(string, string) (any, error) {
 
 			log.Debug().Strs("targets", targets).Msg("publishing to relays")
 
-			results := []map[string]any{}
+			results := []struct {
+				Relay   string `json:"relay"`
+				Success bool   `json:"success"`
+				Error   string `json:"error,omitempty"`
+			}{}
 			for res := range sys.Pool.PublishMany(ctx, targets, p.Event) {
-				r := map[string]any{"relay": res.RelayURL, "success": res.Error == nil}
+				r := struct {
+					Relay   string `json:"relay"`
+					Success bool   `json:"success"`
+					Error   string `json:"error,omitempty"`
+				}{Relay: res.RelayURL, Success: res.Error == nil}
 				if res.Error != nil {
-					r["error"] = res.Error.Error()
+					r.Error = res.Error.Error()
 					log.Warn().Str("relay", res.RelayURL).Err(res.Error).Msg("publish to relay failed")
 				} else {
 					log.Debug().Str("relay", res.RelayURL).Msg("publish to relay succeeded")
