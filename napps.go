@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"fiatjaf.com/nostr"
@@ -70,25 +72,11 @@ func installNapp(n Napp) {
 	defer cancel()
 
 	servers := n.blossomServers(ctx)
-	for _, p := range n.Paths {
-		data, err := downloadBlob(ctx, servers, p.Sha256)
-		if err != nil {
-			log.Error().Err(err).Str("napp", n.ID).Str("sha256", p.Sha256).Msg("install failed")
-			os.RemoveAll(base)
-			setFetchErr("install failed: " + err.Error())
-			return
-		}
-		dest := filepath.Join(base, filepath.FromSlash(strings.TrimPrefix(p.Path, "/")))
-		if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
-			log.Error().Err(err).Str("napp", n.ID).Msg("install mkdir failed")
-			setFetchErr("install failed: " + err.Error())
-			return
-		}
-		if err := os.WriteFile(dest, data, 0644); err != nil {
-			log.Error().Err(err).Str("napp", n.ID).Msg("install write failed")
-			setFetchErr("install failed: " + err.Error())
-			return
-		}
+	if err := fetchNappAssets(ctx, n, base, servers); err != nil {
+		log.Error().Err(err).Str("napp", n.ID).Msg("install failed")
+		os.RemoveAll(base)
+		setFetchErr("install failed: " + err.Error())
+		return
 	}
 
 	stateMu.Lock()
@@ -117,6 +105,75 @@ func uninstallNapp(id string) {
 
 	refreshInstalled()
 	log.Info().Str("napp", id).Msg("uninstall complete")
+}
+
+// maxParallelAssets caps how many of a napp's files are in flight at once, so
+// a big napp doesn't open a connection per asset against the same server.
+const maxParallelAssets = 6
+
+// fetchNappAssets downloads every file of a napp into base. The assets go in
+// parallel; the servers for any one asset are still tried in order, so a napp
+// whose first server has everything is served entirely from there.
+//
+// The first failure cancels the rest: the install is lost either way, and
+// there's no reason to keep pulling bytes for it.
+func fetchNappAssets(ctx context.Context, n Napp, base string, servers []string) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	var (
+		wg       sync.WaitGroup
+		mu       sync.Mutex
+		firstErr error
+	)
+	sem := make(chan struct{}, maxParallelAssets)
+
+	for _, p := range n.Paths {
+		wg.Add(1)
+		go func(p NappPath) {
+			defer wg.Done()
+
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-ctx.Done():
+				return
+			}
+
+			err := fetchNappAsset(ctx, servers, base, p)
+			if err == nil {
+				return
+			}
+
+			mu.Lock()
+			defer mu.Unlock()
+			if firstErr == nil {
+				// what the others report from here on is just the
+				// cancellation we are about to cause
+				firstErr = err
+				cancel()
+			}
+		}(p)
+	}
+	wg.Wait()
+
+	return firstErr
+}
+
+// fetchNappAsset downloads one file and writes it where the napp expects it.
+func fetchNappAsset(ctx context.Context, servers []string, base string, p NappPath) error {
+	data, err := downloadBlob(ctx, servers, p.Sha256)
+	if err != nil {
+		return err
+	}
+	dest := filepath.Join(base, filepath.FromSlash(strings.TrimPrefix(p.Path, "/")))
+	if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
+		return fmt.Errorf("%s: %w", p.Path, err)
+	}
+	if err := os.WriteFile(dest, data, 0644); err != nil {
+		return fmt.Errorf("%s: %w", p.Path, err)
+	}
+	return nil
 }
 
 func (n Napp) blossomServers(ctx context.Context) []string {
