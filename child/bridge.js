@@ -70,14 +70,36 @@
     }
   }
 
-  window.__bridge_theme_change = function (theme, varsJSON) {
-    document.documentElement.dataset.theme = theme
-    if (!varsJSON) return
-    try {
-      const vars = JSON.parse(varsJSON)
-      for (const key in vars) document.documentElement.style.setProperty("--" + key, vars[key])
-    } catch {}
+  // The launcher's theme arrives twice: as window.__nappTheme, injected
+  // before this script on every page load, and as a __bridge_theme_change
+  // call whenever the user switches it while the napp is open.
+  function applyTheme(theme, vars) {
+    if (typeof vars === "string") {
+      try {
+        vars = vars ? JSON.parse(vars) : null
+      } catch {
+        vars = null
+      }
+    }
+    window.__nappTheme = { name: theme, vars: vars || {} }
+
+    const root = document.documentElement
+    if (!root) {
+      // too early (no <html> yet): retry as soon as there is a document
+      document.addEventListener("DOMContentLoaded", () => applyTheme(theme, vars), { once: true })
+      return
+    }
+    if (theme) {
+      root.dataset.theme = theme
+      root.style.colorScheme = theme === "dark" ? "dark" : "light"
+    }
+    if (vars) for (const key in vars) root.style.setProperty("--" + key, vars[key])
+
+    // for napps that paint outside CSS (canvas, inline svg, charts)
+    window.dispatchEvent(new CustomEvent("napp-theme-change", { detail: { theme, vars: vars || {} } }))
   }
+
+  window.__bridge_theme_change = applyTheme
 
   // A napp that navigates on its own pushes { action: { name, payload } }, and
   // the launcher takes it as the window's current action.
@@ -357,6 +379,8 @@
     }
     return btoa(binary)
   }
+
+  if (window.__nappTheme) applyTheme(window.__nappTheme.name, window.__nappTheme.vars)
 
   window.napp = {
     instance: window.name,

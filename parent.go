@@ -32,6 +32,10 @@ func webviewServer() {
 func startChild(req openReq) (*childInfo, error) {
 	instance := nextInstanceID(req.napp)
 
+	// the napp starts already themed: the child injects these before the
+	// page loads, so there is no flash of the wrong colors
+	themeName, themeVars := themeWire()
+
 	childExe := childExePath()
 	cmd := exec.Command(childExe)
 	cmd.Env = append(os.Environ(),
@@ -41,6 +45,8 @@ func startChild(req openReq) (*childInfo, error) {
 		"VERDANA_NAPP_DESC="+req.napp.Description,
 		"VERDANA_INSTANCE_ID="+instance,
 		"VERDANA_NAPP_REQUIRES="+strings.Join(req.napp.Requires, ","),
+		"VERDANA_THEME="+themeName,
+		"VERDANA_THEME_VARS="+themeVars,
 	)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {

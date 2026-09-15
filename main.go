@@ -13,6 +13,7 @@ import (
 	"gioui.org/io/clipboard"
 	"gioui.org/layout"
 	"gioui.org/op"
+	"gioui.org/op/paint"
 	"gioui.org/text"
 	"gioui.org/unit"
 	"gioui.org/widget"
@@ -52,6 +53,7 @@ func main() {
 	defer closer()
 
 	loadState()
+	applyStoredTheme()
 	refreshInstalled()
 	go buildUserIndex()
 
@@ -89,6 +91,7 @@ func gioMain() {
 		fetchBtn      widget.Clickable
 		tabNappsBtn   widget.Clickable
 		tabDiscoBtn   widget.Clickable
+		themeBtn      widget.Clickable
 		installedList widget.List
 		discoveryList widget.List
 		runBtns       []widget.Clickable
@@ -114,6 +117,12 @@ func gioMain() {
 		switch e := w.Event(); e := e.(type) {
 		case app.FrameEvent:
 			gtx := app.NewContext(&ops, e)
+
+			// the palette is re-read every frame, so a theme switch (which can
+			// come from any goroutine) never touches th concurrently
+			pal := currentTheme()
+			pal.apply(th)
+			paint.Fill(gtx.Ops, pal.bg)
 
 			ui.mu.Lock()
 			activePrompt := ui.prompt
@@ -185,6 +194,9 @@ func gioMain() {
 					if tabDiscoBtn.Clicked(gtx) {
 						setTab(1)
 					}
+					if themeBtn.Clicked(gtx) {
+						toggleTheme()
+					}
 					if fetchBtn.Clicked(gtx) {
 						stateMu.Lock()
 						state.Relays = parseRelays(relaysEd.Text())
@@ -220,7 +232,7 @@ func gioMain() {
 							}
 						}
 					}
-					return layoutMain(gtx, th, &tabNappsBtn, &tabDiscoBtn, tab,
+					return layoutMain(gtx, th, &tabNappsBtn, &tabDiscoBtn, &themeBtn, tab,
 						&installedList, &discoveryList, &relaysEd, &fetchBtn,
 						runBtns, actionBtns, profName, profPic, fetchErr, fetching,
 						installedSnap, discoverySnap, installedSet, busySnap)

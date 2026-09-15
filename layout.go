@@ -2,7 +2,6 @@ package main
 
 import (
 	"image"
-	"image/color"
 	"strings"
 
 	"gioui.org/f32"
@@ -72,7 +71,7 @@ func layoutPrompt(
 			layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				l := material.Body2(th, p.detail)
-				l.Color = color.NRGBA{R: 0x66, G: 0x66, B: 0x66, A: 0xff}
+				l.Color = currentTheme().subtle
 				return l.Layout(gtx)
 			}),
 		)
@@ -85,7 +84,7 @@ func layoutPrompt(
 				macro := op.Record(gtx.Ops)
 				dims := layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 					l := material.Body2(th, p.code)
-					l.Color = color.NRGBA{R: 0x33, G: 0x33, B: 0x33, A: 0xff}
+					l.Color = currentTheme().codeFg
 					return l.Layout(gtx)
 				})
 				call := macro.Stop()
@@ -94,7 +93,7 @@ func layoutPrompt(
 					NW:   6, NE: 6, SW: 6, SE: 6,
 				}
 				defer bg.Push(gtx.Ops).Pop()
-				paint.Fill(gtx.Ops, color.NRGBA{R: 0xf0, G: 0xf0, B: 0xf0, A: 0xff})
+				paint.Fill(gtx.Ops, currentTheme().codeBg)
 				call.Add(gtx.Ops)
 				return dims
 			}),
@@ -127,8 +126,8 @@ func layoutPrompt(
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				pointer.CursorPointer.Add(gtx.Ops)
 				b := material.Button(th, denyBtn, "Cancel")
-				b.Background = color.NRGBA{R: 0xe8, G: 0xe8, B: 0xe8, A: 0xff}
-				b.Color = color.NRGBA{R: 0x33, G: 0x33, B: 0x33, A: 0xff}
+				b.Background = currentTheme().chipBg
+				b.Color = currentTheme().chipFg
 				return b.Layout(gtx)
 			}),
 		)
@@ -143,8 +142,8 @@ func layoutPrompt(
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					pointer.CursorPointer.Add(gtx.Ops)
 					b := material.Button(th, denyBtn, "Deny")
-					b.Background = color.NRGBA{R: 0xe8, G: 0xe8, B: 0xe8, A: 0xff}
-					b.Color = color.NRGBA{R: 0x33, G: 0x33, B: 0x33, A: 0xff}
+					b.Background = currentTheme().chipBg
+					b.Color = currentTheme().chipFg
 					return b.Layout(gtx)
 				}),
 			)
@@ -164,7 +163,7 @@ func layoutLogin(gtx layout.Context, th *material.Theme, ed *widget.Editor, btn 
 		layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			l := material.Body2(th, "Paste your nsec or a bunker:// URL")
-			l.Color = color.NRGBA{R: 0x66, G: 0x66, B: 0x66, A: 0xff}
+			l.Color = currentTheme().subtle
 			return l.Layout(gtx)
 		}),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
@@ -182,17 +181,17 @@ func layoutLogin(gtx layout.Context, th *material.Theme, ed *widget.Editor, btn 
 			}
 			return layout.Inset{Top: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				l := material.Body2(th, loginErr)
-				l.Color = color.NRGBA{R: 0xcc, G: 0x22, B: 0x22, A: 0xff}
+				l.Color = currentTheme().danger
 				return l.Layout(gtx)
 			})
 		}),
 	)
 }
 
-func layoutMain(gtx layout.Context, th *material.Theme, tabNappsBtn, tabDiscoBtn *widget.Clickable, tab int, installedList, discoveryList *widget.List, relaysEd *widget.Editor, fetchBtn *widget.Clickable, runBtns, actionBtns []widget.Clickable, profName, profPic, fetchErr string, fetching bool, installed, discovery []Napp, installedSet, busy map[string]bool) layout.Dimensions {
+func layoutMain(gtx layout.Context, th *material.Theme, tabNappsBtn, tabDiscoBtn, themeBtn *widget.Clickable, tab int, installedList, discoveryList *widget.List, relaysEd *widget.Editor, fetchBtn *widget.Clickable, runBtns, actionBtns []widget.Clickable, profName, profPic, fetchErr string, fetching bool, installed, discovery []Napp, installedSet, busy map[string]bool) layout.Dimensions {
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layoutProfile(gtx, th, profName, profPic)
+			return layoutProfile(gtx, th, themeBtn, profName, profPic)
 		}),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -216,8 +215,8 @@ func layoutTabs(gtx layout.Context, th *material.Theme, nappsBtn, discoBtn *widg
 		if active {
 			b.Background = th.Palette.ContrastBg
 		} else {
-			b.Background = color.NRGBA{R: 0xe8, G: 0xe8, B: 0xe8, A: 0xff}
-			b.Color = color.NRGBA{R: 0x33, G: 0x33, B: 0x33, A: 0xff}
+			b.Background = currentTheme().chipBg
+			b.Color = currentTheme().chipFg
 		}
 		return b.Layout(gtx)
 	}
@@ -235,7 +234,7 @@ func layoutTabs(gtx layout.Context, th *material.Theme, nappsBtn, discoBtn *widg
 func layoutNappsTab(gtx layout.Context, th *material.Theme, list *widget.List, runBtns []widget.Clickable, installed []Napp) layout.Dimensions {
 	if len(installed) == 0 {
 		l := material.Body2(th, "No napps installed yet. Find some in the Discovery tab.")
-		l.Color = color.NRGBA{R: 0x99, G: 0x99, B: 0x99, A: 0xff}
+		l.Color = currentTheme().muted
 		return l.Layout(gtx)
 	}
 	return material.List(th, list).Layout(gtx, len(installed), func(gtx layout.Context, i int) layout.Dimensions {
@@ -251,7 +250,7 @@ func layoutDiscoveryTab(gtx layout.Context, th *material.Theme, list *widget.Lis
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			l := material.Body2(th, "Relays (one per line)")
-			l.Color = color.NRGBA{R: 0x66, G: 0x66, B: 0x66, A: 0xff}
+			l.Color = currentTheme().subtle
 			return l.Layout(gtx)
 		}),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
@@ -275,7 +274,7 @@ func layoutDiscoveryTab(gtx layout.Context, th *material.Theme, list *widget.Lis
 						return layout.Dimensions{}
 					}
 					l := material.Body2(th, fetchErr)
-					l.Color = color.NRGBA{R: 0xcc, G: 0x22, B: 0x22, A: 0xff}
+					l.Color = currentTheme().danger
 					return l.Layout(gtx)
 				}),
 			)
@@ -288,7 +287,7 @@ func layoutDiscoveryTab(gtx layout.Context, th *material.Theme, list *widget.Lis
 					msg = "Searching relays\u2026"
 				}
 				l := material.Body2(th, msg)
-				l.Color = color.NRGBA{R: 0x99, G: 0x99, B: 0x99, A: 0xff}
+				l.Color = currentTheme().muted
 				return l.Layout(gtx)
 			}
 			return material.List(th, list).Layout(gtx, len(discovery), func(gtx layout.Context, i int) layout.Dimensions {
@@ -310,7 +309,7 @@ func layoutDiscoveryTab(gtx layout.Context, th *material.Theme, list *widget.Lis
 	)
 }
 
-func layoutProfile(gtx layout.Context, th *material.Theme, name, pic string) layout.Dimensions {
+func layoutProfile(gtx layout.Context, th *material.Theme, themeBtn *widget.Clickable, name, pic string) layout.Dimensions {
 	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return avatar(gtx, pic, 48)
@@ -320,6 +319,23 @@ func layoutProfile(gtx layout.Context, th *material.Theme, name, pic string) lay
 			t := material.H6(th, name)
 			t.Font.Weight = font.Bold
 			return t.Layout(gtx)
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if themeBtn == nil {
+				return layout.Dimensions{}
+			}
+			pointer.CursorPointer.Add(gtx.Ops)
+			p := currentTheme()
+			label := "\u263e Dark"
+			if p.name == "dark" {
+				label = "\u2600 Light"
+			}
+			b := material.Button(th, themeBtn, label)
+			b.Background = p.chipBg
+			b.Color = p.chipFg
+			b.TextSize = unit.Sp(13)
+			b.Inset = layout.UniformInset(unit.Dp(8))
+			return b.Layout(gtx)
 		}),
 	)
 }
@@ -340,20 +356,22 @@ func avatar(gtx layout.Context, url string, size int) layout.Dimensions {
 		imgOp.Add(gtx.Ops)
 		paint.PaintOp{}.Add(gtx.Ops)
 	} else {
-		paint.Fill(gtx.Ops, color.NRGBA{R: 0xdd, G: 0xdd, B: 0xdd, A: 0xff})
+		paint.Fill(gtx.Ops, currentTheme().imageBg)
 	}
 	return layout.Dimensions{Size: sq}
 }
 
 func editorBox(gtx layout.Context, th *material.Theme, ed *widget.Editor, hint string) layout.Dimensions {
 	border := widget.Border{
-		Color:        color.NRGBA{R: 0xcc, G: 0xcc, B: 0xcc, A: 0xff},
+		Color:        currentTheme().border,
 		CornerRadius: unit.Dp(6),
 		Width:        unit.Dp(1),
 	}
 	return border.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			return material.Editor(th, ed, hint).Layout(gtx)
+			style := material.Editor(th, ed, hint)
+			style.HintColor = currentTheme().inputHnt
+			return style.Layout(gtx)
 		})
 	})
 }
@@ -389,7 +407,7 @@ func renderNappCard(gtx layout.Context, th *material.Theme, btn *widget.Clickabl
 							}
 							return layout.Inset{Top: unit.Dp(2)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 								l := material.Body2(th, napp.Description)
-								l.Color = color.NRGBA{R: 0x66, G: 0x66, B: 0x66, A: 0xff}
+								l.Color = currentTheme().subtle
 								return l.Layout(gtx)
 							})
 						}),
@@ -409,7 +427,7 @@ func renderNappCard(gtx layout.Context, th *material.Theme, btn *widget.Clickabl
 											}
 										}
 										c := material.Caption(th, name)
-										c.Color = color.NRGBA{R: 0x88, G: 0x88, B: 0x88, A: 0xff}
+										c.Color = currentTheme().muted
 										return c.Layout(gtx)
 									}),
 								)
@@ -438,7 +456,7 @@ func renderNappCard(gtx layout.Context, th *material.Theme, btn *widget.Clickabl
 			NW:   8, NE: 8, SW: 8, SE: 8,
 		}
 		defer bg.Push(gtx.Ops).Pop()
-		paint.Fill(gtx.Ops, color.NRGBA{R: 0xf2, G: 0xf2, B: 0xf2, A: 0xff})
+		paint.Fill(gtx.Ops, currentTheme().card)
 		call.Add(gtx.Ops)
 		return dims
 	})

@@ -43,6 +43,9 @@ func loadState() {
 	if state.InstalledNapps == nil {
 		state.InstalledNapps = make(map[string]Napp)
 	}
+	if state.Theme != "light" && state.Theme != "dark" {
+		state.Theme = "light"
+	}
 	saveState()
 	log.Info().Int("napps", len(state.InstalledNapps)).Msg("state loaded")
 }

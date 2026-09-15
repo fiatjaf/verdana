@@ -41,6 +41,8 @@ type nappMeta struct {
 	Dir         string
 	Instance    string
 	Requires    []string
+	Theme       string
+	ThemeVars   string
 }
 
 var (
@@ -65,6 +67,8 @@ func main() {
 		Name:        os.Getenv("VERDANA_NAPP_NAME"),
 		Description: os.Getenv("VERDANA_NAPP_DESC"),
 		Instance:    os.Getenv("VERDANA_INSTANCE_ID"),
+		Theme:       os.Getenv("VERDANA_THEME"),
+		ThemeVars:   os.Getenv("VERDANA_THEME_VARS"),
 	}
 	if req := strings.TrimSpace(os.Getenv("VERDANA_NAPP_REQUIRES")); req != "" {
 		meta.Requires = strings.Split(req, ",")
@@ -88,8 +92,11 @@ func main() {
 
 	// window.name is where bridge.js picks up window.napp.instance, and it
 	// survives same-origin navigations — so a reload keeps the instance id.
+	// window.__nappTheme is where bridge.js picks the launcher's theme up on
+	// every (re)load, so a napp that reloads itself stays in sync.
 	w.Init("window.name = " + jsString(meta.Instance) + ";" +
-		"window.__nappDomains = " + jsStringSlice(meta.Requires) + ";")
+		"window.__nappDomains = " + jsStringSlice(meta.Requires) + ";" +
+		themeInitScript(meta.Theme, meta.ThemeVars))
 	w.Init(bridgeJS)
 
 	url := startNappServer(meta.Dir)
@@ -108,6 +115,18 @@ func jsString(s string) string {
 		return `""`
 	}
 	return string(b)
+}
+
+// themeInitScript sets window.__nappTheme, which bridge.js applies as soon as
+// it runs. varsJSON comes from the launcher, so it is already valid JSON.
+func themeInitScript(name, varsJSON string) string {
+	if name == "" {
+		name = "light"
+	}
+	if strings.TrimSpace(varsJSON) == "" {
+		varsJSON = "{}"
+	}
+	return "window.__nappTheme = {name:" + jsString(name) + ",vars:" + varsJSON + "};"
 }
 
 func jsStringSlice(items []string) string {
@@ -210,6 +229,21 @@ func reader(w webview.WebView) {
 			code := "window.__bridge_dispatch_action(" +
 				strconv.Itoa(m.ID) + "," + jsString(m.Method) + "," + jsString(payload) + "," + idx + ")"
 			w.Dispatch(func() { w.Eval(code) })
+		case "theme":
+			// the launcher switched theme: apply it now, and make it the value
+			// future page loads in this window start from
+			init := themeInitScript(m.Method, m.Params)
+			vars := m.Params
+			if vars == "" {
+				vars = "{}"
+			}
+			code := init +
+				"if (window.__bridge_theme_change) window.__bridge_theme_change(" +
+				jsString(m.Method) + "," + jsString(vars) + ");"
+			w.Dispatch(func() {
+				w.Init(init)
+				w.Eval(code)
+			})
 		case "close":
 			w.Dispatch(func() { w.Terminate() })
 		}

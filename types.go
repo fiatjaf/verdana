@@ -35,6 +35,10 @@ type AppState struct {
 	Login          string          `json:"login"`
 	Relays         []string        `json:"relays"`
 	InstalledNapps map[string]Napp `json:"installed_napps"`
+
+	// Theme is "light" or "dark": what the launcher draws with and what
+	// every napp window is told to track.
+	Theme string `json:"theme"`
 }
 
 type uiState struct {
