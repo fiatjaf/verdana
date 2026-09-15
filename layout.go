@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"image"
 	"strings"
 
@@ -383,7 +384,7 @@ func editorBox(gtx layout.Context, th *material.Theme, ed *widget.Editor, hint s
 }
 
 func renderNappCard(gtx layout.Context, th *material.Theme, btn *widget.Clickable, btnLabel string, napp Napp) layout.Dimensions {
-	authorName, authorPic := authorMeta(napp.Author)
+	pm := sys.FetchProfileMetadata(context.Background(), napp.Author)
 	return layout.Inset{Bottom: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		sz := gtx.Constraints.Max
 		macro := op.Record(gtx.Ops)
@@ -421,18 +422,11 @@ func renderNappCard(gtx layout.Context, th *material.Theme, btn *widget.Clickabl
 							return layout.Inset{Top: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 								return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 									layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-										return avatar(gtx, authorPic, 18)
+										return avatar(gtx, pm.Picture, 18)
 									}),
 									layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
 									layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-										name := authorName
-										if name == "" {
-											name = napp.Author
-											if len(name) > 12 {
-												name = name[:12] + "\u2026"
-											}
-										}
-										c := material.Caption(th, name)
+										c := material.Caption(th, pm.ShortName())
 										c.Color = currentTheme().muted
 										return c.Layout(gtx)
 									}),

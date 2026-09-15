@@ -21,7 +21,7 @@ type Napp struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description"`
 	Icon        string          `json:"icon"`
-	Author      string          `json:"author"`
+	Author      nostr.PubKey    `json:"author"`
 	Actions     []string        `json:"actions"`
 	Requires    []string        `json:"requires"`
 	Singleton   bool            `json:"singleton"`

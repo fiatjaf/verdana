@@ -64,15 +64,14 @@ func tagValue(tags nostr.Tags, key string) string {
 }
 
 func nappFromEvent(evt nostr.Event) Napp {
-	pubkey := evt.PubKey.Hex()
 	d := evt.Tags.GetD()
 	n := Napp{
 		D:           d,
-		ID:          pubkey[:16] + "~" + d,
+		ID:          evt.PubKey.Hex()[:16] + "~" + d,
 		Name:        tagValue(evt.Tags, "title"),
 		Description: tagValue(evt.Tags, "description"),
 		Icon:        tagValue(evt.Tags, "icon"),
-		Author:      pubkey,
+		Author:      evt.PubKey,
 		CreatedAt:   evt.CreatedAt,
 	}
 	if n.Name == "" {

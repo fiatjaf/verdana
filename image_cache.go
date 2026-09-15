@@ -1,14 +1,12 @@
 package main
 
 import (
-	"context"
 	"image"
 	"net/http"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"fiatjaf.com/nostr"
 	"gioui.org/op/paint"
 )
 
@@ -20,49 +18,6 @@ type imgEntry struct {
 }
 
 var imgCache sync.Map
-
-type authorEntry struct {
-	once  sync.Once
-	name  string
-	pic   string
-	ready atomic.Bool
-}
-
-var authorCache sync.Map
-
-func authorMeta(pubkeyHex string) (string, string) {
-	if pubkeyHex == "" {
-		return "", ""
-	}
-	v, _ := authorCache.LoadOrStore(pubkeyHex, &authorEntry{})
-	e := v.(*authorEntry)
-	e.once.Do(func() {
-		go func() {
-			log.Debug().Str("pubkey", pubkeyHex).Msg("fetching author metadata")
-			pk, err := nostr.PubKeyFromHex(pubkeyHex)
-			if err != nil {
-				log.Error().Err(err).Str("pubkey", pubkeyHex).Msg("invalid pubkey for author meta")
-				return
-			}
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-			pm := sys.FetchProfileMetadata(ctx, pk)
-			e.name = pm.Name
-			if e.name == "" {
-				e.name = pm.DisplayName
-			}
-			e.pic = pm.Picture
-			e.ready.Store(true)
-			if gioWin != nil {
-				gioWin.Invalidate()
-			}
-		}()
-	})
-	if e.ready.Load() {
-		return e.name, e.pic
-	}
-	return "", ""
-}
 
 func getImage(url string) (paint.ImageOp, bool) {
 	if url == "" {
