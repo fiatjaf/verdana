@@ -12,26 +12,75 @@ import (
 	"fiatjaf.com/nostr/sdk"
 )
 
-// fetchListArgs parses a {pubkey} params blob and returns the pubkey plus a
-// short-lived context for the various napp.load* list/set fetches. ok is false
-// when the system isn't ready or the pubkey is missing/invalid, in which case
-// the caller should return an empty result.
+// fetchListArgs parses a bare pubkey-hex JSON string (as sent by the JS bridge
+// load* helpers) and returns the pubkey plus a short-lived context for the
+// various napp.load* list/set fetches. ok is false when the system isn't ready
+// or the pubkey is missing/invalid, in which case the caller should return an
+// empty result.
 func fetchListArgs(params string) (pk nostr.PubKey, ctx context.Context, cancel context.CancelFunc, ok bool) {
-	var p struct {
-		Pubkey string `json:"pubkey"`
-	}
-	json.Unmarshal([]byte(params), &p)
-	if p.Pubkey == "" {
-		log.Debug().Msg("fetchListArgs: no pubkey in params")
+	var pubkey string
+	json.Unmarshal([]byte(params), &pubkey)
+	pubkey = strings.TrimSpace(pubkey)
+	if pubkey == "" {
+		log.Debug().Str("params", params).Msg("fetchListArgs: no pubkey in params")
 		return pk, nil, func() {}, false
 	}
-	pk, err := nostr.PubKeyFromHex(p.Pubkey)
+	pk, err := nostr.PubKeyFromHex(pubkey)
 	if err != nil {
 		log.Debug().Err(err).Msg("fetchListArgs: invalid pubkey")
 		return pk, nil, func() {}, false
 	}
+	if sys == nil {
+		log.Debug().Msg("fetchListArgs: system not ready")
+		return pk, nil, func() {}, false
+	}
 	ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
 	return pk, ctx, cancel, true
+}
+
+// listResult shapes a sdk GenericList's event + items into the JS-side
+// ListResult shape: { event, items }. The items slice is normalized to a
+// non-nil empty slice so it marshals as [] rather than null.
+func listResult[V comparable, I sdk.TagItemWithValue[V]](l sdk.GenericList[V, I]) any {
+	items := l.Items
+	if items == nil {
+		items = []I{}
+	}
+	return map[string]any{
+		"event": l.Event,
+		"items": items,
+	}
+}
+
+// emptyListResult is the zero-value ListResult returned when args are invalid.
+func emptyListResult() any {
+	return map[string]any{"event": nil, "items": []any{}}
+}
+
+// setsResult shapes a sdk GenericSets into the JS-side SetResult shape:
+// { [dTag]: { event, items } }. The event for each set is matched from the
+// GenericSets.Events slice by its "d" tag.
+func setsResult[V comparable, I sdk.TagItemWithValue[V]](s sdk.GenericSets[V, I]) any {
+	events := make(map[string]*nostr.Event, len(s.Events))
+	for i := range s.Events {
+		events[s.Events[i].Tags.GetD()] = &s.Events[i]
+	}
+	out := make(map[string]any, len(s.Sets))
+	for dTag, items := range s.Sets {
+		if items == nil {
+			items = []I{}
+		}
+		out[dTag] = map[string]any{
+			"event": events[dTag],
+			"items": items,
+		}
+	}
+	return out
+}
+
+// emptySetsResult is the zero-value SetResult returned when args are invalid.
+func emptySetsResult() any {
+	return map[string]any{}
 }
 
 func bridgeRPC(ci *childInfo) func(string, string) (any, error) {
@@ -239,82 +288,90 @@ func bridgeRPC(ci *childInfo) func(string, string) (any, error) {
 		case "napp.loadBlossomServers":
 			pk, ctx, cancel, ok := fetchListArgs(params)
 			if !ok {
-				return []any{}, nil
+				return emptyListResult(), nil
 			}
 			defer cancel()
-			return sys.FetchBlossomServerList(ctx, pk).Items, nil
+			return listResult(sys.FetchBlossomServerList(ctx, pk)), nil
 		case "napp.loadBookmarks":
 			pk, ctx, cancel, ok := fetchListArgs(params)
 			if !ok {
-				return []any{}, nil
+				return emptyListResult(), nil
 			}
 			defer cancel()
-			return sys.FetchBookmarkList(ctx, pk).Items, nil
+			return listResult(sys.FetchBookmarkList(ctx, pk)), nil
 		case "napp.loadEmojis":
-			// no corresponding sys.Fetch method
-			return []any{}, nil
+			pk, ctx, cancel, ok := fetchListArgs(params)
+			if !ok {
+				return emptyListResult(), nil
+			}
+			defer cancel()
+			return listResult(sys.FetchEmojiList(ctx, pk)), nil
 		case "napp.loadFavoriteRelays":
 			// no corresponding sys.Fetch method
-			return []any{}, nil
+			return emptyListResult(), nil
 		case "napp.loadFollowsList":
 			pk, ctx, cancel, ok := fetchListArgs(params)
 			if !ok {
-				return []any{}, nil
+				return emptyListResult(), nil
 			}
 			defer cancel()
-			return sys.FetchFollowList(ctx, pk).Items, nil
+			return listResult(sys.FetchFollowList(ctx, pk)), nil
 		case "napp.loadMuteList":
 			pk, ctx, cancel, ok := fetchListArgs(params)
 			if !ok {
-				return []any{}, nil
+				return emptyListResult(), nil
 			}
 			defer cancel()
-			return sys.FetchMuteList(ctx, pk).Items, nil
+			return listResult(sys.FetchMuteList(ctx, pk)), nil
 		case "napp.loadPins":
 			pk, ctx, cancel, ok := fetchListArgs(params)
 			if !ok {
-				return []any{}, nil
+				return emptyListResult(), nil
 			}
 			defer cancel()
-			return sys.FetchPinList(ctx, pk).Items, nil
+			return listResult(sys.FetchPinList(ctx, pk)), nil
 		case "napp.loadRelayList":
 			pk, ctx, cancel, ok := fetchListArgs(params)
 			if !ok {
-				return []any{}, nil
+				return emptyListResult(), nil
 			}
 			defer cancel()
-			return sys.FetchRelayList(ctx, pk).Items, nil
+			return listResult(sys.FetchRelayList(ctx, pk)), nil
 		case "napp.loadWikiAuthors":
 			pk, ctx, cancel, ok := fetchListArgs(params)
 			if !ok {
-				return []any{}, nil
+				return emptyListResult(), nil
 			}
 			defer cancel()
-			return sys.FetchGoodWikiAuthorList(ctx, pk).Items, nil
+			return listResult(sys.FetchGoodWikiAuthorList(ctx, pk)), nil
 		case "napp.loadWikiRelays":
 			pk, ctx, cancel, ok := fetchListArgs(params)
 			if !ok {
-				return []any{}, nil
+				return emptyListResult(), nil
 			}
 			defer cancel()
-			return sys.FetchGoodWikiRelayList(ctx, pk).Items, nil
+			return listResult(sys.FetchGoodWikiRelayList(ctx, pk)), nil
 		case "napp.loadEmojiSets":
-			// no corresponding sys.Fetch method
-			return struct{}{}, nil
+			pk, ctx, cancel, ok := fetchListArgs(params)
+			if !ok {
+				return emptySetsResult(), nil
+			}
+			defer cancel()
+			return setsResult(sys.FetchEmojiSets(ctx, pk)), nil
 		case "napp.loadFollowSets":
 			pk, ctx, cancel, ok := fetchListArgs(params)
 			if !ok {
-				return struct{}{}, nil
+				return emptySetsResult(), nil
 			}
 			defer cancel()
-			return sys.FetchFollowSets(ctx, pk).Sets, nil
+			return setsResult(sys.FetchFollowSets(ctx, pk)), nil
 		case "napp.loadRelaySets":
 			pk, ctx, cancel, ok := fetchListArgs(params)
 			if !ok {
-				return struct{}{}, nil
+				return emptySetsResult(), nil
 			}
 			defer cancel()
-			return sys.FetchRelaySets(ctx, pk).Sets, nil
+			return setsResult(sys.FetchRelaySets(ctx, pk)), nil
 		case "napp.loadRelayInfo":
 			// no corresponding sys.Fetch method
 			return nil, nil
@@ -385,6 +442,14 @@ func bridgeRPC(ci *childInfo) func(string, string) (any, error) {
 			defer cancel()
 
 			log.Debug().Str("kind", fmt.Sprint(p.Event.Kind)).Int("relays", len(p.Relays)).Msg("publishing event")
+
+			// Persist the event to the local database before publishing it to
+			// the outside world, so it's immediately queryable locally.
+			if sys != nil {
+				if err := sys.Store.SaveEvent(p.Event); err != nil {
+					log.Warn().Err(err).Msg("failed to save event to local store before publishing")
+				}
+			}
 
 			seen := make(map[string]bool)
 			var targets []string
