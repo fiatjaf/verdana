@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -19,151 +18,14 @@ import (
 // gets from @nostr/gadgets, so the item shapes here mirror that package's
 // exactly (see env.d.ts): a napp written against one runs on the other.
 //
-// Getting the events, though, is entirely the sdk's job: every load* below
-// goes through the sdk loader for its kind (sys.Fetch*List / sys.Fetch*Sets),
-// which already does the local eventstore, the kvstore mark that decides when
-// to hit the network again, the author's outbox relays, batched REQs and a 6h
-// cache. All that is left here is turning tags into the items napps expect.
+// Everything else is the sdk's job. Every load* below is a call to the sdk
+// loader for its kind (sys.Fetch*List / sys.Fetch*Sets / sys.Fetch*WithSets),
+// which does the local eventstore, the kvstore mark that decides when to hit
+// the network again, the author's outbox relays, batched REQs, the 6h cache
+// and the tag parsing. All that is left in this file is turning the sdk's
+// typed items into the JSON shapes napps expect.
 
-const listCacheTTL = 6 * time.Hour
-
-// ─── getting the events (all sdk) ────────────────────────────────
-
-// listEvent returns an author's event for a NIP-51 list kind.
-func listEvent(ctx context.Context, kind nostr.Kind, pubkey nostr.PubKey) *nostr.Event {
-	if sys == nil {
-		return nil
-	}
-	switch kind {
-	case 3:
-		return sys.FetchFollowList(ctx, pubkey).Event
-	case 10000:
-		return sys.FetchMuteList(ctx, pubkey).Event
-	case 10001:
-		return sys.FetchPinList(ctx, pubkey).Event
-	case 10002:
-		return sys.FetchRelayList(ctx, pubkey).Event
-	case 10003:
-		return sys.FetchBookmarkList(ctx, pubkey).Event
-	case 10006:
-		return sys.FetchBlockedRelayList(ctx, pubkey).Event
-	case 10007:
-		return sys.FetchSearchRelayList(ctx, pubkey).Event
-	case 10008:
-		return sys.FetchProfileBadgesList(ctx, pubkey).Event
-	case 10012:
-		return sys.FetchRelayFeedsList(ctx, pubkey).Event
-	case 10015:
-		return sys.FetchTopicList(ctx, pubkey).Event
-	case 10017:
-		return sys.FetchGitAuthorList(ctx, pubkey).Event
-	case 10018:
-		return sys.FetchGitRepositoryList(ctx, pubkey).Event
-	case 10020:
-		return sys.FetchMediaFollowList(ctx, pubkey).Event
-	case 10030:
-		return sys.FetchEmojiList(ctx, pubkey).Event
-	case 10050:
-		return sys.FetchDMRelayList(ctx, pubkey).Event
-	case 10054:
-		return sys.FetchFavoritePodcastsList(ctx, pubkey).Event
-	case 10064:
-		return sys.FetchAuthoredPodcastsList(ctx, pubkey).Event
-	case 10101:
-		return sys.FetchGoodWikiAuthorList(ctx, pubkey).Event
-	case 10102:
-		return sys.FetchGoodWikiRelayList(ctx, pubkey).Event
-	}
-	return otherListEvent(ctx, kind, pubkey)
-}
-
-type otherListEntry struct {
-	event   *nostr.Event
-	expires time.Time
-}
-
-var (
-	otherListMu    sync.Mutex
-	otherListCache = make(map[string]otherListEntry)
-)
-
-// otherListEvent covers the kinds the sdk has no loader for -- 10009, 10021,
-// 10027 and 10063 (its FetchBlossomServerList reads kind 10101, so we don't
-// use it). It is still the sdk fetching: the local store first, then the
-// author's relays, saving whatever it finds. What it lacks is the kvstore
-// refresh gate, so we memo the answer for a while instead, which also keeps a
-// napp rendering many rows from asking the network once per row.
-func otherListEvent(ctx context.Context, kind nostr.Kind, pubkey nostr.PubKey) *nostr.Event {
-	key := listCacheKey(kind, pubkey)
-
-	otherListMu.Lock()
-	entry, ok := otherListCache[key]
-	otherListMu.Unlock()
-	if ok && time.Now().Before(entry.expires) {
-		return entry.event
-	}
-
-	fetchCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	evt, _, err := sys.FetchSpecificEvent(fetchCtx,
-		nostr.EntityPointer{PublicKey: pubkey, Kind: kind},
-		sdk.FetchSpecificEventParameters{SaveToLocalStore: true},
-	)
-	if err != nil {
-		log.Debug().Err(err).Uint16("kind", uint16(kind)).Msg("list fetch failed")
-	}
-
-	otherListMu.Lock()
-	otherListCache[key] = otherListEntry{event: evt, expires: time.Now().Add(listCacheTTL)}
-	otherListMu.Unlock()
-	return evt
-}
-
-func listCacheKey(kind nostr.Kind, pubkey nostr.PubKey) string {
-	return strconv.Itoa(int(kind)) + ":" + pubkey.Hex()
-}
-
-// sdkSetEvents returns an author's addressable events of a set kind, when the
-// sdk has a loader for it.
-func sdkSetEvents(ctx context.Context, kind nostr.Kind, pubkey nostr.PubKey) ([]nostr.Event, bool) {
-	if sys == nil {
-		return nil, false
-	}
-	switch kind {
-	case 30000:
-		return sys.FetchFollowSets(ctx, pubkey).Events, true
-	case 30002:
-		return sys.FetchRelaySets(ctx, pubkey).Events, true
-	case 30015:
-		return sys.FetchTopicSets(ctx, pubkey).Events, true
-	case 30030:
-		return sys.FetchEmojiSets(ctx, pubkey).Events, true
-	}
-	return nil, false
-}
-
-// setEvent is one addressable event by author+d, for resolving the "a" items
-// that show up inside NIP-51 lists.
-func setEvent(ctx context.Context, kind nostr.Kind, pubkey nostr.PubKey, identifier string) *nostr.Event {
-	if events, ok := sdkSetEvents(ctx, kind, pubkey); ok {
-		for i := range events {
-			if events[i].Tags.GetD() == identifier {
-				return &events[i]
-			}
-		}
-		return nil
-	}
-	fetchCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	evt, _, err := sys.FetchSpecificEvent(fetchCtx,
-		nostr.EntityPointer{PublicKey: pubkey, Kind: kind, Identifier: identifier},
-		sdk.FetchSpecificEventParameters{SaveToLocalStore: true},
-	)
-	if err != nil {
-		log.Debug().Err(err).Uint16("kind", uint16(kind)).Msg("set fetch failed")
-	}
-	return evt
-}
+// ─── cache invalidation ──────────────────────────────────────────
 
 // invalidateList drops what the sdk cached for a kind+author. Called after
 // publishing (the event is stored locally first), so the next load* reflects
@@ -172,10 +34,6 @@ func invalidateList(kind nostr.Kind, pubkey nostr.PubKey) {
 	if sys == nil {
 		return
 	}
-
-	otherListMu.Lock()
-	delete(otherListCache, listCacheKey(kind, pubkey))
-	otherListMu.Unlock()
 
 	switch kind {
 	case 0:
@@ -196,8 +54,11 @@ func invalidateList(kind nostr.Kind, pubkey nostr.PubKey) {
 		dropCached(sys.SearchRelayListCache, pubkey)
 	case 10008:
 		dropCached(sys.ProfileBadgesListCache, pubkey)
+	case 10009:
+		dropCached(sys.SimpleGroupsListCache, pubkey)
 	case 10012:
 		dropCached(sys.RelayFeedsListCache, pubkey)
+		dropCached(sys.FavoriteRelaysWithSetsListCache, pubkey)
 	case 10015:
 		dropCached(sys.TopicListCache, pubkey)
 	case 10017:
@@ -206,12 +67,19 @@ func invalidateList(kind nostr.Kind, pubkey nostr.PubKey) {
 		dropCached(sys.GitRepositoryListCache, pubkey)
 	case 10020:
 		dropCached(sys.MediaFollowListCache, pubkey)
+	case 10021:
+		dropCached(sys.FavoriteFollowSetsListCache, pubkey)
+	case 10027:
+		dropCached(sys.FavoriteScrollsListCache, pubkey)
 	case 10030:
 		dropCached(sys.EmojiListCache, pubkey)
+		dropCached(sys.EmojisWithSetsListCache, pubkey)
 	case 10050:
 		dropCached(sys.DMRelayListCache, pubkey)
 	case 10054:
 		dropCached(sys.PodcastFavoriteListCache, pubkey)
+	case 10063:
+		dropCached(sys.BlossomServerListCache, pubkey)
 	case 10064:
 		dropCached(sys.AuthoredPodcastListCache, pubkey)
 	case 10101:
@@ -236,7 +104,7 @@ func dropCached[V any](c cache.Cache32[V], pubkey nostr.PubKey) {
 	}
 }
 
-// ─── list results ────────────────────────────────────────────────
+// ─── result shapes ───────────────────────────────────────────────
 
 // listResult is the { event, items } shape napps get from every load*.
 func listResult(evt *nostr.Event, items []any) map[string]any {
@@ -248,19 +116,8 @@ func listResult(evt *nostr.Event, items []any) map[string]any {
 
 func emptyListResult() map[string]any { return listResult(nil, nil) }
 
-// loadList fetches a NIP-51 list through the sdk and turns its tags into items
-// with the given per-tag parser (exactly how gadgets' itemsFromTags works).
-func loadList(ctx context.Context, kind nostr.Kind, pubkey nostr.PubKey, parse func(nostr.Tag) (any, bool)) map[string]any {
-	evt := listEvent(ctx, kind, pubkey)
-	if evt == nil {
-		return emptyListResult()
-	}
-	return listResult(evt, itemsFromTags(*evt, parse))
-}
-
-// fromSDKList shapes one of the sdk's own typed lists into a list result, with
-// conv mapping each sdk item to the shape napps expect. Used for the kinds
-// where the sdk's parser already produces everything gadgets would.
+// fromSDKList shapes one of the sdk's typed lists into a list result, with
+// conv mapping each sdk item to the shape napps expect.
 func fromSDKList[V comparable, I sdk.TagItemWithValue[V]](
 	list sdk.GenericList[V, I],
 	conv func(I) any,
@@ -268,338 +125,20 @@ func fromSDKList[V comparable, I sdk.TagItemWithValue[V]](
 	if list.Event == nil {
 		return emptyListResult()
 	}
-	items := make([]any, 0, len(list.Items))
-	for _, item := range list.Items {
+	return listResult(list.Event, convItems(list.Items, conv))
+}
+
+func convItems[I any](items []I, conv func(I) any) []any {
+	out := make([]any, 0, len(items))
+	for _, item := range items {
 		if v := conv(item); v != nil {
-			items = append(items, v)
+			out = append(out, v)
 		}
-	}
-	return listResult(list.Event, items)
-}
-
-func itemsFromTags(evt nostr.Event, parse func(nostr.Tag) (any, bool)) []any {
-	items := make([]any, 0, len(evt.Tags))
-	for _, tag := range evt.Tags {
-		if item, ok := parse(tag); ok {
-			items = append(items, item)
-		}
-	}
-	return items
-}
-
-// ─── item shapes (mirroring @nostr/gadgets/lists) ────────────────
-
-func profileRefItem(ref sdk.ProfileRef) any { return ref.Pubkey.Hex() }
-
-func relayURLValue(url sdk.RelayURL) any { return string(url) }
-
-// eventRefItem is gadgets' `string | AddressPointer`: an event id as hex, an
-// addressable event as a pointer object.
-func eventRefItem(ref sdk.EventRef) any {
-	switch p := ref.Pointer.(type) {
-	case nostr.EventPointer:
-		return p.ID.Hex()
-	case nostr.EntityPointer:
-		relays := p.Relays
-		if relays == nil {
-			relays = []string{}
-		}
-		return map[string]any{
-			"identifier": p.Identifier,
-			"pubkey":     p.PublicKey.Hex(),
-			"kind":       int(p.Kind),
-			"relays":     relays,
-		}
-	}
-	return nil
-}
-
-func podcastRefItem(ref sdk.PodcastRef) any {
-	if ref.PubKey != nostr.ZeroPK {
-		return ref.PubKey.Hex()
-	}
-	if ref.URL == "" {
-		return nil
-	}
-	return ref.URL
-}
-
-func pubkeyItem(tagName string) func(nostr.Tag) (any, bool) {
-	return func(tag nostr.Tag) (any, bool) {
-		if len(tag) >= 2 && tag[0] == tagName && isHex64(tag[1]) {
-			return strings.ToLower(tag[1]), true
-		}
-		return nil, false
-	}
-}
-
-func relayURLItem(tag nostr.Tag) (any, bool) {
-	if len(tag) >= 2 && tag[0] == "relay" && tag[1] != "" {
-		return nostr.NormalizeURL(tag[1]), true
-	}
-	return nil, false
-}
-
-func emojiItem(tag nostr.Tag) (any, bool) {
-	if len(tag) >= 3 && tag[0] == "emoji" {
-		return map[string]any{"shortcode": tag[1], "url": tag[2]}, true
-	}
-	return nil, false
-}
-
-// addressPointer is the { identifier, pubkey, kind, relays } item shape.
-func addressPointer(coord string, hint string, wantKind int) (any, bool) {
-	spl := strings.SplitN(coord, ":", 3)
-	if len(spl) < 3 || !isHex64(spl[1]) {
-		return nil, false
-	}
-	kind, err := strconv.Atoi(spl[0])
-	if err != nil {
-		return nil, false
-	}
-	if wantKind >= 0 && kind != wantKind {
-		return nil, false
-	}
-	relays := []string{}
-	if hint != "" {
-		relays = append(relays, hint)
-	}
-	return map[string]any{
-		"identifier": spl[2],
-		"pubkey":     strings.ToLower(spl[1]),
-		"kind":       kind,
-		"relays":     relays,
-	}, true
-}
-
-func hint(tag nostr.Tag, i int) string {
-	if len(tag) > i {
-		return tag[i]
-	}
-	return ""
-}
-
-func relayListItems(evt nostr.Event) []any {
-	return itemsFromTags(evt, func(tag nostr.Tag) (any, bool) {
-		if len(tag) < 2 || tag[0] != "r" || tag[1] == "" {
-			return nil, false
-		}
-		url := nostr.NormalizeURL(tag[1])
-		switch {
-		case len(tag) == 2:
-			return map[string]any{"url": url, "read": true, "write": true}, true
-		case tag[2] == "read":
-			return map[string]any{"url": url, "read": true, "write": false}, true
-		case tag[2] == "write":
-			return map[string]any{"url": url, "read": false, "write": true}, true
-		}
-		return nil, false
-	})
-}
-
-// ─── the load* surface ───────────────────────────────────────────
-
-func loadRelayList(ctx context.Context, pubkey nostr.PubKey) map[string]any {
-	// the sdk's Relay item carries the same information, but napps expect
-	// gadgets' { url, read, write }
-	rl := sys.FetchRelayList(ctx, pubkey)
-	if rl.Event == nil {
-		return emptyListResult()
-	}
-	return listResult(rl.Event, relayListItems(*rl.Event))
-}
-
-func loadFollowsList(ctx context.Context, pubkey nostr.PubKey) map[string]any {
-	return fromSDKList(sys.FetchFollowList(ctx, pubkey), profileRefItem)
-}
-
-func loadMuteList(ctx context.Context, pubkey nostr.PubKey) map[string]any {
-	// the sdk only keeps the muted pubkeys; gadgets (and the napps written
-	// against it) want the threads, hashtags and words too
-	return loadList(ctx, 10000, pubkey, func(tag nostr.Tag) (any, bool) {
-		if len(tag) < 2 {
-			return nil, false
-		}
-		switch tag[0] {
-		case "p":
-			if isHex64(tag[1]) {
-				return map[string]any{"label": "pubkey", "value": strings.ToLower(tag[1])}, true
-			}
-		case "e":
-			if isHex64(tag[1]) {
-				return map[string]any{"label": "thread", "value": strings.ToLower(tag[1])}, true
-			}
-		case "t":
-			return map[string]any{"label": "hashtag", "value": tag[1]}, true
-		case "word":
-			return map[string]any{"label": "word", "value": tag[1]}, true
-		}
-		return nil, false
-	})
-}
-
-func loadBookmarks(ctx context.Context, pubkey nostr.PubKey) map[string]any {
-	// EventRef.Value() is the tag reference: an id, or a "kind:pubkey:d"
-	return fromSDKList(sys.FetchBookmarkList(ctx, pubkey), func(ref sdk.EventRef) any {
-		return ref.Value()
-	})
-}
-
-func loadPins(ctx context.Context, pubkey nostr.PubKey) map[string]any {
-	return fromSDKList(sys.FetchPinList(ctx, pubkey), func(ref sdk.EventRef) any {
-		return ref.Value()
-	})
-}
-
-func loadBlossomServers(ctx context.Context, pubkey nostr.PubKey) map[string]any {
-	// not sys.FetchBlossomServerList: that one reads kind 10101
-	return loadList(ctx, 10063, pubkey, func(tag nostr.Tag) (any, bool) {
-		if len(tag) >= 2 && tag[0] == "server" && tag[1] != "" {
-			url, err := nostr.NormalizeHTTPURL(tag[1])
-			if err != nil {
-				return nil, false
-			}
-			return url, true
-		}
-		return nil, false
-	})
-}
-
-func loadEmojis(ctx context.Context, pubkey nostr.PubKey) map[string]any {
-	// the sdk drops the "a" tags pointing at kind:30030 sets, which
-	// fetchEmojisWithSets needs
-	return loadList(ctx, 10030, pubkey, func(tag nostr.Tag) (any, bool) {
-		if len(tag) < 2 {
-			return nil, false
-		}
-		if tag[0] == "a" {
-			return addressPointer(tag[1], hint(tag, 2), 30030)
-		}
-		return emojiItem(tag)
-	})
-}
-
-func loadFavoriteRelays(ctx context.Context, pubkey nostr.PubKey) map[string]any {
-	// same here: the "a" tags point at kind:30002 relay sets
-	return loadList(ctx, 10012, pubkey, func(tag nostr.Tag) (any, bool) {
-		if len(tag) < 2 {
-			return nil, false
-		}
-		switch tag[0] {
-		case "relay":
-			return nostr.NormalizeURL(tag[1]), true
-		case "a":
-			return addressPointer(tag[1], hint(tag, 2), 30002)
-		}
-		return nil, false
-	})
-}
-
-func loadBlockedRelays(ctx context.Context, pubkey nostr.PubKey) map[string]any {
-	return fromSDKList(sys.FetchBlockedRelayList(ctx, pubkey), relayURLValue)
-}
-
-func loadSearchRelays(ctx context.Context, pubkey nostr.PubKey) map[string]any {
-	return fromSDKList(sys.FetchSearchRelayList(ctx, pubkey), relayURLValue)
-}
-
-func loadDmRelays(ctx context.Context, pubkey nostr.PubKey) map[string]any {
-	return fromSDKList(sys.FetchDMRelayList(ctx, pubkey), relayURLValue)
-}
-
-func loadWikiAuthors(ctx context.Context, pubkey nostr.PubKey) map[string]any {
-	return fromSDKList(sys.FetchGoodWikiAuthorList(ctx, pubkey), profileRefItem)
-}
-
-func loadWikiRelays(ctx context.Context, pubkey nostr.PubKey) map[string]any {
-	return fromSDKList(sys.FetchGoodWikiRelayList(ctx, pubkey), relayURLValue)
-}
-
-func loadFavoriteFollowSets(ctx context.Context, pubkey nostr.PubKey) map[string]any {
-	return loadList(ctx, 10021, pubkey, func(tag nostr.Tag) (any, bool) {
-		if len(tag) >= 2 && tag[0] == "a" {
-			return addressPointer(tag[1], hint(tag, 2), 30000)
-		}
-		return nil, false
-	})
-}
-
-func loadFavoriteScrolls(ctx context.Context, pubkey nostr.PubKey) map[string]any {
-	return loadList(ctx, 10027, pubkey, func(tag nostr.Tag) (any, bool) {
-		if len(tag) < 2 || tag[0] != "e" || !isHex64(tag[1]) {
-			return nil, false
-		}
-		item := map[string]any{"id": strings.ToLower(tag[1]), "kind": 1227}
-		if h := hint(tag, 2); h != "" {
-			item["relays"] = []string{nostr.NormalizeURL(h)}
-		}
-		if a := hint(tag, 3); isHex64(a) {
-			item["author"] = strings.ToLower(a)
-		}
-		return item, true
-	})
-}
-
-func loadProfileBadges(ctx context.Context, pubkey nostr.PubKey) map[string]any {
-	return fromSDKList(sys.FetchProfileBadgesList(ctx, pubkey), eventRefItem)
-}
-
-func loadSimpleGroups(ctx context.Context, pubkey nostr.PubKey) map[string]any {
-	return loadList(ctx, 10009, pubkey, func(tag nostr.Tag) (any, bool) {
-		if len(tag) >= 3 && tag[0] == "group" {
-			item := map[string]any{"groupId": tag[1], "relay": nostr.NormalizeURL(tag[2])}
-			if name := hint(tag, 3); name != "" {
-				item["name"] = name
-			}
-			return item, true
-		}
-		return nil, false
-	})
-}
-
-func loadGitAuthors(ctx context.Context, pubkey nostr.PubKey) map[string]any {
-	return fromSDKList(sys.FetchGitAuthorList(ctx, pubkey), profileRefItem)
-}
-
-func loadGitRepositories(ctx context.Context, pubkey nostr.PubKey) map[string]any {
-	return fromSDKList(sys.FetchGitRepositoryList(ctx, pubkey), func(ref sdk.EventRef) any {
-		return ref.Value()
-	})
-}
-
-func loadMediaFollows(ctx context.Context, pubkey nostr.PubKey) map[string]any {
-	return fromSDKList(sys.FetchMediaFollowList(ctx, pubkey), profileRefItem)
-}
-
-func loadFavoritePodcasts(ctx context.Context, pubkey nostr.PubKey) map[string]any {
-	return fromSDKList(sys.FetchFavoritePodcastsList(ctx, pubkey), podcastRefItem)
-}
-
-func loadAuthoredPodcasts(ctx context.Context, pubkey nostr.PubKey) map[string]any {
-	return fromSDKList(sys.FetchAuthoredPodcastsList(ctx, pubkey), podcastRefItem)
-}
-
-// ─── addressable sets ────────────────────────────────────────────
-
-// loadSets returns the gadgets SetResult shape: { [dTag]: ResolvedSet }.
-func loadSets(ctx context.Context, kind nostr.Kind, pubkey nostr.PubKey, parse func(nostr.Tag) (any, bool)) map[string]any {
-	events, _ := sdkSetEvents(ctx, kind, pubkey)
-	out := make(map[string]any, len(events))
-	for i := range events {
-		evt := events[i]
-		d := evt.Tags.GetD()
-		if prev, ok := out[d]; ok {
-			if pm, ok := prev.(map[string]any); ok {
-				if pe, ok := pm["event"].(*nostr.Event); ok && pe.CreatedAt >= evt.CreatedAt {
-					continue
-				}
-			}
-		}
-		out[d] = resolvedSet(evt, kind, d, itemsFromTags(evt, parse))
 	}
 	return out
 }
 
+// resolvedSet is gadgets' ResolvedSet: an addressable set with its contents.
 func resolvedSet(evt nostr.Event, kind nostr.Kind, d string, items []any) map[string]any {
 	if items == nil {
 		items = []any{}
@@ -631,85 +170,285 @@ func resolvedSet(evt nostr.Event, kind nostr.Kind, d string, items []any) map[st
 	return set
 }
 
+// ─── item shapes (mirroring @nostr/gadgets/lists) ────────────────
+
+func profileRefItem(ref sdk.ProfileRef) any { return ref.Pubkey.Hex() }
+
+func relayURLValue(url sdk.RelayURL) any { return string(url) }
+
+func blossomURLValue(url sdk.BlossomURL) any { return string(url) }
+
+// relayItem is gadgets' RelayItem: the sdk's inbox/outbox as read/write.
+func relayItem(r sdk.Relay) any {
+	return map[string]any{"url": r.URL, "read": r.Inbox, "write": r.Outbox}
+}
+
+func emojiItem(e sdk.Emoji) any {
+	return map[string]any{"shortcode": e.Shortcode, "url": e.ImageURL}
+}
+
+func groupRefItem(g sdk.GroupRef) any {
+	item := map[string]any{"groupId": g.GroupId, "relay": g.Relay}
+	if g.Name != "" {
+		item["name"] = g.Name
+	}
+	return item
+}
+
+func podcastRefItem(ref sdk.PodcastRef) any {
+	if ref.PubKey != nostr.ZeroPK {
+		return ref.PubKey.Hex()
+	}
+	if ref.URL == "" {
+		return nil
+	}
+	return ref.URL
+}
+
+// eventRefValue is gadgets' plain tag reference: an id, or a "kind:pubkey:d".
+func eventRefValue(ref sdk.EventRef) any { return ref.Value() }
+
+// eventRefItem is gadgets' `string | AddressPointer`: an event id as hex, an
+// addressable event as a pointer object.
+func eventRefItem(ref sdk.EventRef) any {
+	switch p := ref.Pointer.(type) {
+	case nostr.EventPointer:
+		return p.ID.Hex()
+	case nostr.EntityPointer:
+		return addressPointerItem(p)
+	}
+	return nil
+}
+
+// eventPointerItem is the EventPointer shape from env.d.ts.
+func eventPointerItem(ref sdk.EventRef) any {
+	p, ok := ref.Pointer.(nostr.EventPointer)
+	if !ok {
+		return nil
+	}
+	item := map[string]any{"id": p.ID.Hex()}
+	if p.Kind != 0 {
+		item["kind"] = int(p.Kind)
+	}
+	if len(p.Relays) > 0 {
+		item["relays"] = p.Relays
+	}
+	if p.Author != nostr.ZeroPK {
+		item["author"] = p.Author.Hex()
+	}
+	return item
+}
+
+// addressPointerItem is the { identifier, pubkey, kind, relays } item shape.
+func addressPointerItem(p nostr.EntityPointer) any {
+	relays := p.Relays
+	if relays == nil {
+		relays = []string{}
+	}
+	return map[string]any{
+		"identifier": p.Identifier,
+		"pubkey":     p.PublicKey.Hex(),
+		"kind":       int(p.Kind),
+		"relays":     relays,
+	}
+}
+
+// entityPointerItem is eventRefItem restricted to addressable refs, for the
+// lists that only ever point at sets (kind 10021).
+func entityPointerItem(ref sdk.EventRef) any {
+	p, ok := ref.Pointer.(nostr.EntityPointer)
+	if !ok {
+		return nil
+	}
+	return addressPointerItem(p)
+}
+
+// ─── the load* surface ───────────────────────────────────────────
+
+func loadRelayList(ctx context.Context, pubkey nostr.PubKey) map[string]any {
+	return fromSDKList(sys.FetchRelayList(ctx, pubkey), relayItem)
+}
+
+func loadFollowsList(ctx context.Context, pubkey nostr.PubKey) map[string]any {
+	return fromSDKList(sys.FetchFollowList(ctx, pubkey), profileRefItem)
+}
+
+func loadMuteList(ctx context.Context, pubkey nostr.PubKey) map[string]any {
+	// only the muted pubkeys, like the sdk: threads, hashtags and words are
+	// ignored
+	return fromSDKList(sys.FetchMuteList(ctx, pubkey), profileRefItem)
+}
+
+func loadBookmarks(ctx context.Context, pubkey nostr.PubKey) map[string]any {
+	return fromSDKList(sys.FetchBookmarkList(ctx, pubkey), eventRefValue)
+}
+
+func loadPins(ctx context.Context, pubkey nostr.PubKey) map[string]any {
+	return fromSDKList(sys.FetchPinList(ctx, pubkey), eventRefValue)
+}
+
+func loadBlossomServers(ctx context.Context, pubkey nostr.PubKey) map[string]any {
+	return fromSDKList(sys.FetchBlossomServerList(ctx, pubkey), blossomURLValue)
+}
+
+func loadEmojis(ctx context.Context, pubkey nostr.PubKey) map[string]any {
+	return fromSDKList(sys.FetchEmojiList(ctx, pubkey), emojiItem)
+}
+
+func loadFavoriteRelays(ctx context.Context, pubkey nostr.PubKey) map[string]any {
+	// kind:10012, plain "relay" items only -- the "a" tags pointing at relay
+	// sets are what fetchFavoriteRelaysWithSets is for
+	return fromSDKList(sys.FetchRelayFeedsList(ctx, pubkey), relayURLValue)
+}
+
+func loadBlockedRelays(ctx context.Context, pubkey nostr.PubKey) map[string]any {
+	return fromSDKList(sys.FetchBlockedRelayList(ctx, pubkey), relayURLValue)
+}
+
+func loadSearchRelays(ctx context.Context, pubkey nostr.PubKey) map[string]any {
+	return fromSDKList(sys.FetchSearchRelayList(ctx, pubkey), relayURLValue)
+}
+
+func loadDmRelays(ctx context.Context, pubkey nostr.PubKey) map[string]any {
+	return fromSDKList(sys.FetchDMRelayList(ctx, pubkey), relayURLValue)
+}
+
+func loadWikiAuthors(ctx context.Context, pubkey nostr.PubKey) map[string]any {
+	return fromSDKList(sys.FetchGoodWikiAuthorList(ctx, pubkey), profileRefItem)
+}
+
+func loadWikiRelays(ctx context.Context, pubkey nostr.PubKey) map[string]any {
+	return fromSDKList(sys.FetchGoodWikiRelayList(ctx, pubkey), relayURLValue)
+}
+
+func loadFavoriteFollowSets(ctx context.Context, pubkey nostr.PubKey) map[string]any {
+	return fromSDKList(sys.FetchFavoriteFollowSetsList(ctx, pubkey), entityPointerItem)
+}
+
+func loadFavoriteScrolls(ctx context.Context, pubkey nostr.PubKey) map[string]any {
+	return fromSDKList(sys.FetchFavoriteScrollsList(ctx, pubkey), eventPointerItem)
+}
+
+func loadProfileBadges(ctx context.Context, pubkey nostr.PubKey) map[string]any {
+	return fromSDKList(sys.FetchProfileBadgesList(ctx, pubkey), eventRefItem)
+}
+
+func loadSimpleGroups(ctx context.Context, pubkey nostr.PubKey) map[string]any {
+	return fromSDKList(sys.FetchSimpleGroupsList(ctx, pubkey), groupRefItem)
+}
+
+func loadGitAuthors(ctx context.Context, pubkey nostr.PubKey) map[string]any {
+	return fromSDKList(sys.FetchGitAuthorList(ctx, pubkey), profileRefItem)
+}
+
+func loadGitRepositories(ctx context.Context, pubkey nostr.PubKey) map[string]any {
+	return fromSDKList(sys.FetchGitRepositoryList(ctx, pubkey), eventRefValue)
+}
+
+func loadMediaFollows(ctx context.Context, pubkey nostr.PubKey) map[string]any {
+	return fromSDKList(sys.FetchMediaFollowList(ctx, pubkey), profileRefItem)
+}
+
+func loadFavoritePodcasts(ctx context.Context, pubkey nostr.PubKey) map[string]any {
+	return fromSDKList(sys.FetchFavoritePodcastsList(ctx, pubkey), podcastRefItem)
+}
+
+func loadAuthoredPodcasts(ctx context.Context, pubkey nostr.PubKey) map[string]any {
+	return fromSDKList(sys.FetchAuthoredPodcastsList(ctx, pubkey), podcastRefItem)
+}
+
+// ─── addressable sets ────────────────────────────────────────────
+
+// setsResult is the gadgets SetResult shape: { [dTag]: ResolvedSet }.
+func setsResult[V comparable, I sdk.TagItemWithValue[V]](
+	kind nostr.Kind,
+	sets sdk.GenericSets[V, I],
+	conv func(I) any,
+) map[string]any {
+	out := make(map[string]any, len(sets.Events))
+	for i := range sets.Events {
+		evt := sets.Events[i]
+		d := evt.Tags.GetD()
+		if prev, ok := out[d].(map[string]any); ok {
+			if pe, ok := prev["event"].(*nostr.Event); ok && pe.CreatedAt >= evt.CreatedAt {
+				continue
+			}
+		}
+		out[d] = resolvedSet(evt, kind, d, convItems(sets.Sets[d], conv))
+	}
+	return out
+}
+
 func loadFollowSets(ctx context.Context, pubkey nostr.PubKey) map[string]any {
-	return loadSets(ctx, 30000, pubkey, pubkeyItem("p"))
+	return setsResult(30000, sys.FetchFollowSets(ctx, pubkey), profileRefItem)
 }
 
 func loadRelaySets(ctx context.Context, pubkey nostr.PubKey) map[string]any {
-	return loadSets(ctx, 30002, pubkey, relayURLItem)
+	return setsResult(30002, sys.FetchRelaySets(ctx, pubkey), relayURLValue)
 }
 
 func loadEmojiSets(ctx context.Context, pubkey nostr.PubKey) map[string]any {
-	return loadSets(ctx, 30030, pubkey, emojiItem)
+	return setsResult(30030, sys.FetchEmojiSets(ctx, pubkey), emojiItem)
 }
 
 // ─── composite helpers ───────────────────────────────────────────
 
-// resolveSetPointer fetches the addressable event an "a" item points at and
-// shapes it as a ResolvedSet, so a napp gets the set's contents inline.
-func resolveSetPointer(ctx context.Context, item any, parse func(nostr.Tag) (any, bool)) (any, bool) {
-	m, ok := item.(map[string]any)
-	if !ok {
-		return nil, false
+// itemsOrSets flattens one of the sdk's with-sets lists: plain items stay
+// items, set references become ResolvedSets with their contents inline.
+func itemsOrSets[I sdk.TagItemWithValue[string]](
+	list sdk.GenericList[string, sdk.ListItemOrSet[I]],
+	conv func(I) any,
+) []any {
+	out := make([]any, 0, len(list.Items))
+	for _, los := range list.Items {
+		if los.Pointer == nil {
+			if v := conv(los.Item); v != nil {
+				out = append(out, v)
+			}
+			continue
+		}
+		p, ok := los.Pointer.(nostr.EntityPointer)
+		if !ok || los.Set.Event == nil {
+			continue
+		}
+		out = append(out, resolvedSet(*los.Set.Event, p.Kind, p.Identifier, convItems(los.Set.Items, conv)))
 	}
-	pubkeyHex, _ := m["pubkey"].(string)
-	identifier, _ := m["identifier"].(string)
-	kindNum, _ := m["kind"].(int)
-	pk, err := nostr.PubKeyFromHex(pubkeyHex)
-	if err != nil {
-		return nil, false
-	}
-	kind := nostr.Kind(kindNum)
-	evt := setEvent(ctx, kind, pk, identifier)
-	if evt == nil {
-		return nil, false
-	}
-	return resolvedSet(*evt, kind, identifier, itemsFromTags(*evt, parse)), true
+	return out
 }
 
 // fetchFavoriteRelaysWithSets flattens kind:10012 into urls and resolved
 // kind:30002 sets.
 func fetchFavoriteRelaysWithSets(ctx context.Context, pubkey nostr.PubKey) []any {
-	res := loadFavoriteRelays(ctx, pubkey)
-	items, _ := res["items"].([]any)
-	out := make([]any, 0, len(items))
-	for _, item := range items {
-		if _, isStr := item.(string); isStr {
-			out = append(out, item)
+	return itemsOrSets(sys.FetchFavoriteRelaysWithSets(ctx, pubkey), relayURLValue)
+}
+
+// fetchEmojisWithSets flattens kind:10030 into emojis and resolved kind:30030
+// sets.
+func fetchEmojisWithSets(ctx context.Context, pubkey nostr.PubKey) []any {
+	return itemsOrSets(sys.FetchEmojisWithSets(ctx, pubkey), emojiItem)
+}
+
+// fetchFavoriteFollowSetsWithSets resolves every kind:10021 pointer into the
+// follow set it references. The sdk has no with-sets loader for this kind, but
+// each pointer names an author + d, so its kind:30000 loader answers it (and
+// caches all of that author's sets while it's there).
+func fetchFavoriteFollowSetsWithSets(ctx context.Context, pubkey nostr.PubKey) []any {
+	list := sys.FetchFavoriteFollowSetsList(ctx, pubkey)
+	out := make([]any, 0, len(list.Items))
+	for _, ref := range list.Items {
+		p, ok := ref.Pointer.(nostr.EntityPointer)
+		if !ok {
 			continue
 		}
-		if set, ok := resolveSetPointer(ctx, item, relayURLItem); ok {
-			out = append(out, set)
-		}
-	}
-	return out
-}
-
-func fetchEmojisWithSets(ctx context.Context, pubkey nostr.PubKey) []any {
-	res := loadEmojis(ctx, pubkey)
-	items, _ := res["items"].([]any)
-	out := make([]any, 0, len(items))
-	for _, item := range items {
-		if m, ok := item.(map[string]any); ok {
-			if _, isEmoji := m["shortcode"]; isEmoji {
-				out = append(out, item)
+		sets := sys.FetchFollowSets(ctx, p.PublicKey)
+		for i := range sets.Events {
+			evt := sets.Events[i]
+			if evt.Tags.GetD() != p.Identifier {
 				continue
 			}
-		}
-		if set, ok := resolveSetPointer(ctx, item, emojiItem); ok {
-			out = append(out, set)
-		}
-	}
-	return out
-}
-
-func fetchFavoriteFollowSetsWithSets(ctx context.Context, pubkey nostr.PubKey) []any {
-	res := loadFavoriteFollowSets(ctx, pubkey)
-	items, _ := res["items"].([]any)
-	out := make([]any, 0, len(items))
-	for _, item := range items {
-		if set, ok := resolveSetPointer(ctx, item, pubkeyItem("p")); ok {
-			out = append(out, set)
+			out = append(out, resolvedSet(evt, 30000, p.Identifier,
+				convItems(sets.Sets[p.Identifier], profileRefItem)))
+			break
 		}
 	}
 	return out
@@ -951,19 +690,6 @@ func loadRelayInfo(ctx context.Context, url string) map[string]any {
 }
 
 // ─── small helpers ───────────────────────────────────────────────
-
-func isHex64(s string) bool {
-	if len(s) != 64 {
-		return false
-	}
-	for i := 0; i < 64; i++ {
-		c := s[i]
-		if (c < '0' || c > '9') && (c < 'a' || c > 'f') && (c < 'A' || c > 'F') {
-			return false
-		}
-	}
-	return true
-}
 
 type errNotFound string
 
