@@ -78,9 +78,15 @@ func nappFromEvent(evt nostr.Event) Napp {
 	if n.Name == "" {
 		n.Name = d
 	}
+	n.Singleton = evt.Tags.Has("singleton")
 	for t := range evt.Tags.FindAll("action") {
 		if len(t) > 1 {
 			n.Actions = append(n.Actions, t[1])
+		}
+	}
+	for t := range evt.Tags.FindAll("requires") {
+		if len(t) > 1 {
+			n.Requires = append(n.Requires, t[1])
 		}
 	}
 	for t := range evt.Tags.FindAll("path") {

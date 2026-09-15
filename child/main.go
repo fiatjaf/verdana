@@ -10,6 +10,7 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -30,6 +31,7 @@ type wireMsg struct {
 	Result json.RawMessage `json:"result,omitempty"`
 	Error  string          `json:"error,omitempty"`
 	Code   string          `json:"code,omitempty"`
+	Idx    *int            `json:"idx,omitempty"`
 }
 
 type nappMeta struct {
@@ -37,16 +39,18 @@ type nappMeta struct {
 	Name        string
 	Description string
 	Dir         string
+	Instance    string
+	Requires    []string
 }
 
 var (
-	meta           nappMeta
-	outMu          sync.Mutex
-	outEnc         *json.Encoder
-	pendingMu      sync.Mutex
-	pending        = make(map[int]chan wireMsg)
-	reqSerial      atomic.Int64
-	log            zerolog.Logger
+	meta      nappMeta
+	outMu     sync.Mutex
+	outEnc    *json.Encoder
+	pendingMu sync.Mutex
+	pending   = make(map[int]chan wireMsg)
+	reqSerial atomic.Int64
+	log       zerolog.Logger
 )
 
 func main() {
@@ -60,12 +64,19 @@ func main() {
 		Dir:         os.Getenv("VERDANA_NAPP_DIR"),
 		Name:        os.Getenv("VERDANA_NAPP_NAME"),
 		Description: os.Getenv("VERDANA_NAPP_DESC"),
+		Instance:    os.Getenv("VERDANA_INSTANCE_ID"),
+	}
+	if req := strings.TrimSpace(os.Getenv("VERDANA_NAPP_REQUIRES")); req != "" {
+		meta.Requires = strings.Split(req, ",")
 	}
 	if meta.Name == "" {
 		meta.Name = meta.ID
 	}
+	if meta.Instance == "" {
+		meta.Instance = meta.ID
+	}
 
-	log.Info().Str("napp", meta.ID).Str("name", meta.Name).Msg("child process started")
+	log.Info().Str("napp", meta.ID).Str("instance", meta.Instance).Msg("napp process started")
 	outEnc = json.NewEncoder(os.Stdout)
 
 	runtime.LockOSThread()
@@ -74,6 +85,11 @@ func main() {
 	w.SetTitle(meta.Name)
 	w.SetSize(600, 450, webview.HintNone)
 	_ = w.Bind("__bridge_rpc", rpcBound)
+
+	// window.name is where bridge.js picks up window.napp.instance, and it
+	// survives same-origin navigations — so a reload keeps the instance id.
+	w.Init("window.name = " + jsString(meta.Instance) + ";" +
+		"window.__nappDomains = " + jsStringSlice(meta.Requires) + ";")
 	w.Init(bridgeJS)
 
 	url := startNappServer(meta.Dir)
@@ -84,6 +100,22 @@ func main() {
 	w.Run()
 	w.Destroy()
 	os.Exit(0)
+}
+
+func jsString(s string) string {
+	b, err := json.Marshal(s)
+	if err != nil {
+		return `""`
+	}
+	return string(b)
+}
+
+func jsStringSlice(items []string) string {
+	b, err := json.Marshal(items)
+	if err != nil {
+		return "[]"
+	}
+	return string(b)
 }
 
 func startNappServer(root string) string {
@@ -117,7 +149,11 @@ func startNappServer(root string) string {
 func rpcBound(method string, params string) string {
 	result, err := rpc(method, params)
 	if err != nil {
-		return `{"__bridge_error": "` + err.Error() + `"}`
+		wrapped, _ := json.Marshal(map[string]string{"__bridge_error": err.Error()})
+		return string(wrapped)
+	}
+	if len(result) == 0 {
+		return "null"
 	}
 	return string(result)
 }
@@ -160,6 +196,22 @@ func reader(w webview.WebView) {
 		case "eval":
 			code := m.Code
 			w.Dispatch(func() { w.Eval(code) })
+		case "action":
+			// the launcher routed an action here: hand it to the napp's
+			// registered handler (idx) and/or its popstate listener
+			idx := "null"
+			if m.Idx != nil {
+				idx = strconv.Itoa(*m.Idx)
+			}
+			payload := m.Params
+			if payload == "" {
+				payload = "null"
+			}
+			code := "window.__bridge_dispatch_action(" +
+				strconv.Itoa(m.ID) + "," + jsString(m.Method) + "," + jsString(payload) + "," + idx + ")"
+			w.Dispatch(func() { w.Eval(code) })
+		case "close":
+			w.Dispatch(func() { w.Terminate() })
 		}
 	}
 	w.Terminate()

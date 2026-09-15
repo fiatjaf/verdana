@@ -3,8 +3,6 @@ package main
 import (
 	"image"
 	"image/color"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"gioui.org/f32"
@@ -52,19 +50,108 @@ func parseRelays(text string) []string {
 	return out
 }
 
-func launchNapp(napp Napp) {
-	id := napp.ID
-	if id == "" {
-		id = "unknown"
+// layoutPrompt draws the dialog a blocked rpc is waiting on: either an
+// approve/deny question or a list of napps that can handle an action.
+func layoutPrompt(
+	gtx layout.Context,
+	th *material.Theme,
+	p *prompt,
+	approveBtn, denyBtn *widget.Clickable,
+	optBtns []widget.Clickable,
+) layout.Dimensions {
+	children := []layout.FlexChild{
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			t := material.H6(th, p.title)
+			t.Font.Weight = font.Bold
+			return t.Layout(gtx)
+		}),
 	}
-	log.Info().Str("napp", id).Str("name", napp.Name).Msg("launch napp from UI")
-	appDir := filepath.Join(verdanaDir, "napps", id)
-	os.MkdirAll(appDir, 0755)
-	select {
-	case openReqCh <- openReq{napp: napp, dir: appDir}:
-	default:
-		log.Warn().Str("napp", id).Msg("open request channel full, dropping")
+
+	if p.detail != "" {
+		children = append(children,
+			layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				l := material.Body2(th, p.detail)
+				l.Color = color.NRGBA{R: 0x66, G: 0x66, B: 0x66, A: 0xff}
+				return l.Layout(gtx)
+			}),
+		)
 	}
+
+	if p.code != "" {
+		children = append(children,
+			layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				macro := op.Record(gtx.Ops)
+				dims := layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					l := material.Body2(th, p.code)
+					l.Color = color.NRGBA{R: 0x33, G: 0x33, B: 0x33, A: 0xff}
+					return l.Layout(gtx)
+				})
+				call := macro.Stop()
+				bg := clip.RRect{
+					Rect: image.Rectangle{Max: image.Point{X: gtx.Constraints.Max.X, Y: dims.Size.Y}},
+					NW:   6, NE: 6, SW: 6, SE: 6,
+				}
+				defer bg.Push(gtx.Ops).Pop()
+				paint.Fill(gtx.Ops, color.NRGBA{R: 0xf0, G: 0xf0, B: 0xf0, A: 0xff})
+				call.Add(gtx.Ops)
+				return dims
+			}),
+		)
+	}
+
+	children = append(children, layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout))
+
+	if len(p.options) > 0 {
+		for i := range p.options {
+			i := i
+			children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				if i >= len(optBtns) {
+					return layout.Dimensions{}
+				}
+				return layout.Inset{Bottom: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					pointer.CursorPointer.Add(gtx.Ops)
+					label := p.options[i].label
+					if p.options[i].detail != "" {
+						label += " — " + preview(p.options[i].detail, 40)
+					}
+					b := material.Button(th, &optBtns[i], label)
+					b.TextSize = unit.Sp(14)
+					return b.Layout(gtx)
+				})
+			}))
+		}
+		children = append(children,
+			layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				pointer.CursorPointer.Add(gtx.Ops)
+				b := material.Button(th, denyBtn, "Cancel")
+				b.Background = color.NRGBA{R: 0xe8, G: 0xe8, B: 0xe8, A: 0xff}
+				b.Color = color.NRGBA{R: 0x33, G: 0x33, B: 0x33, A: 0xff}
+				return b.Layout(gtx)
+			}),
+		)
+	} else {
+		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					pointer.CursorPointer.Add(gtx.Ops)
+					return material.Button(th, approveBtn, "Allow").Layout(gtx)
+				}),
+				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					pointer.CursorPointer.Add(gtx.Ops)
+					b := material.Button(th, denyBtn, "Deny")
+					b.Background = color.NRGBA{R: 0xe8, G: 0xe8, B: 0xe8, A: 0xff}
+					b.Color = color.NRGBA{R: 0x33, G: 0x33, B: 0x33, A: 0xff}
+					return b.Layout(gtx)
+				}),
+			)
+		}))
+	}
+
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
 }
 
 func layoutLogin(gtx layout.Context, th *material.Theme, ed *widget.Editor, btn *widget.Clickable, loginErr string) layout.Dimensions {

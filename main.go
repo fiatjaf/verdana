@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"fiatjaf.com/nostr/sdk"
 	"gioui.org/app"
 	"gioui.org/font/gofont"
+	"gioui.org/io/clipboard"
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/text"
@@ -51,6 +53,7 @@ func main() {
 
 	loadState()
 	refreshInstalled()
+	go buildUserIndex()
 
 	go gioMain()
 	go webviewServer()
@@ -90,6 +93,9 @@ func gioMain() {
 		discoveryList widget.List
 		runBtns       []widget.Clickable
 		actionBtns    []widget.Clickable
+		approveBtn    widget.Clickable
+		denyBtn       widget.Clickable
+		optBtns       []widget.Clickable
 	)
 	loginEd.SingleLine = true
 	relaysEd.SingleLine = false
@@ -110,6 +116,9 @@ func gioMain() {
 			gtx := app.NewContext(&ops, e)
 
 			ui.mu.Lock()
+			activePrompt := ui.prompt
+			pendingCopies := ui.clipboard
+			ui.clipboard = nil
 			phase := ui.phase
 			tab := ui.tab
 			loginErr := ui.loginErr
@@ -130,7 +139,35 @@ func gioMain() {
 				installedSet[n.ID] = true
 			}
 
+			// copyText can only reach the clipboard from inside a frame
+			for _, text := range pendingCopies {
+				gtx.Execute(clipboard.WriteCmd{
+					Type: "application/text",
+					Data: io.NopCloser(strings.NewReader(text)),
+				})
+			}
+
 			layout.UniformInset(unit.Dp(16)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				// a prompt takes over the window until it is answered: the napp
+				// that asked is blocked on it
+				if activePrompt != nil {
+					for len(optBtns) < len(activePrompt.options) {
+						optBtns = append(optBtns, widget.Clickable{})
+					}
+					if approveBtn.Clicked(gtx) {
+						answerPrompt(activePrompt, true, 0)
+					}
+					if denyBtn.Clicked(gtx) {
+						answerPrompt(activePrompt, false, 0)
+					}
+					for i := range activePrompt.options {
+						if optBtns[i].Clicked(gtx) {
+							answerPrompt(activePrompt, true, i)
+						}
+					}
+					return layoutPrompt(gtx, th, activePrompt, &approveBtn, &denyBtn, optBtns)
+				}
+
 				switch phase {
 				case "login":
 					if loginBtn.Clicked(gtx) {

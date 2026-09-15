@@ -6,16 +6,32 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 func webviewServer() {
 	for req := range openReqCh {
-		go launchChild(req)
+		go func(req openReq) {
+			ci, err := startChild(req)
+			if req.reply != nil {
+				req.reply <- launchResult{ci: ci, err: err}
+			}
+			if err != nil {
+				log.Error().Err(err).Str("napp", req.napp.ID).Msg("could not start napp")
+				return
+			}
+			// blocks until the child's stdout closes (i.e. the window is gone)
+			readChild(ci)
+		}(req)
 	}
 }
 
-func launchChild(req openReq) {
-	log.Info().Str("napp", req.napp.ID).Str("name", req.napp.Name).Msg("launching child")
+// startChild spawns the webview process for a napp and registers it as an
+// open instance. It returns as soon as the process is up: the napp's own
+// readiness is observed later, when it registers its actions.
+func startChild(req openReq) (*childInfo, error) {
+	instance := nextInstanceID(req.napp)
+
 	childExe := childExePath()
 	cmd := exec.Command(childExe)
 	cmd.Env = append(os.Environ(),
@@ -23,38 +39,48 @@ func launchChild(req openReq) {
 		"VERDANA_NAPP_DIR="+req.dir,
 		"VERDANA_NAPP_NAME="+req.napp.Name,
 		"VERDANA_NAPP_DESC="+req.napp.Description,
+		"VERDANA_INSTANCE_ID="+instance,
+		"VERDANA_NAPP_REQUIRES="+strings.Join(req.napp.Requires, ","),
 	)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		log.Error().Err(err).Str("napp", req.napp.ID).Msg("child stdin pipe failed")
-		return
+		return nil, err
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		log.Error().Err(err).Str("napp", req.napp.ID).Msg("child stdout pipe failed")
-		return
+		return nil, err
 	}
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
-		log.Error().Err(err).Str("napp", req.napp.ID).Msg("child start failed")
-		return
+		return nil, err
 	}
-	log.Info().Str("napp", req.napp.ID).Int("pid", cmd.Process.Pid).Msg("child started")
 
 	ci := &childInfo{
-		cmd:  cmd,
-		enc:  json.NewEncoder(stdin),
-		subs: make(map[int]context.CancelFunc),
+		instance:   instance,
+		napp:       req.napp,
+		cmd:        cmd,
+		enc:        json.NewEncoder(stdin),
+		subs:       make(map[int]context.CancelFunc),
+		actions:    make(map[string]int),
+		changed:    make(chan struct{}),
+		dispatches: make(map[int]chan wireMsg),
+		gone:       make(chan struct{}),
+		stdout:     stdout,
 	}
-	mu.Lock()
-	children = append(children, ci)
-	mu.Unlock()
+	registerInstance(ci)
 
-	dec := json.NewDecoder(stdout)
+	log.Info().Str("napp", req.napp.ID).Str("instance", instance).
+		Int("pid", cmd.Process.Pid).Msg("napp window started")
+	return ci, nil
+}
+
+// readChild consumes the child's messages until it exits.
+func readChild(ci *childInfo) {
+	dec := json.NewDecoder(ci.stdout)
 	for {
 		var m wireMsg
 		if err := dec.Decode(&m); err != nil {
-			log.Debug().Str("napp", req.napp.ID).Err(err).Msg("child stdout decode ended")
+			log.Debug().Str("instance", ci.instance).Err(err).Msg("child stdout ended")
 			break
 		}
 		if m.T == "rpc" {
@@ -64,11 +90,11 @@ func launchChild(req openReq) {
 	}
 
 	cleanupChild(ci)
-	cmd.Wait()
+	ci.cmd.Wait()
+	log.Info().Str("instance", ci.instance).Str("napp", ci.napp.ID).Msg("napp window closed")
 }
 
 func handleChildRPC(ci *childInfo, m wireMsg) {
-	log.Info().Str("method", m.Method).Int("rpc_id", m.ID).Msg("child rpc call")
 	result, err := bridgeRPC(ci)(m.Method, m.Params)
 	resp := wireMsg{T: "resp", ID: m.ID}
 	if err != nil {
@@ -80,14 +106,15 @@ func handleChildRPC(ci *childInfo, m wireMsg) {
 	} else {
 		resp.Result = raw
 	}
-	log.Info().Int("id", m.ID).Any("resp", resp).Msg("child rpc result")
 	ci.send(resp)
 }
 
 func (ci *childInfo) send(m wireMsg) {
 	ci.encMu.Lock()
 	defer ci.encMu.Unlock()
-	ci.enc.Encode(m)
+	if err := ci.enc.Encode(m); err != nil {
+		log.Debug().Str("instance", ci.instance).Err(err).Msg("could not write to child")
+	}
 }
 
 func (ci *childInfo) eval(code string) {
@@ -121,6 +148,13 @@ func cleanupChild(ci *childInfo) {
 	}
 	ci.subs = make(map[int]context.CancelFunc)
 	ci.subMu.Unlock()
+
+	// unblock anything still waiting on this window
+	select {
+	case <-ci.gone:
+	default:
+		close(ci.gone)
+	}
 
 	mu.Lock()
 	for i, c := range children {

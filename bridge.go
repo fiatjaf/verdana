@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -12,82 +13,74 @@ import (
 	"fiatjaf.com/nostr/sdk"
 )
 
-// fetchListArgs parses a bare pubkey-hex JSON string (as sent by the JS bridge
-// load* helpers) and returns the pubkey plus a short-lived context for the
-// various napp.load* list/set fetches. ok is false when the system isn't ready
-// or the pubkey is missing/invalid, in which case the caller should return an
-// empty result.
-func fetchListArgs(params string) (pk nostr.PubKey, ctx context.Context, cancel context.CancelFunc, ok bool) {
-	var pubkey string
-	json.Unmarshal([]byte(params), &pubkey)
-	pubkey = strings.TrimSpace(pubkey)
-	if pubkey == "" {
-		log.Debug().Str("params", params).Msg("fetchListArgs: no pubkey in params")
-		return pk, nil, func() {}, false
+// This is the host side of window.nostr / window.nostrdb / window.napp: every
+// method here is something bridge.js can call from inside a napp's webview.
+// The napp-facing shapes are the ones documented in env.d.ts — that file is
+// the contract, this file honors it.
+
+// resolveUserParam turns the argument of a load* call into a pubkey. Napps may
+// pass hex, npub, nprofile or a nip05 address (and loadNostrUser may pass the
+// whole { pubkey, relays } request object).
+func resolveUserParam(ctx context.Context, params string) (nostr.PubKey, []string, bool) {
+	var zero nostr.PubKey
+	trimmed := strings.TrimSpace(params)
+	if trimmed == "" || trimmed == "null" {
+		return zero, nil, false
 	}
-	pk, err := nostr.PubKeyFromHex(pubkey)
-	if err != nil {
-		log.Debug().Err(err).Msg("fetchListArgs: invalid pubkey")
-		return pk, nil, func() {}, false
+
+	input := ""
+	var relays []string
+
+	if err := json.Unmarshal([]byte(params), &input); err != nil {
+		var req struct {
+			Pubkey string   `json:"pubkey"`
+			Relays []string `json:"relays"`
+		}
+		if err := json.Unmarshal([]byte(params), &req); err != nil {
+			return zero, nil, false
+		}
+		input = req.Pubkey
+		relays = req.Relays
 	}
+
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return zero, nil, false
+	}
+	if pk, err := nostr.PubKeyFromHex(input); err == nil {
+		return pk, relays, true
+	}
+	pp := sdk.InputToProfile(ctx, input)
+	if pp == nil {
+		log.Debug().Str("input", preview(input, 40)).Msg("could not resolve a pubkey")
+		return zero, nil, false
+	}
+	return pp.PublicKey, append(relays, pp.Relays...), true
+}
+
+// listCall is the shared preamble of every load* rpc: resolve the pubkey and
+// give the fetch a deadline.
+func listCall(params string, fn func(context.Context, nostr.PubKey) any, empty any) (any, error) {
 	if sys == nil {
-		log.Debug().Msg("fetchListArgs: system not ready")
-		return pk, nil, func() {}, false
+		return empty, nil
 	}
-	ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
-	return pk, ctx, cancel, true
-}
-
-// listResult shapes a sdk GenericList's event + items into the JS-side
-// ListResult shape: { event, items }. The items slice is normalized to a
-// non-nil empty slice so it marshals as [] rather than null.
-func listResult[V comparable, I sdk.TagItemWithValue[V]](l sdk.GenericList[V, I]) any {
-	items := l.Items
-	if items == nil {
-		items = []I{}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	pk, _, ok := resolveUserParam(ctx, params)
+	if !ok {
+		return empty, nil
 	}
-	return map[string]any{
-		"event": l.Event,
-		"items": items,
-	}
-}
-
-// emptyListResult is the zero-value ListResult returned when args are invalid.
-func emptyListResult() any {
-	return map[string]any{"event": nil, "items": []any{}}
-}
-
-// setsResult shapes a sdk GenericSets into the JS-side SetResult shape:
-// { [dTag]: { event, items } }. The event for each set is matched from the
-// GenericSets.Events slice by its "d" tag.
-func setsResult[V comparable, I sdk.TagItemWithValue[V]](s sdk.GenericSets[V, I]) any {
-	events := make(map[string]*nostr.Event, len(s.Events))
-	for i := range s.Events {
-		events[s.Events[i].Tags.GetD()] = &s.Events[i]
-	}
-	out := make(map[string]any, len(s.Sets))
-	for dTag, items := range s.Sets {
-		if items == nil {
-			items = []I{}
-		}
-		out[dTag] = map[string]any{
-			"event": events[dTag],
-			"items": items,
-		}
-	}
-	return out
-}
-
-// emptySetsResult is the zero-value SetResult returned when args are invalid.
-func emptySetsResult() any {
-	return map[string]any{}
+	return fn(ctx, pk), nil
 }
 
 func bridgeRPC(ci *childInfo) func(string, string) (any, error) {
 	return func(method string, params string) (any, error) {
-		log.Debug().Str("method", method).Int("child", ci.cmd.Process.Pid).Msg("bridge rpc call")
+		log.Debug().Str("method", method).Str("instance", ci.instance).Msg("bridge rpc call")
+
 		switch method {
+		// ─── window.nostr ────────────────────────────────────────
 		case "getPublicKey":
+			// answers from the cached account key and never prompts
 			if userKeyer == nil {
 				return "", errors.New("not logged in")
 			}
@@ -101,6 +94,7 @@ func bridgeRPC(ci *childInfo) func(string, string) (any, error) {
 				return "", err
 			}
 			return pk.Hex(), nil
+
 		case "signEvent":
 			if userKeyer == nil {
 				return nil, errors.New("not logged in")
@@ -109,13 +103,19 @@ func bridgeRPC(ci *childInfo) func(string, string) (any, error) {
 			if err := json.Unmarshal([]byte(params), &evt); err != nil {
 				return nil, err
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			if !askApproval(ci, "sign an event with your key",
+				fmt.Sprintf("Kind %d, %d tags.", evt.Kind, len(evt.Tags)),
+				preview(evt.Content, 200)) {
+				return nil, errors.New("denied by the user")
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer cancel()
 			if err := userKeyer.SignEvent(ctx, &evt); err != nil {
 				return nil, err
 			}
 			return evt, nil
-		case "nip04.encrypt", "nip04.decrypt":
+
+		case "nip04.encrypt", "nip04.decrypt", "nip44.encrypt", "nip44.decrypt":
 			if userKeyer == nil {
 				return "", errors.New("not logged in")
 			}
@@ -131,34 +131,30 @@ func bridgeRPC(ci *childInfo) func(string, string) (any, error) {
 			if err != nil {
 				return "", err
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			encrypting := strings.HasSuffix(method, ".encrypt")
+			verb := "decrypt a message with your key"
+			payload := preview(p.Ciphertext, 120)
+			if encrypting {
+				verb = "encrypt a message with your key"
+				payload = preview(p.Plaintext, 120)
+			}
+			if !askApproval(ci, verb, "Counterparty "+shortPubkey(pk)+" ("+strings.SplitN(method, ".", 2)[0]+").", payload) {
+				return "", errors.New("denied by the user")
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer cancel()
-			if strings.HasSuffix(method, ".encrypt") {
+			switch method {
+			case "nip04.encrypt":
 				return userKeyer.Nip04Encrypt(ctx, p.Plaintext, pk)
-			}
-			return userKeyer.Nip04Decrypt(ctx, p.Ciphertext, pk)
-		case "nip44.encrypt", "nip44.decrypt":
-			if userKeyer == nil {
-				return "", errors.New("not logged in")
-			}
-			var p struct {
-				Pubkey     string `json:"pubkey"`
-				Plaintext  string `json:"plaintext"`
-				Ciphertext string `json:"ciphertext"`
-			}
-			if err := json.Unmarshal([]byte(params), &p); err != nil {
-				return "", err
-			}
-			pk, err := nostr.PubKeyFromHex(p.Pubkey)
-			if err != nil {
-				return "", err
-			}
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			defer cancel()
-			if strings.HasSuffix(method, ".encrypt") {
+			case "nip04.decrypt":
+				return userKeyer.Nip04Decrypt(ctx, p.Ciphertext, pk)
+			case "nip44.encrypt":
 				return userKeyer.Encrypt(ctx, p.Plaintext, pk)
+			default:
+				return userKeyer.Decrypt(ctx, p.Ciphertext, pk)
 			}
-			return userKeyer.Decrypt(ctx, p.Ciphertext, pk)
+
+		// ─── window.nostrdb ──────────────────────────────────────
 		case "nostrdb.add":
 			var p struct {
 				Event nostr.Event `json:"event"`
@@ -170,21 +166,26 @@ func bridgeRPC(ci *childInfo) func(string, string) (any, error) {
 				return false, err
 			}
 			return true, nil
+
 		case "nostrdb.query":
-			out := []nostr.Event{}
 			var p struct {
-				Filters []nostr.Filter `json:"filters"`
+				Filters json.RawMessage `json:"filters"`
 			}
 			if err := json.Unmarshal([]byte(params), &p); err != nil {
 				return nil, err
 			}
+			filters, err := parseFilters(p.Filters)
+			if err != nil {
+				return nil, err
+			}
+			out := []nostr.Event{}
 			seen := make(map[nostr.ID]bool)
-			for _, f := range p.Filters {
-				max := f.Limit
-				if max <= 0 {
-					max = 500
+			for _, f := range filters {
+				maxLimit := f.Limit
+				if maxLimit <= 0 {
+					maxLimit = 500
 				}
-				for evt := range sys.Store.QueryEvents(f, max) {
+				for evt := range sys.Store.QueryEvents(f, maxLimit) {
 					if !seen[evt.ID] {
 						seen[evt.ID] = true
 						out = append(out, evt)
@@ -192,22 +193,33 @@ func bridgeRPC(ci *childInfo) func(string, string) (any, error) {
 				}
 			}
 			return out, nil
+
 		case "nostrdb.count":
 			var p struct {
-				Filters []nostr.Filter `json:"filters"`
+				Filters json.RawMessage `json:"filters"`
 			}
 			if err := json.Unmarshal([]byte(params), &p); err != nil {
 				return 0, err
 			}
-			var total int
-			for _, f := range p.Filters {
-				c, err := sys.Store.CountEvents(f)
-				if err != nil {
-					return 0, err
-				}
-				total += int(c)
+			filters, err := parseFilters(p.Filters)
+			if err != nil {
+				return 0, err
 			}
-			return total, nil
+			seen := make(map[nostr.ID]bool)
+			for _, f := range filters {
+				if len(filters) == 1 {
+					c, err := sys.Store.CountEvents(f)
+					if err != nil {
+						return 0, err
+					}
+					return int(c), nil
+				}
+				for evt := range sys.Store.QueryEvents(f, 10000) {
+					seen[evt.ID] = true
+				}
+			}
+			return len(seen), nil
+
 		case "nostrdb.event":
 			var p struct {
 				ID string `json:"id"`
@@ -223,6 +235,26 @@ func bridgeRPC(ci *childInfo) func(string, string) (any, error) {
 				return evt, nil
 			}
 			return nil, nil
+
+		case "nostrdb.remove":
+			var p struct {
+				IDs []string `json:"ids"`
+			}
+			if err := json.Unmarshal([]byte(params), &p); err != nil {
+				return nil, err
+			}
+			removed := []string{}
+			for _, raw := range p.IDs {
+				id, err := nostr.IDFromHex(strings.TrimSpace(raw))
+				if err != nil {
+					continue
+				}
+				if err := sys.Store.DeleteEvent(id); err == nil {
+					removed = append(removed, id.Hex())
+				}
+			}
+			return removed, nil
+
 		case "nostrdb.replaceable":
 			var p struct {
 				Kind       int    `json:"kind"`
@@ -254,182 +286,390 @@ func bridgeRPC(ci *childInfo) func(string, string) (any, error) {
 				return nil, nil
 			}
 			return *newest, nil
+
+		// ─── actions ─────────────────────────────────────────────
 		case "napp.action":
-			return nil, nil
-		case "napp.feeds.profile", "napp.feeds.following", "napp.feeds.inbox":
 			var p struct {
-				Pubkey     string           `json:"pubkey"`
-				Source     string           `json:"source"`
-				Kinds      []nostr.Kind     `json:"kinds"`
-				CallbackId int              `json:"callbackId"`
-				Since      *nostr.Timestamp `json:"since"`
-				Until      *nostr.Timestamp `json:"until"`
-				Limit      int              `json:"limit"`
+				Name    string          `json:"name"`
+				Payload json.RawMessage `json:"payload"`
+				Options actionOptions   `json:"options"`
 			}
-			json.Unmarshal([]byte(params), &p)
+			if err := json.Unmarshal([]byte(params), &p); err != nil {
+				return nil, err
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer cancel()
+			return runNappAction(ctx, ci, p.Name, p.Payload, p.Options)
+
+		case "napp.registerAction":
+			var p struct {
+				Pattern string `json:"pattern"`
+				Idx     *int   `json:"idx"`
+			}
+			if err := json.Unmarshal([]byte(params), &p); err != nil {
+				return nil, err
+			}
+			if p.Pattern == "" {
+				return nil, errors.New("pattern required")
+			}
+			idx := -1
+			if p.Idx != nil {
+				idx = *p.Idx
+			}
+			ci.registerAction(p.Pattern, idx)
+			return nil, nil
+
+		case "napp.dispatchResult":
+			var p struct {
+				ID     int             `json:"id"`
+				Result json.RawMessage `json:"result"`
+				Error  string          `json:"error"`
+			}
+			if err := json.Unmarshal([]byte(params), &p); err != nil {
+				return nil, err
+			}
+			ci.settleDispatch(p.ID, p.Result, p.Error)
+			return nil, nil
+
+		case "napp.actionState":
+			// the napp navigated on its own and told us where it went, so a
+			// later restore/share can put the window back on this action
+			var p struct {
+				Name    string          `json:"name"`
+				Payload json.RawMessage `json:"payload"`
+			}
+			if err := json.Unmarshal([]byte(params), &p); err != nil {
+				return nil, err
+			}
+			if p.Name != "" {
+				ci.lastAction = &actionRequest{name: p.Name, payload: p.Payload}
+			}
+			return nil, nil
+
+		case "napp.close":
+			log.Info().Str("instance", ci.instance).Msg("napp asked to close its window")
+			ci.send(wireMsg{T: "close"})
+			return nil, nil
+
+		case "napp.link":
+			var url string
+			if err := json.Unmarshal([]byte(params), &url); err != nil {
+				var p struct {
+					URL string `json:"url"`
+				}
+				if err := json.Unmarshal([]byte(params), &p); err != nil {
+					return nil, err
+				}
+				url = p.URL
+			}
+			if !askApproval(ci, "open a link in your browser", "", preview(url, 200)) {
+				return nil, errors.New("denied by the user")
+			}
+			return nil, openExternalLink(url)
+
+		// ─── feeds ───────────────────────────────────────────────
+		case "napp.feeds.profile", "napp.feeds.following", "napp.feeds.inbox", "napp.feeds.outbox":
+			var p feedParams
+			if err := json.Unmarshal([]byte(params), &p); err != nil {
+				return nil, err
+			}
 			ctx, cancel := context.WithCancel(context.Background())
 			ci.subMu.Lock()
-			ci.subs[p.CallbackId] = cancel
+			if old, ok := ci.subs[p.CallbackID]; ok {
+				old()
+			}
+			ci.subs[p.CallbackID] = cancel
 			ci.subMu.Unlock()
-			go feedPump(ctx, ci, method, p)
+			go startFeed(ctx, ci, method, p)
 			return nil, nil
+
 		case "napp.feeds.cancel":
 			var p struct {
-				CallbackId int `json:"callbackId"`
+				CallbackID int `json:"callbackId"`
 			}
 			json.Unmarshal([]byte(params), &p)
 			ci.subMu.Lock()
-			if cancel, ok := ci.subs[p.CallbackId]; ok {
+			if cancel, ok := ci.subs[p.CallbackID]; ok {
 				cancel()
-				delete(ci.subs, p.CallbackId)
+				delete(ci.subs, p.CallbackID)
 			}
 			ci.subMu.Unlock()
 			return nil, nil
-		case "napp.loadBlossomServers":
-			pk, ctx, cancel, ok := fetchListArgs(params)
-			if !ok {
-				return emptyListResult(), nil
-			}
-			defer cancel()
-			return listResult(sys.FetchBlossomServerList(ctx, pk)), nil
-		case "napp.loadBookmarks":
-			pk, ctx, cancel, ok := fetchListArgs(params)
-			if !ok {
-				return emptyListResult(), nil
-			}
-			defer cancel()
-			return listResult(sys.FetchBookmarkList(ctx, pk)), nil
-		case "napp.loadEmojis":
-			pk, ctx, cancel, ok := fetchListArgs(params)
-			if !ok {
-				return emptyListResult(), nil
-			}
-			defer cancel()
-			return listResult(sys.FetchEmojiList(ctx, pk)), nil
-		case "napp.loadFavoriteRelays":
-			// no corresponding sys.Fetch method
-			return emptyListResult(), nil
-		case "napp.loadFollowsList":
-			pk, ctx, cancel, ok := fetchListArgs(params)
-			if !ok {
-				return emptyListResult(), nil
-			}
-			defer cancel()
-			return listResult(sys.FetchFollowList(ctx, pk)), nil
-		case "napp.loadMuteList":
-			pk, ctx, cancel, ok := fetchListArgs(params)
-			if !ok {
-				return emptyListResult(), nil
-			}
-			defer cancel()
-			return listResult(sys.FetchMuteList(ctx, pk)), nil
-		case "napp.loadPins":
-			pk, ctx, cancel, ok := fetchListArgs(params)
-			if !ok {
-				return emptyListResult(), nil
-			}
-			defer cancel()
-			return listResult(sys.FetchPinList(ctx, pk)), nil
+
+		// ─── NIP-51 lists ────────────────────────────────────────
 		case "napp.loadRelayList":
-			pk, ctx, cancel, ok := fetchListArgs(params)
-			if !ok {
-				return emptyListResult(), nil
-			}
-			defer cancel()
-			return listResult(sys.FetchRelayList(ctx, pk)), nil
+			return listCall(params, func(ctx context.Context, pk nostr.PubKey) any {
+				return loadRelayList(ctx, pk)
+			}, emptyListResult())
+		case "napp.loadFollowsList":
+			return listCall(params, func(ctx context.Context, pk nostr.PubKey) any {
+				return loadFollowsList(ctx, pk)
+			}, emptyListResult())
+		case "napp.loadMuteList":
+			return listCall(params, func(ctx context.Context, pk nostr.PubKey) any {
+				return loadMuteList(ctx, pk)
+			}, emptyListResult())
+		case "napp.loadBookmarks":
+			return listCall(params, func(ctx context.Context, pk nostr.PubKey) any {
+				return loadBookmarks(ctx, pk)
+			}, emptyListResult())
+		case "napp.loadPins":
+			return listCall(params, func(ctx context.Context, pk nostr.PubKey) any {
+				return loadPins(ctx, pk)
+			}, emptyListResult())
+		case "napp.loadBlossomServers":
+			return listCall(params, func(ctx context.Context, pk nostr.PubKey) any {
+				return loadBlossomServers(ctx, pk)
+			}, emptyListResult())
+		case "napp.loadEmojis":
+			return listCall(params, func(ctx context.Context, pk nostr.PubKey) any {
+				return loadEmojis(ctx, pk)
+			}, emptyListResult())
+		case "napp.loadFavoriteRelays":
+			return listCall(params, func(ctx context.Context, pk nostr.PubKey) any {
+				return loadFavoriteRelays(ctx, pk)
+			}, emptyListResult())
+		case "napp.loadBlockedRelays":
+			return listCall(params, func(ctx context.Context, pk nostr.PubKey) any {
+				return loadBlockedRelays(ctx, pk)
+			}, emptyListResult())
+		case "napp.loadSearchRelays":
+			return listCall(params, func(ctx context.Context, pk nostr.PubKey) any {
+				return loadSearchRelays(ctx, pk)
+			}, emptyListResult())
+		case "napp.loadDmRelays":
+			return listCall(params, func(ctx context.Context, pk nostr.PubKey) any {
+				return loadDmRelays(ctx, pk)
+			}, emptyListResult())
 		case "napp.loadWikiAuthors":
-			pk, ctx, cancel, ok := fetchListArgs(params)
-			if !ok {
-				return emptyListResult(), nil
-			}
-			defer cancel()
-			return listResult(sys.FetchGoodWikiAuthorList(ctx, pk)), nil
+			return listCall(params, func(ctx context.Context, pk nostr.PubKey) any {
+				return loadWikiAuthors(ctx, pk)
+			}, emptyListResult())
 		case "napp.loadWikiRelays":
-			pk, ctx, cancel, ok := fetchListArgs(params)
-			if !ok {
-				return emptyListResult(), nil
-			}
-			defer cancel()
-			return listResult(sys.FetchGoodWikiRelayList(ctx, pk)), nil
-		case "napp.loadEmojiSets":
-			pk, ctx, cancel, ok := fetchListArgs(params)
-			if !ok {
-				return emptySetsResult(), nil
-			}
-			defer cancel()
-			return setsResult(sys.FetchEmojiSets(ctx, pk)), nil
+			return listCall(params, func(ctx context.Context, pk nostr.PubKey) any {
+				return loadWikiRelays(ctx, pk)
+			}, emptyListResult())
+		case "napp.loadFavoriteFollowSets":
+			return listCall(params, func(ctx context.Context, pk nostr.PubKey) any {
+				return loadFavoriteFollowSets(ctx, pk)
+			}, emptyListResult())
+		case "napp.loadFavoriteScrolls":
+			return listCall(params, func(ctx context.Context, pk nostr.PubKey) any {
+				return loadFavoriteScrolls(ctx, pk)
+			}, emptyListResult())
+		case "napp.loadProfileBadges":
+			return listCall(params, func(ctx context.Context, pk nostr.PubKey) any {
+				return loadProfileBadges(ctx, pk)
+			}, emptyListResult())
+		case "napp.loadSimpleGroups":
+			return listCall(params, func(ctx context.Context, pk nostr.PubKey) any {
+				return loadSimpleGroups(ctx, pk)
+			}, emptyListResult())
+		case "napp.loadGitAuthors":
+			return listCall(params, func(ctx context.Context, pk nostr.PubKey) any {
+				return loadGitAuthors(ctx, pk)
+			}, emptyListResult())
+		case "napp.loadGitRepositories":
+			return listCall(params, func(ctx context.Context, pk nostr.PubKey) any {
+				return loadGitRepositories(ctx, pk)
+			}, emptyListResult())
+		case "napp.loadMediaFollows":
+			return listCall(params, func(ctx context.Context, pk nostr.PubKey) any {
+				return loadMediaFollows(ctx, pk)
+			}, emptyListResult())
+		case "napp.loadFavoritePodcasts":
+			return listCall(params, func(ctx context.Context, pk nostr.PubKey) any {
+				return loadFavoritePodcasts(ctx, pk)
+			}, emptyListResult())
+		case "napp.loadAuthoredPodcasts":
+			return listCall(params, func(ctx context.Context, pk nostr.PubKey) any {
+				return loadAuthoredPodcasts(ctx, pk)
+			}, emptyListResult())
+
+		// ─── composite list+set helpers ──────────────────────────
+		case "napp.fetchFavoriteRelaysWithSets":
+			return listCall(params, func(ctx context.Context, pk nostr.PubKey) any {
+				return fetchFavoriteRelaysWithSets(ctx, pk)
+			}, []any{})
+		case "napp.fetchEmojisWithSets":
+			return listCall(params, func(ctx context.Context, pk nostr.PubKey) any {
+				return fetchEmojisWithSets(ctx, pk)
+			}, []any{})
+		case "napp.fetchFavoriteFollowSetsWithSets":
+			return listCall(params, func(ctx context.Context, pk nostr.PubKey) any {
+				return fetchFavoriteFollowSetsWithSets(ctx, pk)
+			}, []any{})
+
+		// ─── addressable sets ────────────────────────────────────
 		case "napp.loadFollowSets":
-			pk, ctx, cancel, ok := fetchListArgs(params)
-			if !ok {
-				return emptySetsResult(), nil
-			}
-			defer cancel()
-			return setsResult(sys.FetchFollowSets(ctx, pk)), nil
+			return listCall(params, func(ctx context.Context, pk nostr.PubKey) any {
+				return loadFollowSets(ctx, pk)
+			}, map[string]any{})
 		case "napp.loadRelaySets":
-			pk, ctx, cancel, ok := fetchListArgs(params)
-			if !ok {
-				return emptySetsResult(), nil
-			}
-			defer cancel()
-			return setsResult(sys.FetchRelaySets(ctx, pk)), nil
+			return listCall(params, func(ctx context.Context, pk nostr.PubKey) any {
+				return loadRelaySets(ctx, pk)
+			}, map[string]any{})
+		case "napp.loadEmojiSets":
+			return listCall(params, func(ctx context.Context, pk nostr.PubKey) any {
+				return loadEmojiSets(ctx, pk)
+			}, map[string]any{})
+
+		// ─── relay info ──────────────────────────────────────────
 		case "napp.loadRelayInfo":
-			// no corresponding sys.Fetch method
-			return nil, nil
-		case "napp.loadNostrUser":
-			// The JS bridge sends a bare JSON string (the npub/nprofile/nip05/hex
-			// reference). FetchProfileFromInput wants that bare input.
-			var input string
-			if err := json.Unmarshal([]byte(params), &input); err != nil {
-				log.Debug().Str("params", params).Err(err).Msg("loadNostrUser: invalid params")
-				return nil, nil
+			var url string
+			if err := json.Unmarshal([]byte(params), &url); err != nil {
+				var p struct {
+					URL string `json:"url"`
+				}
+				if err := json.Unmarshal([]byte(params), &p); err != nil {
+					return nil, nil
+				}
+				url = p.URL
 			}
-			input = strings.TrimSpace(input)
-			if input == "" {
-				log.Debug().Str("params", params).Msg("loadNostrUser: empty input")
-				return nil, nil
-			}
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 			defer cancel()
-			pm, err := sys.FetchProfileFromInput(ctx, input)
-			if err != nil {
-				log.Debug().Str("input", input).Err(err).Msg("loadNostrUser: fetch failed")
-				return nil, nil
-			}
-			user := struct {
-				Pubkey      string               `json:"pubkey"`
-				Npub        string               `json:"npub"`
-				ShortName   string               `json:"shortName"`
-				Metadata    sdk.ProfileMetadata  `json:"metadata"`
-				Image       string               `json:"image,omitempty"`
-				LastUpdated nostr.Timestamp       `json:"lastUpdated,omitempty"`
-			}{
-				Pubkey:    pm.PubKey.Hex(),
-				Npub:      pm.Npub(),
-				ShortName: pm.ShortName(),
-				Metadata:  pm,
-			}
-			if pm.Picture != "" {
-				user.Image = pm.Picture
-			}
-			if pm.Event != nil {
-				user.LastUpdated = pm.Event.CreatedAt
-			}
-			return user, nil
-		case "napp.loadEvent":
-			var p struct {
-				Code string `json:"code"`
-			}
-			json.Unmarshal([]byte(params), &p)
-			if p.Code == "" {
-				return nil, nil
+			return loadRelayInfo(ctx, url), nil
+
+		// ─── profile metadata + search ───────────────────────────
+		case "napp.loadNostrUser":
+			if sys == nil {
+				return nil, errors.New("system not ready")
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
-			evt, _, err := sys.FetchSpecificEventFromInput(ctx, p.Code, sdk.FetchSpecificEventParameters{SaveToLocalStore: true})
-			if err != nil || evt == nil {
+			var input string
+			var relays []string
+			if err := json.Unmarshal([]byte(params), &input); err != nil {
+				var req struct {
+					Pubkey string   `json:"pubkey"`
+					Relays []string `json:"relays"`
+				}
+				if err := json.Unmarshal([]byte(params), &req); err != nil {
+					return nil, errors.New("invalid request")
+				}
+				input, relays = req.Pubkey, req.Relays
+			}
+			return loadNostrUser(ctx, input, relays)
+
+		case "napp.searchUserLocal":
+			var term string
+			json.Unmarshal([]byte(params), &term)
+			return searchUserLocal(term), nil
+
+		case "napp.searchUser":
+			var term string
+			json.Unmarshal([]byte(params), &term)
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			return searchUser(ctx, term), nil
+
+		// ─── event fetching ──────────────────────────────────────
+		case "napp.loadEvent":
+			var p struct {
+				Code   string   `json:"code"`
+				Relays []string `json:"relays"`
+				Author string   `json:"author"`
+			}
+			if err := json.Unmarshal([]byte(params), &p); err != nil {
+				return nil, err
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+			evt := loadEvent(ctx, p.Code, p.Relays, p.Author)
+			if evt == nil {
 				return nil, nil
 			}
 			return *evt, nil
+
+		case "napp.loadEvents":
+			var ids []string
+			if err := json.Unmarshal([]byte(params), &ids); err != nil {
+				var p struct {
+					IDs []string `json:"ids"`
+				}
+				if err := json.Unmarshal([]byte(params), &p); err != nil {
+					return []nostr.Event{}, nil
+				}
+				ids = p.IDs
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			events := loadEventsByID(ctx, ids)
+			if events == nil {
+				events = []nostr.Event{}
+			}
+			return events, nil
+
+		case "napp.verifyEvent":
+			var evt nostr.Event
+			if err := json.Unmarshal([]byte(params), &evt); err != nil {
+				return false, nil
+			}
+			return evt.CheckID() && evt.VerifySignature(), nil
+
+		// ─── throwaway keys ──────────────────────────────────────
+		// env.d.ts describes these as running inside the napp's own frame,
+		// but a webview here has no crypto companion to import: they run in
+		// the host instead. The user's identity is still never involved, so
+		// there's no prompt.
+		case "napp.generateKey":
+			sk := nostr.Generate()
+			return map[string]any{"sk": sk.Hex(), "pk": sk.Public().Hex()}, nil
+
+		case "napp.signWithKey":
+			var p struct {
+				Event nostr.Event `json:"event"`
+				SK    string      `json:"sk"`
+			}
+			if err := json.Unmarshal([]byte(params), &p); err != nil {
+				return nil, err
+			}
+			sk, err := nostr.SecretKeyFromHex(strings.TrimSpace(p.SK))
+			if err != nil {
+				return nil, errors.New("invalid secret key")
+			}
+			if p.Event.CreatedAt == 0 {
+				p.Event.CreatedAt = nostr.Now()
+			}
+			if err := p.Event.Sign(sk); err != nil {
+				return nil, err
+			}
+			return p.Event, nil
+
+		// ─── files + clipboard ───────────────────────────────────
+		case "napp.saveFile":
+			var p struct {
+				Name string `json:"name"`
+				Data string `json:"data"` // base64
+				Type string `json:"type"`
+			}
+			if err := json.Unmarshal([]byte(params), &p); err != nil {
+				return nil, err
+			}
+			name := sanitizeFilename(p.Name)
+			if !askApproval(ci, "save a file to your disk",
+				"“"+name+"” goes to "+downloadsDir()+".", "") {
+				return nil, errors.New("denied by the user")
+			}
+			return saveFileForNapp(p.Name, p.Data)
+
+		case "napp.copyText":
+			var p struct {
+				Text string `json:"text"`
+			}
+			if err := json.Unmarshal([]byte(params), &p); err != nil {
+				return nil, err
+			}
+			if len(p.Text) > maxCopyChars {
+				return nil, errors.New("text is too long to copy")
+			}
+			if !askApproval(ci, "copy text to your clipboard",
+				strconv.Itoa(len(p.Text))+" characters.", preview(p.Text, 120)) {
+				return nil, errors.New("denied by the user")
+			}
+			return copyTextForNapp(p.Text)
+
+		// ─── publishing ──────────────────────────────────────────
 		case "napp.publish":
 			var p struct {
 				Event  nostr.Event `json:"event"`
@@ -438,100 +678,159 @@ func bridgeRPC(ci *childInfo) func(string, string) (any, error) {
 			if err := json.Unmarshal([]byte(params), &p); err != nil {
 				return nil, err
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			defer cancel()
+			return publishEvent(ci, p.Event, p.Relays)
 
-			log.Debug().Str("kind", fmt.Sprint(p.Event.Kind)).Int("relays", len(p.Relays)).Msg("publishing event")
-
-			// Persist the event to the local database before publishing it to
-			// the outside world, so it's immediately queryable locally.
-			if sys != nil {
-				if err := sys.Store.SaveEvent(p.Event); err != nil {
-					log.Warn().Err(err).Msg("failed to save event to local store before publishing")
-				}
-			}
-
-			seen := make(map[string]bool)
-			var targets []string
-			addRelay := func(url string) {
-				url = strings.TrimSpace(url)
-				if url == "" {
-					return
-				}
-				norm := nostr.NormalizeURL(url)
-				if norm == "" || seen[norm] {
-					return
-				}
-				seen[norm] = true
-				targets = append(targets, norm)
-			}
-
-			for _, url := range p.Relays {
-				addRelay(url)
-			}
-			for _, url := range sys.FetchOutboxRelays(ctx, p.Event.PubKey, 3) {
-				addRelay(url)
-			}
-			for _, key := range []string{"p", "P"} {
-				for tag := range p.Event.Tags.FindAll(key) {
-					pk, err := nostr.PubKeyFromHex(tag[1])
-					if err != nil {
-						continue
-					}
-					for _, url := range sys.FetchInboxRelays(ctx, pk, 3) {
-						addRelay(url)
-					}
-				}
-			}
-
-			if len(targets) == 0 {
-				return nil, errors.New("no relays to publish to")
-			}
-
-			log.Debug().Strs("targets", targets).Msg("publishing to relays")
-
-			results := []struct {
-				Relay   string `json:"relay"`
-				Success bool   `json:"success"`
-				Error   string `json:"error,omitempty"`
-			}{}
-			for res := range sys.Pool.PublishMany(ctx, targets, p.Event) {
-				r := struct {
-					Relay   string `json:"relay"`
-					Success bool   `json:"success"`
-					Error   string `json:"error,omitempty"`
-				}{Relay: res.RelayURL, Success: res.Error == nil}
-				if res.Error != nil {
-					r.Error = res.Error.Error()
-					log.Warn().Str("relay", res.RelayURL).Err(res.Error).Msg("publish to relay failed")
-				} else {
-					log.Debug().Str("relay", res.RelayURL).Msg("publish to relay succeeded")
-				}
-				results = append(results, r)
-			}
-			return results, nil
 		default:
-			return nil, nil
+			log.Warn().Str("method", method).Msg("unsupported rpc method")
+			return nil, fmt.Errorf("unsupported method: %s", method)
 		}
 	}
 }
 
-func feedPump(ctx context.Context, ci *childInfo, method string, p struct {
-	Pubkey     string           `json:"pubkey"`
-	Source     string           `json:"source"`
-	Kinds      []nostr.Kind     `json:"kinds"`
-	CallbackId int              `json:"callbackId"`
-	Since      *nostr.Timestamp `json:"since"`
-	Until      *nostr.Timestamp `json:"until"`
-	Limit      int              `json:"limit"`
-},
-) {
-	for {
-		select {
-		case <-ctx.Done():
+// parseFilters accepts one filter or an array of them, as nostrdb does.
+func parseFilters(raw json.RawMessage) ([]nostr.Filter, error) {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || trimmed == "null" {
+		return nil, nil
+	}
+	if strings.HasPrefix(trimmed, "[") {
+		var filters []nostr.Filter
+		if err := json.Unmarshal(raw, &filters); err != nil {
+			return nil, err
+		}
+		return filters, nil
+	}
+	var filter nostr.Filter
+	if err := json.Unmarshal(raw, &filter); err != nil {
+		return nil, err
+	}
+	return []nostr.Filter{filter}, nil
+}
+
+// publishTargets is where an event goes when the napp didn't say: the
+// author's write relays, plus the inbox relays of everyone p-tagged, plus —
+// for a relay list — the indexers that are supposed to carry it.
+func publishTargets(ctx context.Context, evt nostr.Event, requested []string) []string {
+	seen := make(map[string]bool)
+	targets := make([]string, 0, 8)
+	add := func(url string) {
+		url = strings.TrimSpace(url)
+		if url == "" {
 			return
-		case <-time.After(30 * time.Second):
-			ci.eval("")
+		}
+		norm := nostr.NormalizeURL(url)
+		if norm == "" || seen[norm] {
+			return
+		}
+		seen[norm] = true
+		targets = append(targets, norm)
+	}
+
+	for _, url := range requested {
+		add(url)
+	}
+	if len(targets) > 0 {
+		return targets
+	}
+
+	for _, url := range sys.FetchWriteRelays(ctx, evt.PubKey) {
+		add(url)
+	}
+	if len(targets) == 0 {
+		for _, url := range sys.FetchOutboxRelays(ctx, evt.PubKey, 3) {
+			add(url)
 		}
 	}
+	for _, key := range []string{"p", "P"} {
+		for tag := range evt.Tags.FindAll(key) {
+			if len(tag) < 2 {
+				continue
+			}
+			pk, err := nostr.PubKeyFromHex(tag[1])
+			if err != nil {
+				continue
+			}
+			for _, url := range sys.FetchInboxRelays(ctx, pk, 3) {
+				add(url)
+			}
+		}
+	}
+	if evt.Kind == 10002 {
+		add(sys.RelayListRelays.Next())
+		add(sys.FallbackRelays.Next())
+	}
+	return targets
+}
+
+// publishEvent stores the event locally, asks the user, publishes and reports
+// per-relay outcomes in the PublishResult shape from env.d.ts.
+func publishEvent(ci *childInfo, evt nostr.Event, requested []string) (any, error) {
+	if sys == nil {
+		return nil, errors.New("system not ready")
+	}
+	if evt.ID == nostr.ZeroID || !evt.CheckID() {
+		return nil, errors.New("event is not signed (or its id is wrong)")
+	}
+	if !evt.VerifySignature() {
+		return nil, errors.New("event signature is invalid")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+
+	targets := publishTargets(ctx, evt, requested)
+	if len(targets) == 0 {
+		return nil, errors.New("no relays to publish to")
+	}
+
+	if !askApproval(ci, "publish an event",
+		fmt.Sprintf("Kind %d to %d relay(s): %s", evt.Kind, len(targets),
+			preview(strings.Join(stripSchemes(targets), ", "), 160)),
+		preview(evt.Content, 200)) {
+		return nil, errors.New("denied by the user")
+	}
+
+	// keep it locally first, so the napp can query it back right away
+	if _, err := sys.Store.ReplaceEvent(evt); err != nil {
+		if err := sys.Store.SaveEvent(evt); err != nil {
+			log.Warn().Err(err).Msg("failed to store published event locally")
+		}
+	}
+	// and let the load* caches know they're stale for this kind+author
+	invalidateList(evt.Kind, evt.PubKey)
+
+	log.Info().Uint16("kind", uint16(evt.Kind)).Strs("relays", targets).Msg("publishing event")
+
+	relayResults := make(map[string]any, len(targets))
+	published, failed := 0, 0
+	for res := range sys.Pool.PublishMany(ctx, targets, evt) {
+		if res.Error != nil {
+			failed++
+			relayResults[res.RelayURL] = map[string]any{"ok": false, "error": res.Error.Error()}
+			log.Warn().Str("relay", res.RelayURL).Err(res.Error).Msg("publish failed")
+			continue
+		}
+		published++
+		relayResults[res.RelayURL] = map[string]any{"ok": true}
+		log.Debug().Str("relay", res.RelayURL).Msg("publish succeeded")
+	}
+
+	return map[string]any{
+		"relays":    relayResults,
+		"published": published,
+		"failed":    failed,
+	}, nil
+}
+
+func stripSchemes(urls []string) []string {
+	out := make([]string, 0, len(urls))
+	for _, u := range urls {
+		out = append(out, strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(u, "wss://"), "ws://"), "/"))
+	}
+	return out
+}
+
+func shortPubkey(pk nostr.PubKey) string {
+	hex := pk.Hex()
+	return hex[:8] + "…"
 }
