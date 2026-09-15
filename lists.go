@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/binary"
 	"strconv"
 	"strings"
 	"sync"
@@ -12,238 +11,228 @@ import (
 	"fiatjaf.com/nostr/nip11"
 	"fiatjaf.com/nostr/nip19"
 	"fiatjaf.com/nostr/sdk"
+	"fiatjaf.com/nostr/sdk/cache"
 	"fiatjaf.com/nostr/sdk/hints"
 )
 
 // The launcher promises napps the same data-loading surface the web launcher
-// gets from @nostr/gadgets, so the shapes here mirror that package's items
+// gets from @nostr/gadgets, so the item shapes here mirror that package's
 // exactly (see env.d.ts): a napp written against one runs on the other.
 //
-// Underneath it's all the sdk: sys.Store is the local eventstore every
-// fetched event lands in, sys.KVStore remembers when we last went to the
-// network for a given kind+author, sys.Hints/FetchOutboxRelays decide where
-// to ask, and a small in-memory cache absorbs the repeat calls napps make
-// while rendering.
+// Getting the events, though, is entirely the sdk's job: every load* below
+// goes through the sdk loader for its kind (sys.Fetch*List / sys.Fetch*Sets),
+// which already does the local eventstore, the kvstore mark that decides when
+// to hit the network again, the author's outbox relays, batched REQs and a 6h
+// cache. All that is left here is turning tags into the items napps expect.
 
-const (
-	listCacheTTL     = 6 * time.Hour
-	listRefreshAfter = 3 * 24 * 60 * 60 // seconds before we ask relays again
-)
+const listCacheTTL = 6 * time.Hour
 
-type replCacheEntry struct {
-	events  []nostr.Event
+// ─── getting the events (all sdk) ────────────────────────────────
+
+// listEvent returns an author's event for a NIP-51 list kind.
+func listEvent(ctx context.Context, kind nostr.Kind, pubkey nostr.PubKey) *nostr.Event {
+	if sys == nil {
+		return nil
+	}
+	switch kind {
+	case 3:
+		return sys.FetchFollowList(ctx, pubkey).Event
+	case 10000:
+		return sys.FetchMuteList(ctx, pubkey).Event
+	case 10001:
+		return sys.FetchPinList(ctx, pubkey).Event
+	case 10002:
+		return sys.FetchRelayList(ctx, pubkey).Event
+	case 10003:
+		return sys.FetchBookmarkList(ctx, pubkey).Event
+	case 10006:
+		return sys.FetchBlockedRelayList(ctx, pubkey).Event
+	case 10007:
+		return sys.FetchSearchRelayList(ctx, pubkey).Event
+	case 10008:
+		return sys.FetchProfileBadgesList(ctx, pubkey).Event
+	case 10012:
+		return sys.FetchRelayFeedsList(ctx, pubkey).Event
+	case 10015:
+		return sys.FetchTopicList(ctx, pubkey).Event
+	case 10017:
+		return sys.FetchGitAuthorList(ctx, pubkey).Event
+	case 10018:
+		return sys.FetchGitRepositoryList(ctx, pubkey).Event
+	case 10020:
+		return sys.FetchMediaFollowList(ctx, pubkey).Event
+	case 10030:
+		return sys.FetchEmojiList(ctx, pubkey).Event
+	case 10050:
+		return sys.FetchDMRelayList(ctx, pubkey).Event
+	case 10054:
+		return sys.FetchFavoritePodcastsList(ctx, pubkey).Event
+	case 10064:
+		return sys.FetchAuthoredPodcastsList(ctx, pubkey).Event
+	case 10101:
+		return sys.FetchGoodWikiAuthorList(ctx, pubkey).Event
+	case 10102:
+		return sys.FetchGoodWikiRelayList(ctx, pubkey).Event
+	}
+	return otherListEvent(ctx, kind, pubkey)
+}
+
+type otherListEntry struct {
+	event   *nostr.Event
 	expires time.Time
 }
 
 var (
-	replCacheMu sync.Mutex
-	replCache   = make(map[string]replCacheEntry)
-	// one fetch at a time per kind+author, so a napp rendering a list of
-	// profiles doesn't open the same subscription twenty times
-	replLocks sync.Map // string -> *sync.Mutex
+	otherListMu    sync.Mutex
+	otherListCache = make(map[string]otherListEntry)
 )
 
-func replCacheKey(kind nostr.Kind, pubkey nostr.PubKey) string {
+// otherListEvent covers the kinds the sdk has no loader for -- 10009, 10021,
+// 10027 and 10063 (its FetchBlossomServerList reads kind 10101, so we don't
+// use it). It is still the sdk fetching: the local store first, then the
+// author's relays, saving whatever it finds. What it lacks is the kvstore
+// refresh gate, so we memo the answer for a while instead, which also keeps a
+// napp rendering many rows from asking the network once per row.
+func otherListEvent(ctx context.Context, kind nostr.Kind, pubkey nostr.PubKey) *nostr.Event {
+	key := listCacheKey(kind, pubkey)
+
+	otherListMu.Lock()
+	entry, ok := otherListCache[key]
+	otherListMu.Unlock()
+	if ok && time.Now().Before(entry.expires) {
+		return entry.event
+	}
+
+	fetchCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	evt, _, err := sys.FetchSpecificEvent(fetchCtx,
+		nostr.EntityPointer{PublicKey: pubkey, Kind: kind},
+		sdk.FetchSpecificEventParameters{SaveToLocalStore: true},
+	)
+	if err != nil {
+		log.Debug().Err(err).Uint16("kind", uint16(kind)).Msg("list fetch failed")
+	}
+
+	otherListMu.Lock()
+	otherListCache[key] = otherListEntry{event: evt, expires: time.Now().Add(listCacheTTL)}
+	otherListMu.Unlock()
+	return evt
+}
+
+func listCacheKey(kind nostr.Kind, pubkey nostr.PubKey) string {
 	return strconv.Itoa(int(kind)) + ":" + pubkey.Hex()
 }
 
-func replLock(key string) *sync.Mutex {
-	v, _ := replLocks.LoadOrStore(key, &sync.Mutex{})
-	return v.(*sync.Mutex)
-}
-
-// lastFetchKey namespaces our own "when did we last try" marks so they don't
-// collide with the sdk's.
-func lastFetchKey(kind nostr.Kind, pubkey nostr.PubKey) []byte {
-	key := make([]byte, 0, 3+2+8)
-	key = append(key, 'v', 'd', 'n')
-	key = binary.BigEndian.AppendUint16(key, uint16(kind))
-	key = append(key, pubkey[0:8]...)
-	return key
-}
-
-func triedRecently(kind nostr.Kind, pubkey nostr.PubKey) bool {
-	if sys.KVStore == nil {
-		return false
+// sdkSetEvents returns an author's addressable events of a set kind, when the
+// sdk has a loader for it.
+func sdkSetEvents(ctx context.Context, kind nostr.Kind, pubkey nostr.PubKey) ([]nostr.Event, bool) {
+	if sys == nil {
+		return nil, false
 	}
-	data, _ := sys.KVStore.Get(lastFetchKey(kind, pubkey))
-	if data == nil || len(data) < 4 {
-		return false
+	switch kind {
+	case 30000:
+		return sys.FetchFollowSets(ctx, pubkey).Events, true
+	case 30002:
+		return sys.FetchRelaySets(ctx, pubkey).Events, true
+	case 30015:
+		return sys.FetchTopicSets(ctx, pubkey).Events, true
+	case 30030:
+		return sys.FetchEmojiSets(ctx, pubkey).Events, true
 	}
-	last := nostr.Timestamp(binary.BigEndian.Uint32(data))
-	return nostr.Now()-last < listRefreshAfter
+	return nil, false
 }
 
-func markTried(kind nostr.Kind, pubkey nostr.PubKey) {
-	if sys.KVStore == nil {
+// setEvent is one addressable event by author+d, for resolving the "a" items
+// that show up inside NIP-51 lists.
+func setEvent(ctx context.Context, kind nostr.Kind, pubkey nostr.PubKey, identifier string) *nostr.Event {
+	if events, ok := sdkSetEvents(ctx, kind, pubkey); ok {
+		for i := range events {
+			if events[i].Tags.GetD() == identifier {
+				return &events[i]
+			}
+		}
+		return nil
+	}
+	fetchCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	evt, _, err := sys.FetchSpecificEvent(fetchCtx,
+		nostr.EntityPointer{PublicKey: pubkey, Kind: kind, Identifier: identifier},
+		sdk.FetchSpecificEventParameters{SaveToLocalStore: true},
+	)
+	if err != nil {
+		log.Debug().Err(err).Uint16("kind", uint16(kind)).Msg("set fetch failed")
+	}
+	return evt
+}
+
+// invalidateList drops what the sdk cached for a kind+author. Called after
+// publishing (the event is stored locally first), so the next load* reflects
+// what the napp just wrote without waiting for the relays to echo it back.
+func invalidateList(kind nostr.Kind, pubkey nostr.PubKey) {
+	if sys == nil {
 		return
 	}
-	buf := binary.BigEndian.AppendUint32(nil, uint32(nostr.Now()))
-	sys.KVStore.Set(lastFetchKey(kind, pubkey), buf)
-}
 
-// relaysForKind is where to ask for a given replaceable kind: the author's
-// outbox, plus the sdk's dedicated streams for the kinds that have them.
-func relaysForKind(ctx context.Context, kind nostr.Kind, pubkey nostr.PubKey) []string {
-	relays := make([]string, 0, 5)
-	for _, url := range sys.FetchOutboxRelays(ctx, pubkey, 3) {
-		relays = nostr.AppendUnique(relays, url)
-	}
+	otherListMu.Lock()
+	delete(otherListCache, listCacheKey(kind, pubkey))
+	otherListMu.Unlock()
+
 	switch kind {
 	case 0:
-		relays = nostr.AppendUnique(relays, sys.MetadataRelays.Next())
+		dropCached(sys.MetadataCache, pubkey)
 	case 3:
-		relays = nostr.AppendUnique(relays, sys.FollowListRelays.Next())
+		dropCached(sys.FollowListCache, pubkey)
+	case 10000:
+		dropCached(sys.MuteListCache, pubkey)
+	case 10001:
+		dropCached(sys.PinListCache, pubkey)
 	case 10002:
-		relays = nostr.AppendUnique(relays, sys.RelayListRelays.Next())
+		dropCached(sys.RelayListCache, pubkey)
+	case 10003:
+		dropCached(sys.BookmarkListCache, pubkey)
+	case 10006:
+		dropCached(sys.BlockedRelayListCache, pubkey)
+	case 10007:
+		dropCached(sys.SearchRelayListCache, pubkey)
+	case 10008:
+		dropCached(sys.ProfileBadgesListCache, pubkey)
+	case 10012:
+		dropCached(sys.RelayFeedsListCache, pubkey)
+	case 10015:
+		dropCached(sys.TopicListCache, pubkey)
+	case 10017:
+		dropCached(sys.GitAuthorListCache, pubkey)
+	case 10018:
+		dropCached(sys.GitRepositoryListCache, pubkey)
+	case 10020:
+		dropCached(sys.MediaFollowListCache, pubkey)
+	case 10030:
+		dropCached(sys.EmojiListCache, pubkey)
+	case 10050:
+		dropCached(sys.DMRelayListCache, pubkey)
+	case 10054:
+		dropCached(sys.PodcastFavoriteListCache, pubkey)
+	case 10064:
+		dropCached(sys.AuthoredPodcastListCache, pubkey)
+	case 10101:
+		dropCached(sys.GoodWikiAuthorListCache, pubkey)
+	case 10102:
+		dropCached(sys.GoodWikiRelayListCache, pubkey)
+	case 30000:
+		dropCached(sys.FollowSetsCache, pubkey)
+	case 30002:
+		dropCached(sys.RelaySetsCache, pubkey)
+	case 30015:
+		dropCached(sys.TopicSetsCache, pubkey)
+	case 30030:
+		dropCached(sys.EmojiSetsCache, pubkey)
 	}
-	if len(relays) < 2 {
-		relays = nostr.AppendUnique(relays, sys.FallbackRelays.Next())
-	}
-	return relays
 }
 
-// loadEvents fetches every event of an author for one replaceable (one event)
-// or addressable (one per "d" tag) kind. It answers from the in-memory cache,
-// then the local eventstore, and only then goes to relays — and whatever it
-// gets from relays is stored locally for next time.
-func loadReplaceables(ctx context.Context, kind nostr.Kind, pubkey nostr.PubKey, addressable bool) []nostr.Event {
-	if sys == nil {
-		return nil
-	}
-	key := replCacheKey(kind, pubkey)
-
-	lock := replLock(key)
-	lock.Lock()
-	defer lock.Unlock()
-
-	replCacheMu.Lock()
-	entry, ok := replCache[key]
-	replCacheMu.Unlock()
-	if ok && time.Now().Before(entry.expires) {
-		return entry.events
-	}
-
-	maxLocal := 1
-	if addressable {
-		maxLocal = 200
-	}
-	stored := make([]nostr.Event, 0, maxLocal)
-	for evt := range sys.Store.QueryEvents(nostr.Filter{
-		Kinds:   []nostr.Kind{kind},
-		Authors: []nostr.PubKey{pubkey},
-	}, maxLocal) {
-		stored = append(stored, evt)
-	}
-
-	if len(stored) > 0 && triedRecently(kind, pubkey) {
-		replCacheMu.Lock()
-		replCache[key] = replCacheEntry{events: stored, expires: time.Now().Add(listCacheTTL)}
-		replCacheMu.Unlock()
-		return stored
-	}
-
-	fetched := fetchReplaceablesFromRelays(ctx, kind, pubkey, addressable)
-	markTried(kind, pubkey)
-
-	result := stored
-	if len(fetched) > 0 {
-		result = mergeNewest(stored, fetched, addressable)
-		for _, evt := range fetched {
-			if _, err := sys.Store.ReplaceEvent(evt); err != nil {
-				log.Debug().Err(err).Uint16("kind", uint16(kind)).Msg("failed to store fetched event")
-			}
-		}
-	}
-
-	replCacheMu.Lock()
-	replCache[key] = replCacheEntry{events: result, expires: time.Now().Add(listCacheTTL)}
-	replCacheMu.Unlock()
-	return result
-}
-
-func fetchReplaceablesFromRelays(ctx context.Context, kind nostr.Kind, pubkey nostr.PubKey, addressable bool) []nostr.Event {
-	relays := relaysForKind(ctx, kind, pubkey)
-	if len(relays) == 0 {
-		return nil
-	}
-	fetchCtx, cancel := context.WithTimeout(ctx, 6*time.Second)
-	defer cancel()
-
-	filter := nostr.Filter{Kinds: []nostr.Kind{kind}, Authors: []nostr.PubKey{pubkey}}
-	out := make([]nostr.Event, 0, 4)
-	sys.Pool.FetchManyReplaceable(fetchCtx, relays, filter, nostr.SubscriptionOptions{
-		Label: "napp-list-" + strconv.Itoa(int(kind)),
-	}).Range(func(_ nostr.ReplaceableKey, evt nostr.Event) bool {
-		out = append(out, evt)
-		return true
-	})
-	if !addressable && len(out) > 1 {
-		newest := out[0]
-		for _, evt := range out[1:] {
-			if evt.CreatedAt > newest.CreatedAt {
-				newest = evt
-			}
-		}
-		out = []nostr.Event{newest}
-	}
-	return out
-}
-
-// mergeNewest keeps, per "d" tag (or just one for replaceables), whichever of
-// the stored and the fetched events is newer.
-func mergeNewest(stored, fetched []nostr.Event, addressable bool) []nostr.Event {
-	best := make(map[string]nostr.Event, len(stored)+len(fetched))
-	order := make([]string, 0, len(stored)+len(fetched))
-	add := func(evt nostr.Event) {
-		d := ""
-		if addressable {
-			d = evt.Tags.GetD()
-		}
-		if prev, ok := best[d]; ok {
-			if evt.CreatedAt > prev.CreatedAt {
-				best[d] = evt
-			}
-			return
-		}
-		best[d] = evt
-		order = append(order, d)
-	}
-	for _, evt := range stored {
-		add(evt)
-	}
-	for _, evt := range fetched {
-		add(evt)
-	}
-	out := make([]nostr.Event, 0, len(order))
-	for _, d := range order {
-		out = append(out, best[d])
-	}
-	return out
-}
-
-// invalidateList drops the cached list for a kind+author. Called after
-// publishing so the next load* reflects what the napp just wrote without
-// waiting for the relays to echo it back.
-func invalidateList(kind nostr.Kind, pubkey nostr.PubKey) {
-	replCacheMu.Lock()
-	delete(replCache, replCacheKey(kind, pubkey))
-	replCacheMu.Unlock()
-
-	// the sdk keeps its own caches for the kinds it loads itself
-	switch kind {
-	case 0:
-		if sys.MetadataCache != nil {
-			sys.MetadataCache.Delete(pubkey)
-		}
-	case 3:
-		if sys.FollowListCache != nil {
-			sys.FollowListCache.Delete(pubkey)
-		}
-	case 10002:
-		if sys.RelayListCache != nil {
-			sys.RelayListCache.Delete(pubkey)
-		}
+// dropCached exists because the sdk creates each of its caches lazily.
+func dropCached[V any](c cache.Cache32[V], pubkey nostr.PubKey) {
+	if c != nil {
+		c.Delete(pubkey)
 	}
 }
 
@@ -259,27 +248,33 @@ func listResult(evt *nostr.Event, items []any) map[string]any {
 
 func emptyListResult() map[string]any { return listResult(nil, nil) }
 
-func newestOf(events []nostr.Event) *nostr.Event {
-	if len(events) == 0 {
-		return nil
-	}
-	newest := &events[0]
-	for i := range events[1:] {
-		if events[i+1].CreatedAt > newest.CreatedAt {
-			newest = &events[i+1]
-		}
-	}
-	return newest
-}
-
-// loadList fetches a NIP-51 list and turns its tags into items with the given
-// per-tag parser (exactly how gadgets' itemsFromTags works).
+// loadList fetches a NIP-51 list through the sdk and turns its tags into items
+// with the given per-tag parser (exactly how gadgets' itemsFromTags works).
 func loadList(ctx context.Context, kind nostr.Kind, pubkey nostr.PubKey, parse func(nostr.Tag) (any, bool)) map[string]any {
-	evt := newestOf(loadReplaceables(ctx, kind, pubkey, false))
+	evt := listEvent(ctx, kind, pubkey)
 	if evt == nil {
 		return emptyListResult()
 	}
 	return listResult(evt, itemsFromTags(*evt, parse))
+}
+
+// fromSDKList shapes one of the sdk's own typed lists into a list result, with
+// conv mapping each sdk item to the shape napps expect. Used for the kinds
+// where the sdk's parser already produces everything gadgets would.
+func fromSDKList[V comparable, I sdk.TagItemWithValue[V]](
+	list sdk.GenericList[V, I],
+	conv func(I) any,
+) map[string]any {
+	if list.Event == nil {
+		return emptyListResult()
+	}
+	items := make([]any, 0, len(list.Items))
+	for _, item := range list.Items {
+		if v := conv(item); v != nil {
+			items = append(items, v)
+		}
+	}
+	return listResult(list.Event, items)
 }
 
 func itemsFromTags(evt nostr.Event, parse func(nostr.Tag) (any, bool)) []any {
@@ -292,7 +287,42 @@ func itemsFromTags(evt nostr.Event, parse func(nostr.Tag) (any, bool)) []any {
 	return items
 }
 
-// ─── item parsers (mirroring @nostr/gadgets/lists) ───────────────
+// ─── item shapes (mirroring @nostr/gadgets/lists) ────────────────
+
+func profileRefItem(ref sdk.ProfileRef) any { return ref.Pubkey.Hex() }
+
+func relayURLValue(url sdk.RelayURL) any { return string(url) }
+
+// eventRefItem is gadgets' `string | AddressPointer`: an event id as hex, an
+// addressable event as a pointer object.
+func eventRefItem(ref sdk.EventRef) any {
+	switch p := ref.Pointer.(type) {
+	case nostr.EventPointer:
+		return p.ID.Hex()
+	case nostr.EntityPointer:
+		relays := p.Relays
+		if relays == nil {
+			relays = []string{}
+		}
+		return map[string]any{
+			"identifier": p.Identifier,
+			"pubkey":     p.PublicKey.Hex(),
+			"kind":       int(p.Kind),
+			"relays":     relays,
+		}
+	}
+	return nil
+}
+
+func podcastRefItem(ref sdk.PodcastRef) any {
+	if ref.PubKey != nostr.ZeroPK {
+		return ref.PubKey.Hex()
+	}
+	if ref.URL == "" {
+		return nil
+	}
+	return ref.URL
+}
 
 func pubkeyItem(tagName string) func(nostr.Tag) (any, bool) {
 	return func(tag nostr.Tag) (any, bool) {
@@ -306,6 +336,13 @@ func pubkeyItem(tagName string) func(nostr.Tag) (any, bool) {
 func relayURLItem(tag nostr.Tag) (any, bool) {
 	if len(tag) >= 2 && tag[0] == "relay" && tag[1] != "" {
 		return nostr.NormalizeURL(tag[1]), true
+	}
+	return nil, false
+}
+
+func emojiItem(tag nostr.Tag) (any, bool) {
+	if len(tag) >= 3 && tag[0] == "emoji" {
+		return map[string]any{"shortcode": tag[1], "url": tag[2]}, true
 	}
 	return nil, false
 }
@@ -363,8 +400,8 @@ func relayListItems(evt nostr.Event) []any {
 // ─── the load* surface ───────────────────────────────────────────
 
 func loadRelayList(ctx context.Context, pubkey nostr.PubKey) map[string]any {
-	// kind:10002 has the sdk's own dedicated relay stream and cache, and it
-	// is what every outbox decision downstream depends on.
+	// the sdk's Relay item carries the same information, but napps expect
+	// gadgets' { url, read, write }
 	rl := sys.FetchRelayList(ctx, pubkey)
 	if rl.Event == nil {
 		return emptyListResult()
@@ -373,14 +410,12 @@ func loadRelayList(ctx context.Context, pubkey nostr.PubKey) map[string]any {
 }
 
 func loadFollowsList(ctx context.Context, pubkey nostr.PubKey) map[string]any {
-	fl := sys.FetchFollowList(ctx, pubkey)
-	if fl.Event == nil {
-		return emptyListResult()
-	}
-	return listResult(fl.Event, itemsFromTags(*fl.Event, pubkeyItem("p")))
+	return fromSDKList(sys.FetchFollowList(ctx, pubkey), profileRefItem)
 }
 
 func loadMuteList(ctx context.Context, pubkey nostr.PubKey) map[string]any {
+	// the sdk only keeps the muted pubkeys; gadgets (and the napps written
+	// against it) want the threads, hashtags and words too
 	return loadList(ctx, 10000, pubkey, func(tag nostr.Tag) (any, bool) {
 		if len(tag) < 2 {
 			return nil, false
@@ -404,24 +439,20 @@ func loadMuteList(ctx context.Context, pubkey nostr.PubKey) map[string]any {
 }
 
 func loadBookmarks(ctx context.Context, pubkey nostr.PubKey) map[string]any {
-	return loadList(ctx, 10003, pubkey, func(tag nostr.Tag) (any, bool) {
-		if len(tag) >= 2 && (tag[0] == "e" || tag[0] == "a") && tag[1] != "" {
-			return tag[1], true
-		}
-		return nil, false
+	// EventRef.Value() is the tag reference: an id, or a "kind:pubkey:d"
+	return fromSDKList(sys.FetchBookmarkList(ctx, pubkey), func(ref sdk.EventRef) any {
+		return ref.Value()
 	})
 }
 
 func loadPins(ctx context.Context, pubkey nostr.PubKey) map[string]any {
-	return loadList(ctx, 10001, pubkey, func(tag nostr.Tag) (any, bool) {
-		if len(tag) >= 2 && tag[0] == "e" && tag[1] != "" {
-			return tag[1], true
-		}
-		return nil, false
+	return fromSDKList(sys.FetchPinList(ctx, pubkey), func(ref sdk.EventRef) any {
+		return ref.Value()
 	})
 }
 
 func loadBlossomServers(ctx context.Context, pubkey nostr.PubKey) map[string]any {
+	// not sys.FetchBlossomServerList: that one reads kind 10101
 	return loadList(ctx, 10063, pubkey, func(tag nostr.Tag) (any, bool) {
 		if len(tag) >= 2 && tag[0] == "server" && tag[1] != "" {
 			url, err := nostr.NormalizeHTTPURL(tag[1])
@@ -435,6 +466,8 @@ func loadBlossomServers(ctx context.Context, pubkey nostr.PubKey) map[string]any
 }
 
 func loadEmojis(ctx context.Context, pubkey nostr.PubKey) map[string]any {
+	// the sdk drops the "a" tags pointing at kind:30030 sets, which
+	// fetchEmojisWithSets needs
 	return loadList(ctx, 10030, pubkey, func(tag nostr.Tag) (any, bool) {
 		if len(tag) < 2 {
 			return nil, false
@@ -442,14 +475,12 @@ func loadEmojis(ctx context.Context, pubkey nostr.PubKey) map[string]any {
 		if tag[0] == "a" {
 			return addressPointer(tag[1], hint(tag, 2), 30030)
 		}
-		if len(tag) >= 3 && tag[0] == "emoji" {
-			return map[string]any{"shortcode": tag[1], "url": tag[2]}, true
-		}
-		return nil, false
+		return emojiItem(tag)
 	})
 }
 
 func loadFavoriteRelays(ctx context.Context, pubkey nostr.PubKey) map[string]any {
+	// same here: the "a" tags point at kind:30002 relay sets
 	return loadList(ctx, 10012, pubkey, func(tag nostr.Tag) (any, bool) {
 		if len(tag) < 2 {
 			return nil, false
@@ -465,23 +496,23 @@ func loadFavoriteRelays(ctx context.Context, pubkey nostr.PubKey) map[string]any
 }
 
 func loadBlockedRelays(ctx context.Context, pubkey nostr.PubKey) map[string]any {
-	return loadList(ctx, 10006, pubkey, relayURLItem)
+	return fromSDKList(sys.FetchBlockedRelayList(ctx, pubkey), relayURLValue)
 }
 
 func loadSearchRelays(ctx context.Context, pubkey nostr.PubKey) map[string]any {
-	return loadList(ctx, 10007, pubkey, relayURLItem)
+	return fromSDKList(sys.FetchSearchRelayList(ctx, pubkey), relayURLValue)
 }
 
 func loadDmRelays(ctx context.Context, pubkey nostr.PubKey) map[string]any {
-	return loadList(ctx, 10050, pubkey, relayURLItem)
+	return fromSDKList(sys.FetchDMRelayList(ctx, pubkey), relayURLValue)
 }
 
 func loadWikiAuthors(ctx context.Context, pubkey nostr.PubKey) map[string]any {
-	return loadList(ctx, 10101, pubkey, pubkeyItem("p"))
+	return fromSDKList(sys.FetchGoodWikiAuthorList(ctx, pubkey), profileRefItem)
 }
 
 func loadWikiRelays(ctx context.Context, pubkey nostr.PubKey) map[string]any {
-	return loadList(ctx, 10102, pubkey, relayURLItem)
+	return fromSDKList(sys.FetchGoodWikiRelayList(ctx, pubkey), relayURLValue)
 }
 
 func loadFavoriteFollowSets(ctx context.Context, pubkey nostr.PubKey) map[string]any {
@@ -510,20 +541,7 @@ func loadFavoriteScrolls(ctx context.Context, pubkey nostr.PubKey) map[string]an
 }
 
 func loadProfileBadges(ctx context.Context, pubkey nostr.PubKey) map[string]any {
-	return loadList(ctx, 10008, pubkey, func(tag nostr.Tag) (any, bool) {
-		if len(tag) < 2 {
-			return nil, false
-		}
-		switch tag[0] {
-		case "a":
-			return addressPointer(tag[1], hint(tag, 2), -1)
-		case "e":
-			if isHex64(tag[1]) {
-				return strings.ToLower(tag[1]), true
-			}
-		}
-		return nil, false
-	})
+	return fromSDKList(sys.FetchProfileBadgesList(ctx, pubkey), eventRefItem)
 }
 
 func loadSimpleGroups(ctx context.Context, pubkey nostr.PubKey) map[string]any {
@@ -540,46 +558,32 @@ func loadSimpleGroups(ctx context.Context, pubkey nostr.PubKey) map[string]any {
 }
 
 func loadGitAuthors(ctx context.Context, pubkey nostr.PubKey) map[string]any {
-	return loadList(ctx, 10017, pubkey, pubkeyItem("p"))
+	return fromSDKList(sys.FetchGitAuthorList(ctx, pubkey), profileRefItem)
 }
 
 func loadGitRepositories(ctx context.Context, pubkey nostr.PubKey) map[string]any {
-	return loadList(ctx, 10018, pubkey, func(tag nostr.Tag) (any, bool) {
-		if len(tag) >= 2 && tag[0] == "a" && tag[1] != "" {
-			return tag[1], true
-		}
-		return nil, false
+	return fromSDKList(sys.FetchGitRepositoryList(ctx, pubkey), func(ref sdk.EventRef) any {
+		return ref.Value()
 	})
 }
 
 func loadMediaFollows(ctx context.Context, pubkey nostr.PubKey) map[string]any {
-	return loadList(ctx, 10020, pubkey, pubkeyItem("p"))
+	return fromSDKList(sys.FetchMediaFollowList(ctx, pubkey), profileRefItem)
 }
 
 func loadFavoritePodcasts(ctx context.Context, pubkey nostr.PubKey) map[string]any {
-	return loadList(ctx, 10054, pubkey, func(tag nostr.Tag) (any, bool) {
-		if len(tag) < 2 {
-			return nil, false
-		}
-		if tag[0] == "p" && isHex64(tag[1]) {
-			return strings.ToLower(tag[1]), true
-		}
-		if tag[0] == "url" {
-			return tag[1], true
-		}
-		return nil, false
-	})
+	return fromSDKList(sys.FetchFavoritePodcastsList(ctx, pubkey), podcastRefItem)
 }
 
 func loadAuthoredPodcasts(ctx context.Context, pubkey nostr.PubKey) map[string]any {
-	return loadList(ctx, 10064, pubkey, pubkeyItem("p"))
+	return fromSDKList(sys.FetchAuthoredPodcastsList(ctx, pubkey), podcastRefItem)
 }
 
 // ─── addressable sets ────────────────────────────────────────────
 
 // loadSets returns the gadgets SetResult shape: { [dTag]: ResolvedSet }.
 func loadSets(ctx context.Context, kind nostr.Kind, pubkey nostr.PubKey, parse func(nostr.Tag) (any, bool)) map[string]any {
-	events := loadReplaceables(ctx, kind, pubkey, true)
+	events, _ := sdkSetEvents(ctx, kind, pubkey)
 	out := make(map[string]any, len(events))
 	for i := range events {
 		evt := events[i]
@@ -636,12 +640,7 @@ func loadRelaySets(ctx context.Context, pubkey nostr.PubKey) map[string]any {
 }
 
 func loadEmojiSets(ctx context.Context, pubkey nostr.PubKey) map[string]any {
-	return loadSets(ctx, 30030, pubkey, func(tag nostr.Tag) (any, bool) {
-		if len(tag) >= 3 && tag[0] == "emoji" {
-			return map[string]any{"shortcode": tag[1], "url": tag[2]}, true
-		}
-		return nil, false
-	})
+	return loadSets(ctx, 30030, pubkey, emojiItem)
 }
 
 // ─── composite helpers ───────────────────────────────────────────
@@ -661,12 +660,11 @@ func resolveSetPointer(ctx context.Context, item any, parse func(nostr.Tag) (any
 		return nil, false
 	}
 	kind := nostr.Kind(kindNum)
-	for _, evt := range loadReplaceables(ctx, kind, pk, true) {
-		if evt.Tags.GetD() == identifier {
-			return resolvedSet(evt, kind, identifier, itemsFromTags(evt, parse)), true
-		}
+	evt := setEvent(ctx, kind, pk, identifier)
+	if evt == nil {
+		return nil, false
 	}
-	return nil, false
+	return resolvedSet(*evt, kind, identifier, itemsFromTags(*evt, parse)), true
 }
 
 // fetchFavoriteRelaysWithSets flattens kind:10012 into urls and resolved
@@ -690,12 +688,6 @@ func fetchFavoriteRelaysWithSets(ctx context.Context, pubkey nostr.PubKey) []any
 func fetchEmojisWithSets(ctx context.Context, pubkey nostr.PubKey) []any {
 	res := loadEmojis(ctx, pubkey)
 	items, _ := res["items"].([]any)
-	emojiTag := func(tag nostr.Tag) (any, bool) {
-		if len(tag) >= 3 && tag[0] == "emoji" {
-			return map[string]any{"shortcode": tag[1], "url": tag[2]}, true
-		}
-		return nil, false
-	}
 	out := make([]any, 0, len(items))
 	for _, item := range items {
 		if m, ok := item.(map[string]any); ok {
@@ -704,7 +696,7 @@ func fetchEmojisWithSets(ctx context.Context, pubkey nostr.PubKey) []any {
 				continue
 			}
 		}
-		if set, ok := resolveSetPointer(ctx, item, emojiTag); ok {
+		if set, ok := resolveSetPointer(ctx, item, emojiItem); ok {
 			out = append(out, set)
 		}
 	}
