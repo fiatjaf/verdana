@@ -9,7 +9,6 @@ import (
 
 	"fiatjaf.com/nostr/sdk"
 	"gioui.org/app"
-	"gioui.org/font/gofont"
 	"gioui.org/io/clipboard"
 	"gioui.org/layout"
 	"gioui.org/op"
@@ -34,6 +33,8 @@ var (
 	children   []*childInfo
 	verdanaDir string
 )
+
+const APP_TITLE = "Verdana"
 
 func main() {
 	pid := os.Getpid()
@@ -78,10 +79,11 @@ func killAllChildren() {
 
 func gioMain() {
 	th := material.NewTheme()
-	th.Shaper = text.NewShaper(text.WithCollection(gofont.Collection()))
+	th.Shaper = text.NewShaper(text.WithCollection(fontCollection()))
+	th.Face = "vFont"
 
 	w := new(app.Window)
-	w.Option(app.Title("Verdana"), app.Size(unit.Dp(560), unit.Dp(640)))
+	w.Option(app.Title(APP_TITLE), app.Size(unit.Dp(560), unit.Dp(640)))
 	gioWin = w
 
 	var (

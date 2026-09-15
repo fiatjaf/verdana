@@ -34,6 +34,12 @@ func setTab(t int) {
 	}
 }
 
+// emph is an italic Verdana label for emphasis-ish subtle text.
+func emph(l material.LabelStyle) material.LabelStyle {
+	l.Font.Style = font.Italic
+	return l
+}
+
 func parseRelays(text string) []string {
 	var out []string
 	for _, line := range strings.Split(text, "\n") {
@@ -162,7 +168,7 @@ func layoutLogin(gtx layout.Context, th *material.Theme, ed *widget.Editor, btn 
 		}),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			l := material.Body2(th, "Paste your nsec or a bunker:// URL")
+			l := emph(material.Body2(th, "Paste your nsec or a bunker:// URL"))
 			l.Color = currentTheme().subtle
 			return l.Layout(gtx)
 		}),
@@ -249,7 +255,7 @@ func layoutNappsTab(gtx layout.Context, th *material.Theme, list *widget.List, r
 func layoutDiscoveryTab(gtx layout.Context, th *material.Theme, list *widget.List, relaysEd *widget.Editor, fetchBtn *widget.Clickable, actionBtns []widget.Clickable, fetchErr string, fetching bool, discovery []Napp, installedSet, busy map[string]bool) layout.Dimensions {
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			l := material.Body2(th, "Relays (one per line)")
+			l := emph(material.Body2(th, "Relays (one per line)"))
 			l.Color = currentTheme().subtle
 			return l.Layout(gtx)
 		}),
