@@ -12,11 +12,8 @@ import (
 var defaultRelays = []string{
 	"relay.nostrapps.com",
 	"relay.nostrapps.com/public",
-}
-
-var defaultBlossomServers = []string{
-	"https://blossom.primal.net",
-	"https://cdn.satellite.earth",
+	"relay.nostrapps.com/internal",
+	"relay.nostrapps.com/personal",
 }
 
 var (

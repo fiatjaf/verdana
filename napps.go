@@ -9,9 +9,12 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
+
+	"fiatjaf.com/nostr"
 )
 
 func nappBaseDir(id string) string {
@@ -66,7 +69,7 @@ func installNapp(n Napp) {
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
-	servers := append(append([]string(nil), n.Servers...), defaultBlossomServers...)
+	servers := n.blossomServers(ctx)
 	for _, p := range n.Paths {
 		data, err := downloadBlob(ctx, servers, p.Sha256)
 		if err != nil {
@@ -116,14 +119,44 @@ func uninstallNapp(id string) {
 	log.Info().Str("napp", id).Msg("uninstall complete")
 }
 
+func (n Napp) blossomServers(ctx context.Context) []string {
+	servers := make([]string, 0, 8)
+	add := func(raw string) {
+		url, err := nostr.NormalizeHTTPURL(raw)
+		if err != nil || url == "" {
+			return
+		}
+		if !slices.Contains(servers, url) {
+			servers = append(servers, url)
+		}
+	}
+
+	add("https://relay.nostrapps.com")
+
+	for _, srv := range n.Servers {
+		add(srv)
+	}
+
+	if sys != nil && n.Author != nostr.ZeroPK {
+		listCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		list := sys.FetchBlossomServerList(listCtx, n.Author)
+		cancel()
+		for _, srv := range list.Items {
+			add(string(srv))
+		}
+		log.Debug().Str("napp", n.ID).Int("authored", len(list.Items)).
+			Msg("loaded the author's blossom servers")
+	}
+
+	add("https://nostr.download")
+
+	return servers
+}
+
 func downloadBlob(ctx context.Context, servers []string, sha string) ([]byte, error) {
 	log.Debug().Str("sha256", sha).Int("servers", len(servers)).Msg("downloading blob")
 	var lastErr error = errors.New("no servers")
 	for _, srv := range servers {
-		srv = strings.TrimRight(srv, "/")
-		if !strings.Contains(srv, "://") {
-			srv = "https://" + srv
-		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, srv+"/"+sha, nil)
 		if err != nil {
 			lastErr = err
