@@ -107,6 +107,23 @@ func uninstallNapp(id string) {
 	log.Info().Str("napp", id).Msg("uninstall complete")
 }
 
+// iconAsset resolves the napp's "icon" tag to the file it names. The tag is a
+// path into the napp itself ("/icon.png"), which the event also carries a
+// "path" tag for, so the icon is a blob like everything else. The leading
+// slash is optional on either side, so both are trimmed before comparing.
+func (n Napp) iconAsset() (NappPath, bool) {
+	want := strings.TrimPrefix(n.Icon, "/")
+	if want == "" {
+		return NappPath{}, false
+	}
+	for _, p := range n.Paths {
+		if strings.TrimPrefix(p.Path, "/") == want {
+			return p, true
+		}
+	}
+	return NappPath{}, false
+}
+
 // maxParallelAssets caps how many of a napp's files are in flight at once, so
 // a big napp doesn't open a connection per asset against the same server.
 const maxParallelAssets = 6

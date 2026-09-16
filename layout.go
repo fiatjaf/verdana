@@ -229,7 +229,7 @@ func layoutTabs(gtx layout.Context, th *material.Theme, nappsBtn, discoBtn *widg
 	}
 	return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return tabBtn(gtx, nappsBtn, "Napps", tab == 0)
+			return tabBtn(gtx, nappsBtn, "Installed", tab == 0)
 		}),
 		layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -348,10 +348,24 @@ func layoutProfile(gtx layout.Context, th *material.Theme, themeBtn *widget.Clic
 }
 
 func avatar(gtx layout.Context, url string, size int) layout.Dimensions {
+	imgOp, ok := getImage(url)
+	return imageSquare(gtx, size, imgOp, ok)
+}
+
+// nappIcon draws a napp's icon, or a plain square for the napps that declare
+// none (and while one is still being fetched).
+func nappIcon(gtx layout.Context, n Napp, size int) layout.Dimensions {
+	imgOp, ok := nappIconImage(n)
+	return imageSquare(gtx, size, imgOp, ok)
+}
+
+// imageSquare paints an image cropped to a rounded square, filling it with
+// the theme's placeholder colour when there is nothing to paint yet.
+func imageSquare(gtx layout.Context, size int, imgOp paint.ImageOp, ok bool) layout.Dimensions {
 	px := gtx.Dp(unit.Dp(size))
 	sq := image.Point{X: px, Y: px}
 	defer clip.RRect{Rect: image.Rectangle{Max: sq}, NW: 6, NE: 6, SW: 6, SE: 6}.Push(gtx.Ops).Pop()
-	if imgOp, ok := getImage(url); ok {
+	if ok {
 		isz := imgOp.Size()
 		if isz.X > 0 && isz.Y > 0 {
 			scale := float32(px) / float32(isz.X)
@@ -394,11 +408,8 @@ func renderNappCard(gtx layout.Context, th *material.Theme, btn *widget.Clickabl
 		}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					if napp.Icon == "" {
-						return layout.Dimensions{}
-					}
 					return layout.Inset{Right: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						return avatar(gtx, napp.Icon, 40)
+						return nappIcon(gtx, napp, 40)
 					})
 				}),
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
