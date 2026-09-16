@@ -1,5 +1,5 @@
-verdana
-child/child
+desktop/verdana
+desktop/child/child
 
 # android build products
 android/app/libs/backend.aar

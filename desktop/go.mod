@@ -1,4 +1,4 @@
-module fiatjaf.com/verdana
+module fiatjaf.com/verdana/desktop
 
 go 1.26.2
 
@@ -56,7 +56,7 @@ require (
 	github.com/ebitengine/purego v0.8.2 // indirect
 )
 
-replace fiatjaf.com/nostr => ../nostrlib
+replace fiatjaf.com/nostr => ../../nostrlib
 
 require verdana/backend v0.0.0
 
@@ -66,4 +66,4 @@ require (
 	golang.org/x/tools v0.50.0 // indirect
 )
 
-replace verdana/backend => ./backend
+replace verdana/backend => ../backend
