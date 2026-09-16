@@ -12,11 +12,15 @@ import "encoding/json"
 //	{t:"eval",   code}               run this in the napp's page
 //	{t:"action", id, method, params, idx?}  dispatch an action
 //	{t:"theme",  method:<name>, params:<vars json>}  theme changed
+//	{t:"prompt", params:<prompt json>}   show a prompt overlaying this
+//	                                     window ("" = take the overlay down)
 //	{t:"close"}                      close this window
 //
 // Shell → backend (all through HandleWireMessage):
 //
 //	{t:"rpc", id, method, params}    a window.nostr/nostrdb/napp call
+//	{t:"promptAnswer", id, params:{"ok","index"}}  the user answered
+//	                                 the prompt shown over this window
 type WireMsg struct {
 	T      string          `json:"t"`
 	ID     int             `json:"id,omitempty"`

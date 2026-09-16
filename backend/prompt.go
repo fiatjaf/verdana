@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"encoding/json"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -45,6 +46,12 @@ type Prompt struct {
 	// Napp is the napp that asked, for a GUI that wants to show it.
 	Napp string `json:"napp"`
 
+	// Instance is the window the prompt belongs over, when it was fired by
+	// a running napp: that screen covers itself with the prompt until it is
+	// answered. Empty for launcher-generated prompts (the GUI shows those
+	// wherever it likes).
+	Instance string `json:"instance"`
+
 	resp chan promptAnswer
 	done bool
 }
@@ -87,6 +94,7 @@ func enqueuePrompt(p *Prompt) {
 	if host != nil {
 		host.PromptsChanged()
 	}
+	syncPromptOverlays()
 }
 
 // AnswerPrompt is what a GUI calls when the user clicks: it hands the answer
@@ -135,6 +143,7 @@ func AnswerPrompt(id int, ok bool, index int) {
 	if host != nil {
 		host.PromptsChanged()
 	}
+	syncPromptOverlays()
 }
 
 func (p *Prompt) wait() promptAnswer {
@@ -167,6 +176,9 @@ func askApproval(ci *Instance, title, detail, code string) bool {
 		name = ci.napp.Label()
 	}
 	p := newPrompt(name, name+" wants to "+title, detail, code, nil)
+	if ci != nil {
+		p.Instance = ci.instance
+	}
 	log.Info().Str("napp", name).Str("ask", title).Msg("asking the user for approval")
 	enqueuePrompt(p)
 	answer := p.wait()
@@ -177,7 +189,11 @@ func askApproval(ci *Instance, title, detail, code string) bool {
 
 // askActionHandler asks which napp should handle an action when more than one
 // can. Open windows come first — routing into one keeps the user's state.
-func askActionHandler(callerName, action string, candidates []Napp, open []*Instance) (PromptOption, bool) {
+func askActionHandler(caller *Instance, action string, candidates []Napp, open []*Instance) (PromptOption, bool) {
+	callerName := "launcher"
+	if caller != nil {
+		callerName = caller.napp.Label()
+	}
 	options := make([]PromptOption, 0, len(candidates)+len(open))
 	for _, ci := range open {
 		options = append(options, PromptOption{
@@ -196,6 +212,9 @@ func askActionHandler(callerName, action string, candidates []Napp, open []*Inst
 	}
 
 	p := newPrompt(callerName, "Open “"+action+"” with…", "Fired by "+callerName+".", "", options)
+	if caller != nil {
+		p.Instance = caller.instance
+	}
 	log.Info().Str("action", action).Int("options", len(options)).Msg("asking the user to pick a handler")
 	enqueuePrompt(p)
 	answer := p.wait()
@@ -203,6 +222,87 @@ func askActionHandler(callerName, action string, candidates []Napp, open []*Inst
 		return PromptOption{}, false
 	}
 	return options[answer.index], true
+}
+
+// ─── showing prompts over the window that asked ──────────────────
+//
+// A prompt fired by a running napp belongs over that napp's own screen: the
+// covered window keeps it up until the answer comes back, and the launcher
+// chrome only shows prompts it generated itself.
+
+// promptOverlays tracks the instances currently showing a prompt overlay, so
+// each screen gets exactly one and stale ones come down when the prompt is
+// answered (or times out).
+var (
+	promptOverlayMu sync.Mutex
+	promptOverlays  = map[string]bool{}
+)
+
+// syncPromptOverlays makes what each napp window shows match the prompt
+// state: one overlay per window with a pending prompt, none elsewhere.
+// Safe to call after any change to the prompt state.
+func syncPromptOverlays() {
+	promptMu.Lock()
+	targets := make(map[string]*Prompt)
+	if promptActive != nil && promptActive.Instance != "" {
+		targets[promptActive.Instance] = promptActive
+	}
+	for _, q := range promptQueue {
+		if q.Instance != "" {
+			if _, ok := targets[q.Instance]; !ok {
+				targets[q.Instance] = q
+			}
+		}
+	}
+	promptMu.Unlock()
+
+	var hide []string
+	var showList []*Prompt
+
+	promptOverlayMu.Lock()
+	for inst := range promptOverlays {
+		if _, ok := targets[inst]; !ok {
+			hide = append(hide, inst)
+			delete(promptOverlays, inst)
+		}
+	}
+	for inst, p := range targets {
+		if !promptOverlays[inst] {
+			showList = append(showList, p)
+			promptOverlays[inst] = true
+		}
+	}
+	promptOverlayMu.Unlock()
+
+	for _, inst := range hide {
+		if ci := lookupInstance(inst); ci != nil {
+			ci.send(WireMsg{T: "prompt"})
+		}
+	}
+	for _, p := range showList {
+		raw, err := json.Marshal(p)
+		if err != nil {
+			continue
+		}
+		if ci := lookupInstance(p.Instance); ci != nil {
+			ci.send(WireMsg{T: "prompt", Params: string(raw)})
+		} else {
+			// the window is already gone: never mark it as covered
+			promptOverlayMu.Lock()
+			delete(promptOverlays, p.Instance)
+			promptOverlayMu.Unlock()
+		}
+	}
+}
+
+// handlePromptAnswer is what a shell sends up when its overlay was clicked.
+func (ci *Instance) handlePromptAnswer(m WireMsg) {
+	var a struct {
+		OK    bool `json:"ok"`
+		Index int  `json:"index"`
+	}
+	_ = json.Unmarshal([]byte(m.Params), &a)
+	AnswerPrompt(m.ID, a.OK, a.Index)
 }
 
 // preview trims an arbitrary payload into something a dialog can show.

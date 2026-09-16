@@ -87,6 +87,7 @@ func main() {
 	w.SetTitle(meta.Name)
 	w.SetSize(600, 450, webview.HintNone)
 	_ = w.Bind("__bridge_rpc", rpcBound)
+	_ = w.Bind("__verdana_prompt_answer", promptAnswer)
 
 	// window.name is where bridge.js picks up window.napp.instance, and it
 	// survives same-origin navigations — so a reload keeps the instance id.
@@ -204,6 +205,20 @@ func reader(w webview.WebView) {
 			break
 		}
 		switch m.T {
+		case "prompt":
+			// the prompt this napp asked for covers its own screen until
+			// answered (empty params take a stale overlay down)
+			if strings.TrimSpace(m.Params) == "" {
+				w.Dispatch(func() { w.Eval(promptHideCode()) })
+				continue
+			}
+			var pv promptView
+			if err := json.Unmarshal([]byte(m.Params), &pv); err != nil {
+				log.Warn().Err(err).Msg("unreadable prompt from launcher")
+				continue
+			}
+			code := promptOverlayCode(pv)
+			w.Dispatch(func() { w.Eval(code) })
 		case "resp":
 			pendingMu.Lock()
 			ch := pending[m.ID]
@@ -255,3 +270,120 @@ func writeMsg(m wireMsg) {
 	defer outMu.Unlock()
 	outEnc.Encode(m)
 }
+
+// ─── prompt overlay ──────────────────────────────────────────────
+//
+// A prompt fired by this napp is shown over its own screen: an opaque
+// overlay that hides the webview until the user answers it.
+
+// promptView and promptOptionView mirror backend.Prompt as the overlay needs
+// to see it.
+type promptView struct {
+	ID      int                `json:"id"`
+	Title   string             `json:"title"`
+	Detail  string             `json:"detail"`
+	Code    string             `json:"code"`
+	Options []promptOptionView `json:"options"`
+}
+
+type promptOptionView struct {
+	Label    string `json:"label"`
+	Detail   string `json:"detail"`
+	NappID   string `json:"nappId"`
+	Instance string `json:"instance"`
+}
+
+// promptAnswer is the bound call the overlay's buttons make. It sends the
+// answer up to the launcher and takes the overlay down; if the launcher has
+// another prompt queued for this window it will send it right back.
+func promptAnswer(id int, ok bool, index int) {
+	b, _ := json.Marshal(map[string]any{"ok": ok, "index": index})
+	writeMsg(wireMsg{T: "promptAnswer", ID: id, Params: string(b)})
+}
+
+func promptOverlayCode(pv promptView) string {
+	data, err := json.Marshal(pv)
+	if err != nil {
+		return ""
+	}
+	return promptLibScript + ";window.__verdana_prompt_lib.show(" + string(data) + ");"
+}
+
+func promptHideCode() string {
+	return ";if (window.__verdana_prompt_lib) window.__verdana_prompt_lib.hide();"
+}
+
+// promptLibScript defines the overlay runtime once per page. It draws an
+// opaque full-viewport cover — the napp underneath stays hidden until the
+// user answers.
+const promptLibScript = "(function(){" +
+	"if (window.__verdana_prompt_lib) return;" +
+	"function tok(k, fallback) {" +
+	"try { var v = (window.__nappTheme && window.__nappTheme.vars) || {};" +
+	"return v[k] || fallback } catch(e) { return fallback }" +
+	"};" +
+	"window.__verdana_prompt_lib = {" +
+	"show: function(p) {" +
+	"var old = document.getElementById('__verdana_prompt');" +
+	"if (old && old.parentNode) old.parentNode.removeChild(old);" +
+	"var dark = window.__nappTheme && window.__nappTheme.name === 'dark';" +
+	"var bg = tok('surface', dark ? '#17181b' : '#ffffff');" +
+	"var card = tok('surface-alt', dark ? '#23252b' : '#f2f2f2');" +
+	"var fg = tok('text', dark ? '#e8e8ea' : '#000000');" +
+	"var muted = tok('text-faint', dark ? '#7d818a' : '#999999');" +
+	"var accent = tok('accent', dark ? '#5c6bc0' : '#3f51b5');" +
+	"var accentText = tok('accent-text', '#ffffff');" +
+	"var border = tok('border', dark ? '#3a3d45' : '#cccccc');" +
+	"var o = document.createElement('div');" +
+	"o.id = '__verdana_prompt';" +
+	"o.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;" +
+	"z-index:2147483647;background:' + bg + ';color:' + fg" +
+	"+ ';font:14px sans-serif;overflow:auto;padding:24px;box-sizing:border-box;" +
+	"margin:0;border:0;display:flex;flex-direction:column;';" +
+	"var box = document.createElement('div');" +
+	"box.style.cssText = 'margin:auto 0;width:100%;max-width:520px;';" +
+	"var h = document.createElement('div');" +
+	"h.textContent = p.title;" +
+	"h.style.cssText = 'font-size:17px;font-weight:700;margin:0 0 10px;';" +
+	"box.appendChild(h);" +
+	"if (p.detail) {" +
+	"var d = document.createElement('div');" +
+	"d.textContent = p.detail;" +
+	"d.style.cssText = 'color:' + muted + ';margin-bottom:14px;line-height:1.45;';" +
+	"box.appendChild(d);" +
+	"}" +
+	"if (p.code) {" +
+	"var c = document.createElement('pre');" +
+	"c.style.cssText = 'white-space:pre-wrap;word-break:break-word;background:' + card " +
+	"+ ';border:1px solid ' + border + ';border-radius:8px;padding:10px" +
+	";max-height:160px;overflow:auto;font:12px monospace;margin:0 0 14px;';" +
+	"c.textContent = p.code;" +
+	"box.appendChild(c);" +
+	"}" +
+	"function btn(label, detail, ok, index) {" +
+	"var b = document.createElement('button');" +
+	"b.style.cssText = 'display:block;width:100%;padding:10px 14px;margin-bottom:8px" +
+	";border:0;border-radius:8px;background:' + accent" +
+	"+ ';color:' + accentText + ';font-size:14px;text-align:left;cursor:pointer;';" +
+	"b.textContent = detail ? label + '  \\u2014  ' + detail : label;" +
+	"b.onclick = function() { window.__verdana_prompt_answer(p.id, ok, index) };" +
+	"return b;" +
+	"};" +
+	"var isPicker = p.options && p.options.length;" +
+	"if (isPicker) {" +
+	"p.options.forEach(function(opt, i) { box.appendChild(btn(opt.label, opt.detail, true, i)) });" +
+	"} else {" +
+	"box.appendChild(btn('Allow', '', true, 0));" +
+	"}" +
+	"var cancel = btn(isPicker ? 'Cancel' : 'Deny', '', false, 0);" +
+	"cancel.style.background = card; cancel.style.color = fg;" +
+	"box.appendChild(cancel);" +
+	"o.appendChild(box);" +
+	"document.documentElement.appendChild(o);" +
+	"}," +
+	"hide: function() {" +
+	"var o = document.getElementById('__verdana_prompt');" +
+	"if (o && o.parentNode) o.parentNode.removeChild(o);" +
+	"}" +
+	"};" +
+	"})()"

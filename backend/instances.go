@@ -222,6 +222,11 @@ func HandleMessage(instance string, m WireMsg) {
 		return
 	}
 	switch m.T {
+	case "promptAnswer":
+		// the answer of the prompt overlaying this window. Answered
+		// inline, not in a goroutine: it mutates the prompt state and
+		// quicky; the window sends nothing else worth racing on.
+		ci.handlePromptAnswer(m)
 	case "rpc":
 		go ci.handleRPC(m)
 	default:
@@ -484,7 +489,7 @@ func runNappAction(
 		return dispatchToInstance(ctx, ci, req)
 	}
 
-	choice, ok := askActionHandler(callerName, name, candidates, open)
+	choice, ok := askActionHandler(caller, name, candidates, open)
 	if !ok {
 		return nil, errors.New("action handler selection cancelled")
 	}

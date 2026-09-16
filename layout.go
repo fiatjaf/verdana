@@ -179,10 +179,10 @@ func layoutLogin(gtx layout.Context, th *material.Theme, ed *widget.Editor, btn 
 	)
 }
 
-func layoutMain(gtx layout.Context, th *material.Theme, tabNappsBtn, tabDiscoBtn, themeBtn *widget.Clickable, tab int, installedList, discoveryList *widget.List, relaysEd *widget.Editor, fetchBtn *widget.Clickable, runBtns, actionBtns []widget.Clickable, st backend.State, installedSet, busy map[string]bool) layout.Dimensions {
+func layoutMain(gtx layout.Context, th *material.Theme, tabNappsBtn, tabDiscoBtn, themeBtn, logoutBtn *widget.Clickable, tab int, installedList, discoveryList *widget.List, relaysEd *widget.Editor, fetchBtn *widget.Clickable, runBtns, actionBtns []widget.Clickable, st backend.State, installedSet, busy map[string]bool) layout.Dimensions {
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layoutProfile(gtx, th, themeBtn, st.ProfileName, st.ProfilePicture)
+			return layoutProfile(gtx, th, themeBtn, logoutBtn, st.ProfileName, st.ProfilePicture)
 		}),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -309,7 +309,61 @@ func layoutDiscoveryTab(gtx layout.Context, th *material.Theme, list *widget.Lis
 	)
 }
 
-func layoutProfile(gtx layout.Context, th *material.Theme, themeBtn *widget.Clickable, name, pic string) layout.Dimensions {
+// layoutConfirmLogout is the dialog shown when the user hits "Log out":
+// logging out closes every open napp, so it deserves a second look.
+func layoutConfirmLogout(gtx layout.Context, th *material.Theme, yesBtn, noBtn *widget.Clickable) layout.Dimensions {
+	p := currentTheme()
+	return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		macro := op.Record(gtx.Ops)
+		dims := layout.UniformInset(unit.Dp(20)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					t := material.H6(th, "Log out?")
+					t.Font.Weight = font.Bold
+					return t.Layout(gtx)
+				}),
+				layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					l := material.Body2(th, "This closes every open napp and forgets the key on this device.")
+					l.Color = p.subtle
+					return l.Layout(gtx)
+				}),
+				layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							pointer.CursorPointer.Add(gtx.Ops)
+							b := material.Button(th, yesBtn, "Log out")
+							b.Background = p.chipBg
+							b.Color = p.danger
+							return b.Layout(gtx)
+						}),
+						layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							pointer.CursorPointer.Add(gtx.Ops)
+							b := material.Button(th, noBtn, "Cancel")
+							b.Background = p.chipBg
+							b.Color = p.chipFg
+							return b.Layout(gtx)
+						}),
+					)
+				}),
+			)
+		})
+		call := macro.Stop()
+		// card behind the dialog, like the prompt dialogs
+		bg := clip.RRect{
+			Rect: image.Rectangle{Max: image.Point{X: dims.Size.X, Y: dims.Size.Y}},
+			NW:   10, NE: 10, SW: 10, SE: 10,
+		}
+		defer bg.Push(gtx.Ops).Pop()
+		paint.Fill(gtx.Ops, p.card)
+		call.Add(gtx.Ops)
+		return dims
+	})
+}
+
+func layoutProfile(gtx layout.Context, th *material.Theme, themeBtn, logoutBtn *widget.Clickable, name, pic string) layout.Dimensions {
 	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return avatar(gtx, pic, 48)
@@ -333,6 +387,20 @@ func layoutProfile(gtx layout.Context, th *material.Theme, themeBtn *widget.Clic
 			b := material.Button(th, themeBtn, label)
 			b.Background = p.chipBg
 			b.Color = p.chipFg
+			b.TextSize = unit.Sp(13)
+			b.Inset = layout.UniformInset(unit.Dp(8))
+			return b.Layout(gtx)
+		}),
+		layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if logoutBtn == nil {
+				return layout.Dimensions{}
+			}
+			pointer.CursorPointer.Add(gtx.Ops)
+			p := currentTheme()
+			b := material.Button(th, logoutBtn, "Log out")
+			b.Background = p.chipBg
+			b.Color = p.danger
 			b.TextSize = unit.Sp(13)
 			b.Inset = layout.UniformInset(unit.Dp(8))
 			return b.Layout(gtx)
