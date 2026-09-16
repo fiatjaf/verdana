@@ -5,18 +5,60 @@
   // or the local eventstore is an rpc to the Go host; the bech32/hex helpers
   // below are pure, so they stay here and answer synchronously.
 
-  const _rpc = window.__bridge_rpc
   const feedCallbacks = new Map()
   const actionHandlers = []
   let serial = 0
 
-  function rpc(method, params) {
-    return _rpc(method, params !== undefined ? JSON.stringify(params) : "null").then(result => {
-      const val = typeof result === "string" ? JSON.parse(result) : result
+  // ── talking to the host ─────────────────────────────────────────
+  // Two shells inject this same file. The desktop's webview binds a
+  // promise-returning __bridge_rpc; on Android there is a web message channel
+  // instead (__verdanaHost), which answers with a {t:"resp", id, …} message.
+  // Nothing below this closure knows which one it got.
+  const rpc = (() => {
+    const decode = value => {
+      const val = typeof value === "string" ? JSON.parse(value) : value
       if (val && val.__bridge_error) throw new Error(val.__bridge_error)
       return val
-    })
-  }
+    }
+    const encode = params => (params !== undefined ? JSON.stringify(params) : "null")
+
+    if (typeof window.__bridge_rpc === "function") {
+      const bound = window.__bridge_rpc
+      return (method, params) => bound(method, encode(params)).then(decode)
+    }
+
+    const port = window.__verdanaHost
+    if (!port) return () => Promise.reject(new Error("no napp host to talk to"))
+
+    const pending = new Map()
+    let rpcSerial = 0
+    port.onmessage = event => {
+      let msg
+      try {
+        msg = JSON.parse(typeof event.data === "string" ? event.data : "")
+      } catch {
+        return
+      }
+      const waiter = msg && pending.get(msg.id)
+      if (!waiter) return
+      pending.delete(msg.id)
+      if (msg.error) {
+        waiter.reject(new Error(msg.error))
+        return
+      }
+      try {
+        waiter.resolve(msg.result === undefined ? null : decode(msg.result))
+      } catch (err) {
+        waiter.reject(err)
+      }
+    }
+    return (method, params) =>
+      new Promise((resolve, reject) => {
+        const id = ++rpcSerial
+        pending.set(id, { resolve, reject })
+        port.postMessage(JSON.stringify({ t: "rpc", id, method, params: encode(params) }))
+      })
+  })()
 
   // ── host → napp hooks ───────────────────────────────────────────
   window.__bridge_feed_callback = function (callbackId, eventsJSON, synced) {

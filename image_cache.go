@@ -10,14 +10,13 @@ import (
 	_ "image/png"
 	"io"
 	"net/http"
-	"os"
-	"path/filepath"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"gioui.org/op/paint"
+
+	"verdana/backend"
 )
 
 type imgEntry struct {
@@ -91,21 +90,15 @@ func getImage(url string) (paint.ImageOp, bool) {
 
 // nappIconImage loads the icon a napp declares. That icon is not a URL: the
 // "icon" tag names one of the napp's own files, so it's a blossom blob like
-// every other asset — already on disk when the napp is installed, downloaded
-// from its author's servers when it isn't.
+// every other asset, and the backend knows how to get it — from the install
+// directory or from the author's servers.
 //
 // Keyed by the blob hash, so two napps shipping the same icon share it and a
 // reinstall doesn't refetch it.
-func nappIconImage(n Napp) (paint.ImageOp, bool) {
-	asset, ok := n.iconAsset()
-	if !ok {
+func nappIconImage(n backend.Napp) (paint.ImageOp, bool) {
+	hash := n.IconHash()
+	if hash == "" {
 		return paint.ImageOp{}, false
 	}
-	return cachedImage("sha256:"+asset.Sha256, func(ctx context.Context) ([]byte, error) {
-		local := filepath.Join(nappBaseDir(n.ID), filepath.FromSlash(strings.TrimPrefix(asset.Path, "/")))
-		if data, err := os.ReadFile(local); err == nil {
-			return data, nil
-		}
-		return downloadBlob(ctx, n.blossomServers(ctx), asset.Sha256)
-	})
+	return cachedImage("sha256:"+hash, n.IconBlob)
 }

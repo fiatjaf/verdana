@@ -1,4 +1,4 @@
-package main
+package backend
 
 import (
 	"context"
@@ -73,7 +73,7 @@ func listCall(params string, fn func(context.Context, nostr.PubKey) any, empty a
 	return fn(ctx, pk), nil
 }
 
-func bridgeRPC(ci *childInfo) func(string, string) (any, error) {
+func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 	return func(method string, params string) (any, error) {
 		log.Debug().Str("method", method).Str("instance", ci.instance).Msg("bridge rpc call")
 
@@ -342,13 +342,14 @@ func bridgeRPC(ci *childInfo) func(string, string) (any, error) {
 				return nil, err
 			}
 			if p.Name != "" {
-				ci.lastAction = &actionRequest{name: p.Name, payload: p.Payload}
+				ci.lastAction.Store(&actionRequest{name: p.Name, payload: p.Payload})
+				notifyState()
 			}
 			return nil, nil
 
 		case "napp.close":
 			log.Info().Str("instance", ci.instance).Msg("napp asked to close its window")
-			ci.send(wireMsg{T: "close"})
+			ci.send(WireMsg{T: "close"})
 			return nil, nil
 
 		case "napp.link":
@@ -646,9 +647,9 @@ func bridgeRPC(ci *childInfo) func(string, string) (any, error) {
 			if err := json.Unmarshal([]byte(params), &p); err != nil {
 				return nil, err
 			}
-			name := sanitizeFilename(p.Name)
+			name := SanitizeFilename(p.Name)
 			if !askApproval(ci, "save a file to your disk",
-				"“"+name+"” goes to "+downloadsDir()+".", "") {
+				"“"+name+"” goes to "+host.SaveFileTarget()+".", "") {
 				return nil, errors.New("denied by the user")
 			}
 			return saveFileForNapp(p.Name, p.Data)
@@ -764,7 +765,7 @@ func publishTargets(ctx context.Context, evt nostr.Event, requested []string) []
 
 // publishEvent stores the event locally, asks the user, publishes and reports
 // per-relay outcomes in the PublishResult shape from env.d.ts.
-func publishEvent(ci *childInfo, evt nostr.Event, requested []string) (any, error) {
+func publishEvent(ci *Instance, evt nostr.Event, requested []string) (any, error) {
 	if sys == nil {
 		return nil, errors.New("system not ready")
 	}

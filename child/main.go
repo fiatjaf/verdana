@@ -1,7 +1,6 @@
 package main
 
 import (
-	_ "embed"
 	"encoding/json"
 	"errors"
 	"net"
@@ -18,10 +17,9 @@ import (
 	"github.com/abemedia/go-webview"
 	_ "github.com/abemedia/go-webview/embedded"
 	"github.com/rs/zerolog"
-)
 
-//go:embed bridge.js
-var bridgeJS string
+	nappbridge "verdana/backend/webview"
+)
 
 type wireMsg struct {
 	T      string          `json:"t"`
@@ -97,7 +95,8 @@ func main() {
 	w.Init("window.name = " + jsString(meta.Instance) + ";" +
 		"window.__nappDomains = " + jsStringSlice(meta.Requires) + ";" +
 		themeInitScript(meta.Theme, meta.ThemeVars))
-	w.Init(bridgeJS)
+	// the very same bridge.js the Android app injects
+	w.Init(nappbridge.JS())
 
 	url := startNappServer(meta.Dir)
 	w.Navigate(url)

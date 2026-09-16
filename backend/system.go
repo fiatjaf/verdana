@@ -1,6 +1,7 @@
-package main
+package backend
 
 import (
+	"fmt"
 	"path/filepath"
 
 	lmdb "fiatjaf.com/nostr/eventstore/lmdb"
@@ -8,19 +9,20 @@ import (
 	bolt_kv "fiatjaf.com/nostr/sdk/kvstore/bbolt"
 )
 
-func initSystem(dataDir string) func() {
+func initSystem(dataDir string) (func(), error) {
 	log.Info().Str("path", filepath.Join(dataDir, "eventstore")).Msg("init eventstore")
 	db := &lmdb.LMDBBackend{
 		Path: filepath.Join(dataDir, "eventstore"),
 	}
 	if err := db.Init(); err != nil {
-		log.Fatal().Err(err).Msg("failed to init eventstore")
+		return nil, fmt.Errorf("eventstore: %w", err)
 	}
 
 	log.Info().Str("path", filepath.Join(dataDir, "kvstore")).Msg("init kvstore")
 	kv, err := bolt_kv.NewStore(filepath.Join(dataDir, "kvstore"))
 	if err != nil {
-		log.Fatal().Err(err).Msg("failed to init kvstore")
+		db.Close()
+		return nil, fmt.Errorf("kvstore: %w", err)
 	}
 
 	sys = sdk.NewSystem()
@@ -32,5 +34,9 @@ func initSystem(dataDir string) func() {
 	sys.Pool.DuplicateMiddleware = sys.TrackEventRelaysD
 
 	log.Info().Msg("system initialized")
-	return db.Close
+	return db.Close, nil
 }
+
+// Sys is the sdk system the backend runs on, for a GUI that needs to reach it
+// directly (the launcher's own profile lookups, say).
+func Sys() *sdk.System { return sys }

@@ -1,4 +1,4 @@
-package main
+package backend
 
 import (
 	"context"
@@ -74,7 +74,7 @@ func (p feedParams) filter(authors []nostr.PubKey, inbox bool) nostr.Filter {
 }
 
 // startFeed resolves what to ask and from where, then runs the pump.
-func startFeed(ctx context.Context, ci *childInfo, method string, p feedParams) {
+func startFeed(ctx context.Context, ci *Instance, method string, p feedParams) {
 	if sys == nil {
 		return
 	}
@@ -163,7 +163,7 @@ func sdkPubkey(input string) *nostr.PubKey {
 
 // feedPump serves the local store first (instant render), then subscribes and
 // keeps pushing. Events are batched so a napp isn't called once per event.
-func feedPump(ctx context.Context, ci *childInfo, callbackID int, filter nostr.Filter, relays []string) {
+func feedPump(ctx context.Context, ci *Instance, callbackID int, filter nostr.Filter, relays []string) {
 	batch := make([]nostr.Event, 0, 64)
 	seen := make(map[nostr.ID]bool, 128)
 	synced := false
@@ -222,7 +222,7 @@ func feedPump(ctx context.Context, ci *childInfo, callbackID int, filter nostr.F
 }
 
 // deliverFeed hands a batch to the napp's callback inside its webview.
-func (ci *childInfo) deliverFeed(callbackID int, events []nostr.Event, synced bool) {
+func (ci *Instance) deliverFeed(callbackID int, events []nostr.Event, synced bool) {
 	if events == nil {
 		events = []nostr.Event{}
 	}

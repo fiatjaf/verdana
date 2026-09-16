@@ -1,2 +1,10 @@
 verdana
 child/child
+
+# android build products
+android/app/libs/backend.aar
+android/app/libs/backend-sources.jar
+android/app/build
+android/.gradle
+android/build
+android/local.properties

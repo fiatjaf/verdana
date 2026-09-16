@@ -7,7 +7,6 @@ import (
 	"strings"
 	"sync"
 
-	"fiatjaf.com/nostr/sdk"
 	"gioui.org/app"
 	"gioui.org/io/clipboard"
 	"gioui.org/layout"
@@ -18,28 +17,36 @@ import (
 	"gioui.org/widget"
 	"gioui.org/widget/material"
 	"github.com/rs/zerolog"
+
+	"verdana/backend"
 )
 
-var (
-	sys       *sdk.System
-	ui        = uiState{phase: "loading", busy: make(map[string]bool)}
-	openReqCh = make(chan openReq, 16)
-	gioWin    *app.Window
-	log       zerolog.Logger
-)
+// This is the desktop launcher: a Gio window, and nothing else. Everything it
+// shows comes from backend.Snapshot(), everything it does is a backend call,
+// and every napp window is a child process (see childproc.go).
+
+// gioState is what belongs to this window alone — the backend owns the rest.
+type gioState struct {
+	mu  sync.Mutex
+	tab int
+
+	// clipboard holds texts napp.utils.copyText asked for: only a Gio frame
+	// can execute clipboard.WriteCmd, so the host parks them here and the
+	// next frame drains them.
+	clipboard []string
+}
 
 var (
-	mu         sync.Mutex
-	children   []*childInfo
-	verdanaDir string
+	ui     gioState
+	gioWin *app.Window
+	log    zerolog.Logger
 )
 
 const APP_TITLE = "Verdana"
 
 func main() {
-	pid := os.Getpid()
 	log = zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr}).With().
-		Int("_", pid).
+		Int("_", os.Getpid()).
 		Timestamp().
 		Logger()
 	log.Info().Msg("starting verdana")
@@ -48,33 +55,34 @@ func main() {
 	if err != nil {
 		log.Fatal().Err(err).Msg("no data dir")
 	}
-	verdanaDir = filepath.Join(dataDir, "Verdana")
-	os.MkdirAll(verdanaDir, 0755)
-	closer := initSystem(verdanaDir)
-	defer closer()
 
-	loadState()
+	closeStores, err := backend.Start(backend.Options{
+		DataDir: filepath.Join(dataDir, "Verdana"),
+		Host:    gioHost{},
+		Log:     &log,
+	})
+	if err != nil {
+		log.Fatal().Err(err).Msg("could not start the backend")
+	}
+	defer closeStores()
+
+	// the palette the user last chose, and its CSS tokens for napps
 	applyStoredTheme()
-	refreshInstalled()
-	go buildUserIndex()
 
 	go gioMain()
-	go webviewServer()
 	app.Main()
 
+	backend.CloseAllWindows()
 	killAllChildren()
 }
 
-func killAllChildren() {
-	mu.Lock()
-	snapshot := append([]*childInfo(nil), children...)
-	mu.Unlock()
-	for _, ci := range snapshot {
-		if ci.cmd != nil && ci.cmd.Process != nil {
-			ci.cmd.Process.Kill()
-		}
+func setTab(t int) {
+	ui.mu.Lock()
+	ui.tab = t
+	ui.mu.Unlock()
+	if gioWin != nil {
+		gioWin.Invalidate()
 	}
-	log.Info().Int("count", len(snapshot)).Msg("killed all child processes")
 }
 
 func gioMain() {
@@ -106,13 +114,7 @@ func gioMain() {
 	relaysEd.SingleLine = false
 	installedList.Axis = layout.Vertical
 	discoveryList.Axis = layout.Vertical
-	relaysEd.SetText(relayListText())
-
-	if strings.TrimSpace(state.Login) != "" {
-		go doLogin(state.Login)
-	} else {
-		setPhase("login")
-	}
+	relaysEd.SetText(strings.Join(backend.Relays(), "\n"))
 
 	var ops op.Ops
 	for {
@@ -126,28 +128,22 @@ func gioMain() {
 			pal.apply(th)
 			paint.Fill(gtx.Ops, pal.bg)
 
+			st := backend.Snapshot()
+			activePrompt := backend.CurrentPrompt()
+
 			ui.mu.Lock()
-			activePrompt := ui.prompt
+			tab := ui.tab
 			pendingCopies := ui.clipboard
 			ui.clipboard = nil
-			phase := ui.phase
-			tab := ui.tab
-			loginErr := ui.loginErr
-			profName := ui.profName
-			profPic := ui.profPic
-			fetchErr := ui.fetchErr
-			fetching := ui.fetching
-			discoverySnap := ui.discovery
-			installedSnap := ui.installed
-			busySnap := make(map[string]bool, len(ui.busy))
-			for k, v := range ui.busy {
-				busySnap[k] = v
-			}
 			ui.mu.Unlock()
 
-			installedSet := make(map[string]bool, len(installedSnap))
-			for _, n := range installedSnap {
+			installedSet := make(map[string]bool, len(st.Installed))
+			for _, n := range st.Installed {
 				installedSet[n.ID] = true
+			}
+			busy := make(map[string]bool, len(st.Busy))
+			for _, id := range st.Busy {
+				busy[id] = true
 			}
 
 			// copyText can only reach the clipboard from inside a frame
@@ -162,34 +158,33 @@ func gioMain() {
 				// a prompt takes over the window until it is answered: the napp
 				// that asked is blocked on it
 				if activePrompt != nil {
-					for len(optBtns) < len(activePrompt.options) {
+					for len(optBtns) < len(activePrompt.Options) {
 						optBtns = append(optBtns, widget.Clickable{})
 					}
 					if approveBtn.Clicked(gtx) {
-						answerPrompt(activePrompt, true, 0)
+						backend.AnswerPrompt(activePrompt.ID, true, 0)
 					}
 					if denyBtn.Clicked(gtx) {
-						answerPrompt(activePrompt, false, 0)
+						backend.AnswerPrompt(activePrompt.ID, false, 0)
 					}
-					for i := range activePrompt.options {
+					for i := range activePrompt.Options {
 						if optBtns[i].Clicked(gtx) {
-							answerPrompt(activePrompt, true, i)
+							backend.AnswerPrompt(activePrompt.ID, true, i)
 						}
 					}
 					return layoutPrompt(gtx, th, activePrompt, &approveBtn, &denyBtn, optBtns)
 				}
 
-				switch phase {
-				case "login":
+				switch st.Phase {
+				case backend.PhaseLogin:
 					if loginBtn.Clicked(gtx) {
 						in := strings.TrimSpace(loginEd.Text())
 						if in != "" {
-							setPhase("loading")
-							go doLogin(in)
+							go backend.Login(in)
 						}
 					}
-					return layoutLogin(gtx, th, &loginEd, &loginBtn, loginErr)
-				case "main":
+					return layoutLogin(gtx, th, &loginEd, &loginBtn, st.LoginErr)
+				case backend.PhaseMain:
 					if tabNappsBtn.Clicked(gtx) {
 						setTab(0)
 					}
@@ -200,44 +195,39 @@ func gioMain() {
 						toggleTheme()
 					}
 					if fetchBtn.Clicked(gtx) {
-						stateMu.Lock()
-						state.Relays = parseRelays(relaysEd.Text())
-						saveState()
-						relays := append([]string(nil), state.Relays...)
-						stateMu.Unlock()
-						go doFetch(relays)
+						backend.SetRelays(parseRelays(relaysEd.Text()))
+						go backend.Fetch()
 					}
-					for len(runBtns) < len(installedSnap) {
+					for len(runBtns) < len(st.Installed) {
 						runBtns = append(runBtns, widget.Clickable{})
 					}
-					for len(actionBtns) < len(discoverySnap) {
+					for len(actionBtns) < len(st.Discovery) {
 						actionBtns = append(actionBtns, widget.Clickable{})
 					}
 					if tab == 0 {
-						for i := range installedSnap {
+						for i := range st.Installed {
 							if runBtns[i].Clicked(gtx) {
-								launchNapp(installedSnap[i])
+								backend.Launch(st.Installed[i])
 							}
 						}
 					} else {
-						for i := range discoverySnap {
+						for i := range st.Discovery {
 							if actionBtns[i].Clicked(gtx) {
-								n := discoverySnap[i]
-								if busySnap[n.ID] {
+								n := st.Discovery[i]
+								if busy[n.ID] {
 									continue
 								}
 								if installedSet[n.ID] {
-									go uninstallNapp(n.ID)
+									go backend.Uninstall(n.ID)
 								} else {
-									go installNapp(n)
+									go backend.Install(n)
 								}
 							}
 						}
 					}
 					return layoutMain(gtx, th, &tabNappsBtn, &tabDiscoBtn, &themeBtn, tab,
 						&installedList, &discoveryList, &relaysEd, &fetchBtn,
-						runBtns, actionBtns, profName, profPic, fetchErr, fetching,
-						installedSnap, discoverySnap, installedSet, busySnap)
+						runBtns, actionBtns, st, installedSet, busy)
 				default:
 					return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 						return material.Body1(th, "Loading\u2026").Layout(gtx)
@@ -251,18 +241,4 @@ func gioMain() {
 			return
 		}
 	}
-}
-
-func relayListText() string {
-	stateMu.Lock()
-	relays := state.Relays
-	stateMu.Unlock()
-	var b strings.Builder
-	for i, r := range relays {
-		if i > 0 {
-			b.WriteByte('\n')
-		}
-		b.WriteString(r)
-	}
-	return b.String()
 }

@@ -7,14 +7,18 @@ import (
 	"sync"
 
 	"gioui.org/widget/material"
+
+	"verdana/backend"
 )
 
 // The launcher has one theme at a time and every napp tracks it: the Gio
 // palette below draws the launcher itself, and the same colors travel to each
 // napp window as the CSS tokens behavior.md documents (`data-theme` on <html>
-// plus `--surface`/`--text` & friends on :root). Napps are told at startup
-// (through an Init script in the child process) and on every change (through
-// a `theme` wire message that ends up in bridge.js's __bridge_theme_change).
+// plus `--surface`/`--text` & friends on :root).
+//
+// Delivering them is the backend's job — it hands them to a window as it
+// opens and pushes a `theme` message to the open ones — so all this file does
+// is own the colors and tell the backend which ones are current.
 
 type themePalette struct {
 	name string
@@ -100,15 +104,16 @@ func currentTheme() themePalette {
 }
 
 // applyStoredTheme picks up the theme the user last chose. Called once at
-// startup, before the first frame and before any napp is launched.
+// startup, before the first frame and before any napp is launched, so napps
+// start already themed.
 func applyStoredTheme() {
-	stateMu.Lock()
-	name := state.Theme
-	stateMu.Unlock()
+	p := paletteByName(backend.ThemeName())
 
 	themeMu.Lock()
-	curTheme = paletteByName(name)
+	curTheme = p
 	themeMu.Unlock()
+
+	backend.SetTheme(p.name, p.varsJSON())
 }
 
 // apply hands the palette to Gio. The frame loop calls this on every frame,
@@ -143,17 +148,17 @@ func (p themePalette) vars() map[string]string {
 	}
 }
 
-// themeWire is what travels to a napp: the theme name and its tokens as JSON.
-func themeWire() (string, string) {
-	p := currentTheme()
+// varsJSON is the tokens as the backend carries them.
+func (p themePalette) varsJSON() string {
 	varsJSON, err := json.Marshal(p.vars())
 	if err != nil {
-		return p.name, "{}"
+		return "{}"
 	}
-	return p.name, string(varsJSON)
+	return string(varsJSON)
 }
 
-// setTheme switches the launcher's theme and tells every open napp about it.
+// setTheme switches the launcher's theme. The backend persists it and pushes
+// it to every open napp.
 func setTheme(name string) {
 	p := paletteByName(name)
 
@@ -165,16 +170,10 @@ func setTheme(name string) {
 	curTheme = p
 	themeMu.Unlock()
 
-	stateMu.Lock()
-	state.Theme = p.name
-	saveState()
-	stateMu.Unlock()
-
-	log.Info().Str("theme", p.name).Msg("theme changed")
 	if gioWin != nil {
 		gioWin.Invalidate()
 	}
-	go broadcastTheme()
+	backend.SetTheme(p.name, p.varsJSON())
 }
 
 func toggleTheme() {
@@ -183,18 +182,4 @@ func toggleTheme() {
 	} else {
 		setTheme("dark")
 	}
-}
-
-// broadcastTheme pushes the current theme into every running napp window.
-func broadcastTheme() {
-	name, vars := themeWire()
-
-	mu.Lock()
-	snapshot := append([]*childInfo(nil), children...)
-	mu.Unlock()
-
-	for _, ci := range snapshot {
-		ci.send(wireMsg{T: "theme", Method: name, Params: vars})
-	}
-	log.Debug().Str("theme", name).Int("napps", len(snapshot)).Msg("pushed theme to napps")
 }

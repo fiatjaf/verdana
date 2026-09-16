@@ -1,4 +1,4 @@
-package main
+package backend
 
 import (
 	"context"
@@ -8,20 +8,20 @@ import (
 	"fiatjaf.com/nostr"
 )
 
-func doFetch(relays []string) {
-	urls := relays
+// Fetch looks for napps (kind:35128) on the discovery relays and fills the
+// launcher's discovery list as they arrive. Blocking: call it from a
+// goroutine.
+func Fetch() {
+	urls := Relays()
 	if len(urls) == 0 {
-		urls = parseRelays(defaultRelays[0] + "\n" + defaultRelays[1])
+		urls = append([]string(nil), DefaultRelays...)
+		SetRelays(urls)
 	}
 
 	log.Info().Strs("relays", urls).Msg("fetching napps from relays")
 
-	ui.mu.Lock()
-	ui.fetching = true
-	ui.fetchErr = ""
-	ui.discovery = nil
-	ui.mu.Unlock()
-	gioWin.Invalidate()
+	setFetching(true)
+	defer setFetching(false)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -29,31 +29,22 @@ func doFetch(relays []string) {
 	seen := make(map[nostr.ID]bool)
 	var collected []Napp
 
-	ch := sys.Pool.FetchMany(ctx, urls,
+	for re := range sys.Pool.FetchMany(ctx, urls,
 		nostr.Filter{Kinds: []nostr.Kind{35128}},
 		nostr.SubscriptionOptions{},
-	)
-	for re := range ch {
+	) {
 		if seen[re.ID] {
 			continue
 		}
 		seen[re.ID] = true
 		collected = append(collected, nappFromEvent(re.Event))
 
-		ui.mu.Lock()
-		ui.discovery = append([]Napp(nil), collected...)
-		ui.mu.Unlock()
-		gioWin.Invalidate()
+		sorted := append([]Napp(nil), collected...)
+		sort.Slice(sorted, func(i, j int) bool { return sorted[i].Name < sorted[j].Name })
+		setDiscovery(sorted)
 	}
 
-	sort.Slice(collected, func(i, j int) bool { return collected[i].Name < collected[j].Name })
-
 	log.Info().Int("count", len(collected)).Msg("fetch complete")
-
-	ui.mu.Lock()
-	ui.fetching = false
-	ui.mu.Unlock()
-	gioWin.Invalidate()
 }
 
 func tagValue(tags nostr.Tags, key string) string {

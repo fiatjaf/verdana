@@ -15,25 +15,9 @@ import (
 	"gioui.org/unit"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
+
+	"verdana/backend"
 )
-
-func setPhase(p string) {
-	ui.mu.Lock()
-	ui.phase = p
-	ui.mu.Unlock()
-	if gioWin != nil {
-		gioWin.Invalidate()
-	}
-}
-
-func setTab(t int) {
-	ui.mu.Lock()
-	ui.tab = t
-	ui.mu.Unlock()
-	if gioWin != nil {
-		gioWin.Invalidate()
-	}
-}
 
 // emph is an italic Verdana label for emphasis-ish subtle text.
 func emph(l material.LabelStyle) material.LabelStyle {
@@ -61,36 +45,36 @@ func parseRelays(text string) []string {
 func layoutPrompt(
 	gtx layout.Context,
 	th *material.Theme,
-	p *prompt,
+	p *backend.Prompt,
 	approveBtn, denyBtn *widget.Clickable,
 	optBtns []widget.Clickable,
 ) layout.Dimensions {
 	children := []layout.FlexChild{
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			t := material.H6(th, p.title)
+			t := material.H6(th, p.Title)
 			t.Font.Weight = font.Bold
 			return t.Layout(gtx)
 		}),
 	}
 
-	if p.detail != "" {
+	if p.Detail != "" {
 		children = append(children,
 			layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				l := material.Body2(th, p.detail)
+				l := material.Body2(th, p.Detail)
 				l.Color = currentTheme().subtle
 				return l.Layout(gtx)
 			}),
 		)
 	}
 
-	if p.code != "" {
+	if p.Code != "" {
 		children = append(children,
 			layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				macro := op.Record(gtx.Ops)
 				dims := layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-					l := material.Body2(th, p.code)
+					l := material.Body2(th, p.Code)
 					l.Color = currentTheme().codeFg
 					return l.Layout(gtx)
 				})
@@ -109,8 +93,8 @@ func layoutPrompt(
 
 	children = append(children, layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout))
 
-	if len(p.options) > 0 {
-		for i := range p.options {
+	if len(p.Options) > 0 {
+		for i := range p.Options {
 			i := i
 			children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				if i >= len(optBtns) {
@@ -118,9 +102,9 @@ func layoutPrompt(
 				}
 				return layout.Inset{Bottom: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 					pointer.CursorPointer.Add(gtx.Ops)
-					label := p.options[i].label
-					if p.options[i].detail != "" {
-						label += " — " + preview(p.options[i].detail, 40)
+					label := p.Options[i].Label
+					if p.Options[i].Detail != "" {
+						label += " — " + truncate(p.Options[i].Detail, 40)
 					}
 					b := material.Button(th, &optBtns[i], label)
 					b.TextSize = unit.Sp(14)
@@ -195,24 +179,33 @@ func layoutLogin(gtx layout.Context, th *material.Theme, ed *widget.Editor, btn 
 	)
 }
 
-func layoutMain(gtx layout.Context, th *material.Theme, tabNappsBtn, tabDiscoBtn, themeBtn *widget.Clickable, tab int, installedList, discoveryList *widget.List, relaysEd *widget.Editor, fetchBtn *widget.Clickable, runBtns, actionBtns []widget.Clickable, profName, profPic, fetchErr string, fetching bool, installed, discovery []Napp, installedSet, busy map[string]bool) layout.Dimensions {
+func layoutMain(gtx layout.Context, th *material.Theme, tabNappsBtn, tabDiscoBtn, themeBtn *widget.Clickable, tab int, installedList, discoveryList *widget.List, relaysEd *widget.Editor, fetchBtn *widget.Clickable, runBtns, actionBtns []widget.Clickable, st backend.State, installedSet, busy map[string]bool) layout.Dimensions {
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layoutProfile(gtx, th, themeBtn, profName, profPic)
+			return layoutProfile(gtx, th, themeBtn, st.ProfileName, st.ProfilePicture)
 		}),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layoutTabs(gtx, th, tabNappsBtn, tabDiscoBtn, tab, len(installed), len(discovery))
+			return layoutTabs(gtx, th, tabNappsBtn, tabDiscoBtn, tab, len(st.Installed), len(st.Discovery))
 		}),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			if tab == 0 {
-				return layoutNappsTab(gtx, th, installedList, runBtns, installed)
+				return layoutNappsTab(gtx, th, installedList, runBtns, st.Installed)
 			}
 			return layoutDiscoveryTab(gtx, th, discoveryList, relaysEd, fetchBtn, actionBtns,
-				fetchErr, fetching, discovery, installedSet, busy)
+				st.FetchErr, st.Fetching, st.Discovery, installedSet, busy)
 		}),
 	)
+}
+
+// truncate keeps a label short enough for a dialog line.
+func truncate(s string, max int) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if len(s) > max {
+		return s[:max] + "…"
+	}
+	return s
 }
 
 func layoutTabs(gtx layout.Context, th *material.Theme, nappsBtn, discoBtn *widget.Clickable, tab, nInstalled, nDiscovery int) layout.Dimensions {
@@ -238,7 +231,7 @@ func layoutTabs(gtx layout.Context, th *material.Theme, nappsBtn, discoBtn *widg
 	)
 }
 
-func layoutNappsTab(gtx layout.Context, th *material.Theme, list *widget.List, runBtns []widget.Clickable, installed []Napp) layout.Dimensions {
+func layoutNappsTab(gtx layout.Context, th *material.Theme, list *widget.List, runBtns []widget.Clickable, installed []backend.Napp) layout.Dimensions {
 	if len(installed) == 0 {
 		l := material.Body2(th, "No napps installed yet. Find some in the Discovery tab.")
 		l.Color = currentTheme().muted
@@ -253,7 +246,7 @@ func layoutNappsTab(gtx layout.Context, th *material.Theme, list *widget.List, r
 	})
 }
 
-func layoutDiscoveryTab(gtx layout.Context, th *material.Theme, list *widget.List, relaysEd *widget.Editor, fetchBtn *widget.Clickable, actionBtns []widget.Clickable, fetchErr string, fetching bool, discovery []Napp, installedSet, busy map[string]bool) layout.Dimensions {
+func layoutDiscoveryTab(gtx layout.Context, th *material.Theme, list *widget.List, relaysEd *widget.Editor, fetchBtn *widget.Clickable, actionBtns []widget.Clickable, fetchErr string, fetching bool, discovery []backend.Napp, installedSet, busy map[string]bool) layout.Dimensions {
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			l := emph(material.Body2(th, "Relays (one per line)"))
@@ -354,7 +347,7 @@ func avatar(gtx layout.Context, url string, size int) layout.Dimensions {
 
 // nappIcon draws a napp's icon, or a plain square for the napps that declare
 // none (and while one is still being fetched).
-func nappIcon(gtx layout.Context, n Napp, size int) layout.Dimensions {
+func nappIcon(gtx layout.Context, n backend.Napp, size int) layout.Dimensions {
 	imgOp, ok := nappIconImage(n)
 	return imageSquare(gtx, size, imgOp, ok)
 }
@@ -397,8 +390,8 @@ func editorBox(gtx layout.Context, th *material.Theme, ed *widget.Editor, hint s
 	})
 }
 
-func renderNappCard(gtx layout.Context, th *material.Theme, btn *widget.Clickable, btnLabel string, napp Napp) layout.Dimensions {
-	pm := sys.FetchProfileMetadata(context.Background(), napp.Author)
+func renderNappCard(gtx layout.Context, th *material.Theme, btn *widget.Clickable, btnLabel string, napp backend.Napp) layout.Dimensions {
+	authorName, authorPic := napp.AuthorProfile(context.Background())
 	return layout.Inset{Bottom: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		sz := gtx.Constraints.Max
 		macro := op.Record(gtx.Ops)
@@ -433,11 +426,11 @@ func renderNappCard(gtx layout.Context, th *material.Theme, btn *widget.Clickabl
 							return layout.Inset{Top: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 								return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 									layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-										return avatar(gtx, pm.Picture, 18)
+										return avatar(gtx, authorPic, 18)
 									}),
 									layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
 									layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-										c := material.Caption(th, pm.ShortName())
+										c := material.Caption(th, authorName)
 										c.Color = currentTheme().muted
 										return c.Layout(gtx)
 									}),

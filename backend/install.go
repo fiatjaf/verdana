@@ -1,4 +1,4 @@
-package main
+package backend
 
 import (
 	"context"
@@ -10,59 +10,26 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
 	"time"
-
-	"fiatjaf.com/nostr"
 )
 
-func nappBaseDir(id string) string {
-	return filepath.Join(verdanaDir, "napps", id)
-}
-
+// refreshInstalled republishes the installed list into the launcher state.
 func refreshInstalled() {
-	stateMu.Lock()
-	list := make([]Napp, 0, len(state.InstalledNapps))
-	for _, n := range state.InstalledNapps {
-		list = append(list, n)
-	}
-	stateMu.Unlock()
+	list := installedNapps()
 	sort.Slice(list, func(i, j int) bool { return list[i].Name < list[j].Name })
 
-	ui.mu.Lock()
-	ui.installed = list
-	ui.mu.Unlock()
-	if gioWin != nil {
-		gioWin.Invalidate()
-	}
+	ls.mu.Lock()
+	ls.installed = list
+	ls.mu.Unlock()
+	notifyState()
 }
 
-func setBusy(id string, busy bool) {
-	ui.mu.Lock()
-	if busy {
-		ui.busy[id] = true
-	} else {
-		delete(ui.busy, id)
-	}
-	ui.mu.Unlock()
-	if gioWin != nil {
-		gioWin.Invalidate()
-	}
-}
-
-func setFetchErr(msg string) {
-	ui.mu.Lock()
-	ui.fetchErr = msg
-	ui.mu.Unlock()
-	if gioWin != nil {
-		gioWin.Invalidate()
-	}
-}
-
-func installNapp(n Napp) {
+// Install downloads a napp's files and records it as installed. Blocking:
+// call it from a goroutine (progress shows up as IsBusy).
+func Install(n Napp) {
 	log.Info().Str("napp", n.ID).Str("name", n.Name).Msg("installing napp")
 	setBusy(n.ID, true)
 	defer setBusy(n.ID, false)
@@ -75,7 +42,7 @@ func installNapp(n Napp) {
 	if err := fetchNappAssets(ctx, n, base, servers); err != nil {
 		log.Error().Err(err).Str("napp", n.ID).Msg("install failed")
 		os.RemoveAll(base)
-		setFetchErr("install failed: " + err.Error())
+		SetFetchErr("install failed: " + err.Error())
 		return
 	}
 
@@ -91,7 +58,8 @@ func installNapp(n Napp) {
 	log.Info().Str("napp", n.ID).Str("name", n.Name).Msg("install complete")
 }
 
-func uninstallNapp(id string) {
+// Uninstall removes a napp's files and forgets it.
+func Uninstall(id string) {
 	log.Info().Str("napp", id).Msg("uninstalling napp")
 	setBusy(id, true)
 	defer setBusy(id, false)
@@ -105,23 +73,6 @@ func uninstallNapp(id string) {
 
 	refreshInstalled()
 	log.Info().Str("napp", id).Msg("uninstall complete")
-}
-
-// iconAsset resolves the napp's "icon" tag to the file it names. The tag is a
-// path into the napp itself ("/icon.png"), which the event also carries a
-// "path" tag for, so the icon is a blob like everything else. The leading
-// slash is optional on either side, so both are trimmed before comparing.
-func (n Napp) iconAsset() (NappPath, bool) {
-	want := strings.TrimPrefix(n.Icon, "/")
-	if want == "" {
-		return NappPath{}, false
-	}
-	for _, p := range n.Paths {
-		if strings.TrimPrefix(p.Path, "/") == want {
-			return p, true
-		}
-	}
-	return NappPath{}, false
 }
 
 // maxParallelAssets caps how many of a napp's files are in flight at once, so
@@ -193,40 +144,8 @@ func fetchNappAsset(ctx context.Context, servers []string, base string, p NappPa
 	return nil
 }
 
-func (n Napp) blossomServers(ctx context.Context) []string {
-	servers := make([]string, 0, 8)
-	add := func(raw string) {
-		url, err := nostr.NormalizeHTTPURL(raw)
-		if err != nil || url == "" {
-			return
-		}
-		if !slices.Contains(servers, url) {
-			servers = append(servers, url)
-		}
-	}
-
-	add("https://relay.nostrapps.com")
-
-	for _, srv := range n.Servers {
-		add(srv)
-	}
-
-	if sys != nil && n.Author != nostr.ZeroPK {
-		listCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-		list := sys.FetchBlossomServerList(listCtx, n.Author)
-		cancel()
-		for _, srv := range list.Items {
-			add(string(srv))
-		}
-		log.Debug().Str("napp", n.ID).Int("authored", len(list.Items)).
-			Msg("loaded the author's blossom servers")
-	}
-
-	add("https://nostr.download")
-
-	return servers
-}
-
+// downloadBlob fetches a blob from the first server that has it and verifies
+// it against its hash before returning it.
 func downloadBlob(ctx context.Context, servers []string, sha string) ([]byte, error) {
 	log.Debug().Str("sha256", sha).Int("servers", len(servers)).Msg("downloading blob")
 	var lastErr error = errors.New("no servers")
