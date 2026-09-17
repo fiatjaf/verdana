@@ -301,6 +301,26 @@ class MainActivity : ComponentActivity(), UI {
                         state.phase == "main" -> "launcher"
                         else -> ""
                     }
+                    // back on a napp screen walks the webview history, and
+                    // lands on the launcher when there is nothing left to go
+                    // back to — instead of minimizing verdana entirely. (The
+                    // prompt overlay keeps the default behavior: it is a
+                    // blocking question and must be answered, not dismissed.)
+                    androidx.activity.compose.BackHandler(enabled = bodyShowingNapp && !showingPrompt) {
+                        val shell = currentShell
+                        if (shell != null && shell.view.canGoBack()) {
+                            shell.view.goBack()
+                        } else {
+                            goHomeScreen()
+                        }
+                    }
+                    // same for the profile screen, which already has an
+                    // on-screen back affordance doing exactly this
+                    androidx.activity.compose.BackHandler(
+                        enabled = showProfile && state.phase == "main" && !showingPrompt,
+                    ) {
+                        goHomeScreen()
+                    }
                     Column(Modifier.fillMaxSize()) {
                         if (state.phase != "login" && state.phase != "loading") {
                             AppHeader(
