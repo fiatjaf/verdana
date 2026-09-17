@@ -90,44 +90,8 @@ fun LauncherScreen(activity: MainActivity, st: LauncherState) {
     var relaysEd by remember(st.relays.hashCode()) { mutableStateOf(st.relays.joinToString("\n")) }
     var discoveryFilter by remember { mutableStateOf("") }
     var installedFilter by remember { mutableStateOf("") }
-    var showLogoutConfirm by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize().padding(16.dp)) {
-
-        // profile header
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Avatar(st.profilePicture, theme, 44)
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    st.profileName.ifBlank { "…" },
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = theme.fg,
-                    maxLines = 1,
-                )
-                TextButton(onClick = { showLogoutConfirm = true }, contentPadding = PaddingValues(0.dp)) {
-                    Text("Log out", fontSize = 12.sp, color = theme.muted)
-                }
-            }
-            TextButton(onClick = { activity.toggleTheme() }) {
-                Text(if (theme.name == "dark") "☀ Light" else "☾ Dark", color = theme.chipFg, fontSize = 13.sp)
-            }
-        }
-
-        if (showLogoutConfirm) {
-            LogoutConfirmDialog(
-                theme = theme,
-                onConfirm = {
-                    showLogoutConfirm = false
-                    activity.logout()
-                },
-                onDismiss = { showLogoutConfirm = false },
-            )
-        }
-
-        Spacer(Modifier.height(8.dp))
-
         // tabs
         Row {
             TabChip("Installed", tab == 0, theme) { tab = 0 }
@@ -142,6 +106,73 @@ fun LauncherScreen(activity: MainActivity, st: LauncherState) {
         } else {
             DiscoveryTab(activity, st, theme, relaysEd, { relaysEd = it }, discoveryFilter, { discoveryFilter = it })
         }
+    }
+}
+
+// ProfileScreen holds everything about the current user that used to live
+// on top of the launcher: picture, name, pubkey, theme switch and logout.
+@Composable
+fun ProfileScreen(activity: MainActivity, st: LauncherState, onBack: () -> Unit) {
+    val theme = themeByName(st.theme)
+    var showLogoutConfirm by remember { mutableStateOf(false) }
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+    ) {
+        TextButton(onClick = onBack, contentPadding = PaddingValues(0.dp)) {
+            Text("← Back", color = theme.muted, fontSize = 13.sp)
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Avatar(st.profilePicture, theme, 64)
+            Spacer(Modifier.width(16.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    st.profileName.ifBlank { "…" },
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = theme.fg,
+                    maxLines = 2,
+                )
+                if (st.pubkey.isNotBlank()) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        st.pubkey,
+                        color = theme.muted,
+                        fontSize = 11.sp,
+                        maxLines = 2,
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(24.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Theme", color = theme.fg, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            TextButton(onClick = { activity.toggleTheme() }) {
+                Text(if (theme.name == "dark") "☀ Light" else "☾ Dark", color = theme.chipFg, fontSize = 13.sp)
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        TextButton(
+            onClick = { showLogoutConfirm = true },
+            contentPadding = PaddingValues(0.dp),
+        ) {
+            Text("Log out", fontSize = 14.sp, color = theme.danger)
+        }
+    }
+
+    if (showLogoutConfirm) {
+        LogoutConfirmDialog(
+            theme = theme,
+            onConfirm = {
+                showLogoutConfirm = false
+                activity.logout()
+            },
+            onDismiss = { showLogoutConfirm = false },
+        )
     }
 }
 
@@ -443,7 +474,7 @@ private fun NappIcon(img: ImageBitmap?, theme: Theme, size: Int) {
 }
 
 @Composable
-private fun Avatar(url: String, theme: Theme, size: Int) {
+fun Avatar(url: String, theme: Theme, size: Int) {
     val shape = RoundedCornerShape(6.dp)
     var img by remember(url) { mutableStateOf<ImageBitmap?>(null) }
 
@@ -490,9 +521,10 @@ private fun outlinedColors(theme: Theme) = OutlinedTextFieldDefaults.colors(
 
 // ─── the browser-like chrome ─────────────────────────────────────────
 //
-// A fixed header carries the app name, the id of the window on screen and a
-// box with the number of open napps; tapping the box lists the open windows
-// (and the pending prompt, which is just another window) to jump between.
+// A fixed header: tab count box on the left, app name + current window id
+// on one line in the middle, logged-user picture on the right (tap it for
+// the profile screen); tapping the count box lists the open windows (and
+// the pending prompt, which is just another window) to jump between.
 
 @Composable
 fun AppHeader(
@@ -504,6 +536,7 @@ fun AppHeader(
     onShowPrompt: () -> Unit,
     onActivate: (String) -> Unit,
     onClose: (String) -> Unit,
+    onProfile: () -> Unit,
 ) {
     var showList by remember { mutableStateOf(false) }
 
@@ -515,15 +548,7 @@ fun AppHeader(
                 .padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // the app name doubles as "home": tap it to go back to the launcher
-            Column(Modifier.weight(1f).clickable { showList = false; onHome() }) {
-                Text("Verdana", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = theme.fg)
-                if (subtitle.isNotBlank()) {
-                    Text(subtitle, fontSize = 11.sp, color = theme.muted, maxLines = 1)
-                }
-            }
-
-            // the open-napps count box: tap to list and switch
+            // the open-napps count box, left: tap to list and switch
             Box(
                 Modifier
                     .clip(RoundedCornerShape(14.dp))
@@ -538,6 +563,34 @@ fun AppHeader(
                     fontWeight = FontWeight.Bold,
                     fontSize = 14.sp,
                 )
+            }
+
+            Spacer(Modifier.width(8.dp))
+
+            // the app name + current window id on one line: tap for launcher
+            Row(
+                Modifier.weight(1f).clickable { showList = false; onHome() },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Verdana", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = theme.fg)
+                if (subtitle.isNotBlank()) {
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        subtitle,
+                        fontSize = 11.sp,
+                        color = theme.muted,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                }
+            }
+
+            Spacer(Modifier.width(8.dp))
+
+            // the logged-user picture, right: tap for the profile screen
+            Box(Modifier.clickable { showList = false; onProfile() }) {
+                Avatar(st.profilePicture, theme, 32)
             }
         }
 

@@ -105,6 +105,7 @@ class MainActivity : ComponentActivity(), UI {
             // (a pending prompt keeps overlaying whatever is on screen)
             activeTab = instance
             showHome = false
+            showProfile = false
         }
     }
 
@@ -200,6 +201,7 @@ class MainActivity : ComponentActivity(), UI {
         activeTab = instance
         promptShown = false
         showHome = false
+        showProfile = false
     }
 
     // showPromptWindow brings the pending prompt back on screen (it is just
@@ -207,12 +209,21 @@ class MainActivity : ComponentActivity(), UI {
     fun showPromptWindow() {
         promptShown = true
         showHome = false
+        showProfile = false
     }
 
     // goHomeScreen dismisses the prompt window and lands on the launcher.
     fun goHomeScreen() {
         promptShown = false
         showHome = true
+        showProfile = false
+    }
+
+    // showProfileScreen lands on the user-details screen (opened by tapping
+    // the avatar in the header).
+    fun showProfileScreen() {
+        promptShown = false
+        showProfile = true
     }
 
     // answerPrompt answers and leaves the prompt window. If the chosen option
@@ -220,6 +231,7 @@ class MainActivity : ComponentActivity(), UI {
     fun answerPrompt(p: Prompt, ok: Boolean, index: Int) {
         promptShown = false
         showHome = false
+        showProfile = false
         answer(p.id, ok, index)
         if (ok && index >= 0 && index < p.options.size) {
             val opt = p.options[index]
@@ -234,6 +246,7 @@ class MainActivity : ComponentActivity(), UI {
 
     private var activeTab by mutableStateOf<String?>(null)
     private var showHome by mutableStateOf(false)
+    private var showProfile by mutableStateOf(false)
 
     // ─── launcher actions (called from composables) ──────────────────
 
@@ -273,16 +286,17 @@ class MainActivity : ComponentActivity(), UI {
         val theme = themeByName(state.theme)
         androidx.compose.material3.MaterialTheme(colorScheme = theme.compose()) {
             androidx.compose.material3.Surface(color = theme.bg) {
-                // browser-like frame: the header (app name + current window id
-                // + the open-napps count box) is always on top, and the body
-                // shows whichever "window" is current — a napp, the prompt
-                // window, or the launcher home.
+                // browser-like frame: the header (tab count + app name +
+                // current window id + user picture) is always on top, and the
+                // body shows whichever "window" is current — a napp, the
+                // profile screen, the prompt window, or the launcher home.
                 tabsVersion.let { _ -> // recompose when the tab set changes
                     val showingPrompt = promptShown && prompt != null
                     val currentShell = activeTab?.let { tabs[it] }
                     val currentInstance = activeTab?.takeIf { tabs.containsKey(it) }
-                    val bodyShowingNapp = currentShell != null && !showHome
+                    val bodyShowingNapp = currentShell != null && !showHome && !showProfile
                     val subtitle = when {
+                        showProfile && state.phase == "main" -> "profile"
                         bodyShowingNapp -> currentInstance.orEmpty()
                         state.phase == "main" -> "launcher"
                         else -> ""
@@ -298,12 +312,18 @@ class MainActivity : ComponentActivity(), UI {
                                 onShowPrompt = { showPromptWindow() },
                                 onActivate = { activateTab(it) },
                                 onClose = { closeTab(it) },
+                                onProfile = { showProfileScreen() },
                             )
                         }
                         Box(Modifier.weight(1f)) {
                             when {
                                 bodyShowingNapp -> NappScreen(currentShell!!)
                                 state.phase == "login" -> LoginScreen(this@MainActivity, state)
+                                showProfile && state.phase == "main" -> ProfileScreen(
+                                    this@MainActivity,
+                                    state,
+                                    onBack = { goHomeScreen() },
+                                )
                                 state.phase == "main" -> LauncherScreen(this@MainActivity, state)
                                 else -> LoadingScreen()
                             }
