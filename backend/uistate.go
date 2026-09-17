@@ -48,6 +48,16 @@ type State struct {
 	Installed []Napp `json:"installed"`
 	Discovery []Napp `json:"discovery"`
 
+	// Dev napps are the ephemeral in-memory ones loaded from a folder or a
+	// dev-server url (see dev.go): shown on the launcher's dev tab, never
+	// persisted.
+	Dev []Napp `json:"dev"`
+
+	// DevErr is the last dev-tab failure worth showing, DevLoading is true
+	// while a dev napp is being read in.
+	DevErr     string `json:"devErr"`
+	DevLoading bool   `json:"devLoading"`
+
 	// Busy holds the ids of napps being installed, uninstalled or updated.
 	Busy []string `json:"busy"`
 
@@ -73,16 +83,19 @@ type WindowInfo struct {
 type launcherState struct {
 	mu sync.Mutex
 
-	phase     string
-	loginErr  string
-	profName  string
-	profPic   string
-	pubkey    string
-	fetchErr  string
-	fetching  bool
-	installed []Napp
-	discovery []Napp
-	busy      map[string]bool
+	phase      string
+	loginErr   string
+	profName   string
+	profPic    string
+	pubkey     string
+	fetchErr   string
+	fetching   bool
+	installed  []Napp
+	discovery  []Napp
+	dev        []Napp
+	devErr     string
+	devLoading bool
+	busy       map[string]bool
 }
 
 var ls = launcherState{phase: PhaseLoading, busy: make(map[string]bool)}
@@ -129,6 +142,9 @@ func Snapshot() State {
 		Theme:          name,
 		Installed:      append([]Napp(nil), ls.installed...),
 		Discovery:      append([]Napp(nil), ls.discovery...),
+		Dev:            append([]Napp(nil), ls.dev...),
+		DevErr:         ls.devErr,
+		DevLoading:     ls.devLoading,
 		Busy:           make([]string, 0, len(ls.busy)),
 	}
 	for id := range ls.busy {
@@ -160,6 +176,11 @@ func Snapshot() State {
 	for i := range s.Discovery {
 		if s.Discovery[i].AuthorName == "" {
 			s.Discovery[i].AuthorName = s.Discovery[i].AuthorShortName()
+		}
+	}
+	for i := range s.Dev {
+		if s.Dev[i].AuthorName == "" {
+			s.Dev[i].AuthorName = s.Dev[i].AuthorShortName()
 		}
 	}
 	return s

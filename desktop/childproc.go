@@ -37,6 +37,7 @@ func startChild(spec backend.WindowSpec) (backend.Transport, error) {
 	cmd.Env = append(os.Environ(),
 		"VERDANA_NAPP_ID="+spec.NappID,
 		"VERDANA_NAPP_DIR="+spec.Dir,
+		"VERDANA_NAPP_URL="+spec.URL,
 		"VERDANA_NAPP_NAME="+spec.Name,
 		"VERDANA_NAPP_DESC="+spec.Description,
 		"VERDANA_INSTANCE_ID="+spec.Instance,

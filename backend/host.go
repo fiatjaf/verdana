@@ -66,6 +66,11 @@ type WindowSpec struct {
 	// Dir holds the napp's unpacked files (index.html and friends).
 	Dir string
 
+	// URL navigates the shell straight to a page instead of serving Dir:
+	// dev napps use it (a dev-server url, or the throwaway server the
+	// backend runs for folder dev napps). Empty for installed napps.
+	URL string
+
 	// Requires are the domains the napp asked to reach (behavior.md).
 	Requires []string
 

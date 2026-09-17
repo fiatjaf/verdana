@@ -60,6 +60,7 @@ func (h mobileHost) OpenWindow(spec backend.WindowSpec) (backend.Transport, erro
 		"name":        spec.Name,
 		"description": spec.Description,
 		"dir":         spec.Dir,
+		"url":         spec.URL,
 		"requires":    spec.Requires,
 		"theme":       spec.Theme,
 		"themeVars":   spec.ThemeVars,

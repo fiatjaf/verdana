@@ -99,6 +99,9 @@ func (n Napp) IconHash() string {
 // the napp is installed, from its author's blossom servers otherwise. The
 // GUIs decode and cache it themselves (keyed by IconHash).
 func (n Napp) IconBlob(ctx context.Context) ([]byte, error) {
+	if data, ok := devIconBlob(ctx, n); ok {
+		return data, nil
+	}
 	asset, ok := n.iconAsset()
 	if !ok {
 		return nil, errNotFound("this napp has no icon")

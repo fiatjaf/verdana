@@ -145,12 +145,22 @@ func gioMain() {
 		fetchBtn      widget.Clickable
 		tabNappsBtn   widget.Clickable
 		tabDiscoBtn   widget.Clickable
+		tabDevBtn     widget.Clickable
 		themeBtn      widget.Clickable
 		logoutBtn     widget.Clickable
 		confirmYesBtn widget.Clickable
 		confirmNoBtn  widget.Clickable
 		installedList widget.List
 		discoveryList widget.List
+		devList       widget.List
+		devURLed      widget.Editor
+		devPathEd     widget.Editor
+		loadURLBtn    widget.Clickable
+		browseBtn     widget.Clickable
+		loadFolderBtn widget.Clickable
+		devOpenBtns   []widget.Clickable
+		devUnloadBtns []widget.Clickable
+		devReloadBtns []widget.Clickable
 		cardBtns      []widget.Clickable
 		uninstBtns    []widget.Clickable
 		actionBtns    []widget.Clickable
@@ -164,8 +174,11 @@ func gioMain() {
 	relaysEd.SingleLine = false
 	filterEd.SingleLine = true
 	installedFilterEd.SingleLine = true
+	devURLed.SingleLine = true
+	devPathEd.SingleLine = true
 	installedList.Axis = layout.Vertical
 	discoveryList.Axis = layout.Vertical
+	devList.Axis = layout.Vertical
 	relaysEd.SetText(strings.Join(backend.Relays(), "\n"))
 
 	var ops op.Ops
@@ -255,6 +268,9 @@ func gioMain() {
 					if tabDiscoBtn.Clicked(gtx) {
 						setTab(1)
 					}
+					if devEnabled && tabDevBtn.Clicked(gtx) {
+						setTab(2)
+					}
 					if themeBtn.Clicked(gtx) {
 						toggleTheme()
 					}
@@ -277,6 +293,15 @@ func gioMain() {
 					for len(updateBtns) < len(st.Discovery) {
 						updateBtns = append(updateBtns, widget.Clickable{})
 					}
+					for len(devOpenBtns) < len(st.Dev) {
+						devOpenBtns = append(devOpenBtns, widget.Clickable{})
+					}
+					for len(devUnloadBtns) < len(st.Dev) {
+						devUnloadBtns = append(devUnloadBtns, widget.Clickable{})
+					}
+					for len(devReloadBtns) < len(st.Dev) {
+						devReloadBtns = append(devReloadBtns, widget.Clickable{})
+					}
 					vis := discoveryFilter(st)
 					instVis := installedFilter(st)
 					if tab == 0 {
@@ -297,7 +322,7 @@ func gioMain() {
 								}
 							}
 						}
-					} else {
+					} else if tab == 1 {
 						for _, i := range vis {
 							if actionBtns[i].Clicked(gtx) {
 								n := st.Discovery[i]
@@ -317,10 +342,51 @@ func gioMain() {
 						if checkUpdBtn.Clicked(gtx) && !st.UpdateCheckRunning {
 							go backend.CheckForUpdates()
 						}
+					} else {
+						// the dev tab (only reachable in dev builds): load a
+						// napp from a folder or a dev-server url, open and
+						// unload the ephemeral ones below
+						if loadURLBtn.Clicked(gtx) {
+							if u := strings.TrimSpace(devURLed.Text()); u != "" {
+								go backend.DevLoadURL(u)
+							}
+						}
+						if loadFolderBtn.Clicked(gtx) {
+							if p := strings.TrimSpace(devPathEd.Text()); p != "" {
+								go backend.DevLoadFolder(p)
+							}
+						}
+						if browseBtn.Clicked(gtx) {
+							go pickAndLoadFolder(&devPathEd)
+						}
+						acted := false
+						for i := range st.Dev {
+							if devUnloadBtns[i].Clicked(gtx) {
+								backend.DevUnload(st.Dev[i].ID)
+								acted = true
+							}
+							if devReloadBtns[i].Clicked(gtx) {
+								go backend.DevReload(st.Dev[i].ID)
+								acted = true
+							}
+						}
+						if !acted {
+							for i := range st.Dev {
+								if devOpenBtns[i].Clicked(gtx) {
+									backend.LaunchDev(st.Dev[i].ID)
+								}
+							}
+						}
 					}
-					return layoutMain(gtx, th, &tabNappsBtn, &tabDiscoBtn, &themeBtn, &logoutBtn, tab,
-						&installedList, &discoveryList, &relaysEd, &filterEd, &installedFilterEd, &fetchBtn, &checkUpdBtn,
-						cardBtns, uninstBtns, actionBtns, updateBtns, vis, instVis, st, installedSet, busy)
+					var devBtn *widget.Clickable
+					if devEnabled {
+						devBtn = &tabDevBtn
+					}
+					return layoutMain(gtx, th, &tabNappsBtn, &tabDiscoBtn, devBtn, &themeBtn, &logoutBtn, tab,
+						&installedList, &discoveryList, &devList, &relaysEd, &filterEd, &installedFilterEd,
+						&devURLed, &devPathEd, &fetchBtn, &checkUpdBtn, &loadURLBtn, &browseBtn, &loadFolderBtn,
+						cardBtns, uninstBtns, actionBtns, updateBtns, devOpenBtns, devUnloadBtns, devReloadBtns,
+						vis, instVis, st, installedSet, busy)
 				default:
 					return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 						return material.Body1(th, "Loading\u2026").Layout(gtx)

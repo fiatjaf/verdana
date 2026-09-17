@@ -179,22 +179,26 @@ func layoutLogin(gtx layout.Context, th *material.Theme, ed *widget.Editor, btn 
 	)
 }
 
-func layoutMain(gtx layout.Context, th *material.Theme, tabNappsBtn, tabDiscoBtn, themeBtn, logoutBtn *widget.Clickable, tab int, installedList, discoveryList *widget.List, relaysEd, filterEd, installedFilterEd *widget.Editor, fetchBtn, checkUpdBtn *widget.Clickable, cardBtns, uninstBtns, actionBtns, updateBtns []widget.Clickable, vis, instVis []int, st backend.State, installedSet, busy map[string]bool) layout.Dimensions {
+func layoutMain(gtx layout.Context, th *material.Theme, tabNappsBtn, tabDiscoBtn, tabDevBtn, themeBtn, logoutBtn *widget.Clickable, tab int, installedList, discoveryList, devList *widget.List, relaysEd, filterEd, installedFilterEd, devURLed, devPathEd *widget.Editor, fetchBtn, checkUpdBtn, loadURLBtn, browseBtn, loadFolderBtn *widget.Clickable, cardBtns, uninstBtns, actionBtns, updateBtns, devOpenBtns, devUnloadBtns, devReloadBtns []widget.Clickable, vis, instVis []int, st backend.State, installedSet, busy map[string]bool) layout.Dimensions {
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layoutProfile(gtx, th, themeBtn, logoutBtn, st.ProfileName, st.ProfilePicture)
 		}),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layoutTabs(gtx, th, tabNappsBtn, tabDiscoBtn, tab, len(st.Installed), len(st.Discovery))
+			return layoutTabs(gtx, th, tabNappsBtn, tabDiscoBtn, tabDevBtn, tab, len(st.Installed), len(st.Discovery))
 		}),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			if tab == 0 {
 				return layoutNappsTab(gtx, th, installedList, installedFilterEd, cardBtns, uninstBtns, checkUpdBtn, instVis, st)
 			}
-			return layoutDiscoveryTab(gtx, th, discoveryList, relaysEd, filterEd, fetchBtn, actionBtns,
-				updateBtns, vis, st.FetchErr, st.Fetching, st.Discovery, installedSet, busy)
+			if tab == 1 {
+				return layoutDiscoveryTab(gtx, th, discoveryList, relaysEd, filterEd, fetchBtn, actionBtns,
+					updateBtns, vis, st.FetchErr, st.Fetching, st.Discovery, installedSet, busy)
+			}
+			return layoutDevTab(gtx, th, devList, devURLed, devPathEd, loadURLBtn, browseBtn, loadFolderBtn,
+				devOpenBtns, devUnloadBtns, devReloadBtns, st)
 		}),
 	)
 }
@@ -208,7 +212,7 @@ func truncate(s string, max int) string {
 	return s
 }
 
-func layoutTabs(gtx layout.Context, th *material.Theme, nappsBtn, discoBtn *widget.Clickable, tab, nInstalled, nDiscovery int) layout.Dimensions {
+func layoutTabs(gtx layout.Context, th *material.Theme, nappsBtn, discoBtn, devBtn *widget.Clickable, tab, nInstalled, nDiscovery int) layout.Dimensions {
 	tabBtn := func(gtx layout.Context, btn *widget.Clickable, label string, active bool) layout.Dimensions {
 		pointer.CursorPointer.Add(gtx.Ops)
 		b := material.Button(th, btn, label)
@@ -220,7 +224,7 @@ func layoutTabs(gtx layout.Context, th *material.Theme, nappsBtn, discoBtn *widg
 		}
 		return b.Layout(gtx)
 	}
-	return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+	children := []layout.FlexChild{
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return tabBtn(gtx, nappsBtn, "Installed", tab == 0)
 		}),
@@ -228,7 +232,17 @@ func layoutTabs(gtx layout.Context, th *material.Theme, nappsBtn, discoBtn *widg
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return tabBtn(gtx, discoBtn, "Discovery", tab == 1)
 		}),
-	)
+	}
+	// devBtn is nil outside dev builds: no dev tab there
+	if devBtn != nil {
+		children = append(children,
+			layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return tabBtn(gtx, devBtn, "Dev", tab == 2)
+			}),
+		)
+	}
+	return layout.Flex{Axis: layout.Horizontal}.Layout(gtx, children...)
 }
 
 func layoutNappsTab(gtx layout.Context, th *material.Theme, list *widget.List, filterEd *widget.Editor, cardBtns, uninstBtns []widget.Clickable, checkUpdBtn *widget.Clickable, vis []int, st backend.State) layout.Dimensions {
@@ -358,6 +372,106 @@ func layoutDiscoveryTab(gtx layout.Context, th *material.Theme, list *widget.Lis
 					updLabel = "Update"
 				}
 				return renderNappCard(gtx, th, nil, btn, updBtn, label, updLabel, n)
+			})
+		}),
+	)
+}
+
+// layoutDevTab is the dev-build tab for loading ephemeral napps: either a
+// dev-server url (used directly) or a local folder (read into memory and
+// served from the throwaway server). The cards open on tap, like the
+// installed tab's.
+func layoutDevTab(gtx layout.Context, th *material.Theme, list *widget.List, urlEd, pathEd *widget.Editor, loadURLBtn, browseBtn, loadFolderBtn *widget.Clickable, openBtns, unloadBtns, reloadBtns []widget.Clickable, st backend.State) layout.Dimensions {
+	smallBtn := func(gtx layout.Context, btn *widget.Clickable, label string) layout.Dimensions {
+		pointer.CursorPointer.Add(gtx.Ops)
+		b := material.Button(th, btn, label)
+		b.TextSize = unit.Sp(13)
+		b.Inset = layout.UniformInset(unit.Dp(8))
+		return b.Layout(gtx)
+	}
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+		// a dev-server url, e.g. http://localhost:5173
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			l := emph(material.Body2(th, "Dev server URL"))
+			l.Color = currentTheme().subtle
+			return l.Layout(gtx)
+		}),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					return editorBox(gtx, th, urlEd, "http://localhost:5173")
+				}),
+				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return smallBtn(gtx, loadURLBtn, "Load URL")
+				}),
+			)
+		}),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
+		// a local folder carrying metadata.json next to its index.html
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			l := emph(material.Body2(th, "Napp folder"))
+			l.Color = currentTheme().subtle
+			return l.Layout(gtx)
+		}),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					return editorBox(gtx, th, pathEd, "/path/to/napp")
+				}),
+				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return smallBtn(gtx, browseBtn, "Browse…")
+				}),
+				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return smallBtn(gtx, loadFolderBtn, "Load folder")
+				}),
+			)
+		}),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			msg := ""
+			if st.DevErr != "" {
+				l := material.Body2(th, st.DevErr)
+				l.Color = currentTheme().danger
+				return l.Layout(gtx)
+			}
+			if st.DevLoading {
+				msg = "Loading…"
+			} else if len(st.Dev) == 0 {
+				msg = "No dev napps loaded. They are ephemeral: gone when the launcher quits."
+			}
+			if msg == "" {
+				return layout.Dimensions{}
+			}
+			l := material.Body2(th, msg)
+			l.Color = currentTheme().muted
+			return l.Layout(gtx)
+		}),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
+		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			if len(st.Dev) == 0 {
+				return layout.Dimensions{}
+			}
+			return material.List(th, list).Layout(gtx, len(st.Dev), func(gtx layout.Context, i int) layout.Dimensions {
+				var openBtn, unloadBtn, reloadBtn *widget.Clickable
+				if i < len(openBtns) {
+					openBtn = &openBtns[i]
+				}
+				if i < len(unloadBtns) {
+					unloadBtn = &unloadBtns[i]
+				}
+				// folder napps can be re-read from disk; url napps just
+				// point at their server, so there is nothing to reload
+				reloadLabel := ""
+				if i < len(reloadBtns) && backend.DevSourceKind(st.Dev[i].ID) == "folder" {
+					reloadBtn = &reloadBtns[i]
+					reloadLabel = "Reload"
+				}
+				return renderNappCard(gtx, th, openBtn, reloadBtn, unloadBtn, reloadLabel, "Unload", st.Dev[i])
 			})
 		}),
 	)

@@ -37,6 +37,7 @@ type nappMeta struct {
 	Name        string
 	Description string
 	Dir         string
+	URL         string
 	Instance    string
 	Requires    []string
 	Theme       string
@@ -62,6 +63,7 @@ func main() {
 	meta = nappMeta{
 		ID:          os.Getenv("VERDANA_NAPP_ID"),
 		Dir:         os.Getenv("VERDANA_NAPP_DIR"),
+		URL:         strings.TrimSpace(os.Getenv("VERDANA_NAPP_URL")),
 		Name:        os.Getenv("VERDANA_NAPP_NAME"),
 		Description: os.Getenv("VERDANA_NAPP_DESC"),
 		Instance:    os.Getenv("VERDANA_INSTANCE_ID"),
@@ -99,7 +101,13 @@ func main() {
 	// the very same bridge.js the Android app injects
 	w.Init(nappbridge.JS())
 
-	url := startNappServer(meta.Dir)
+	// a dev napp navigates straight to its page (its dev-server url, or the
+	// launcher's throwaway server): the bridge bindings below don't depend
+	// on the page's origin, so nothing else changes.
+	url := meta.URL
+	if url == "" {
+		url = startNappServer(meta.Dir)
+	}
 	w.Navigate(url)
 
 	go reader(w)

@@ -379,11 +379,21 @@ func launch(ctx context.Context, napp Napp) (*Instance, error) {
 	}
 
 	appDir := nappBaseDir(id)
-	if err := os.MkdirAll(appDir, 0755); err != nil {
-		return nil, err
-	}
-	if _, err := os.Stat(filepath.Join(appDir, "index.html")); err != nil {
-		return nil, fmt.Errorf("napp %s is not installed", id)
+	pageURL := ""
+	if d := devLookup(id); d != nil {
+		// dev napps live in memory, not on disk: the shell navigates to
+		// the throwaway server (folder napps) or the dev server (url napps)
+		pageURL = d.pageURL()
+		if pageURL == "" {
+			return nil, fmt.Errorf("dev napp %s has nowhere to run", id)
+		}
+	} else {
+		if err := os.MkdirAll(appDir, 0755); err != nil {
+			return nil, err
+		}
+		if _, err := os.Stat(filepath.Join(appDir, "index.html")); err != nil {
+			return nil, fmt.Errorf("napp %s is not installed", id)
+		}
 	}
 
 	themeName, themeVars := Theme()
@@ -410,6 +420,7 @@ func launch(ctx context.Context, napp Napp) (*Instance, error) {
 		Name:        napp.Label(),
 		Description: napp.Description,
 		Dir:         appDir,
+		URL:         pageURL,
 		Requires:    napp.Requires,
 		Theme:       themeName,
 		ThemeVars:   themeVars,
