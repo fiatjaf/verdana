@@ -526,12 +526,17 @@ func runNappAction(
 	return nil, fmt.Errorf("napp %q is gone", choice.NappID)
 }
 
-// findHandlersForAction lists the installed napps declaring this action plus
-// the already-open windows among them. "view" declared by a napp matches
+// findHandlersForAction lists the installed and dev napps declaring this action
+// plus the already-open windows among them. "view" declared by a napp matches
 // every "view:<number>" dispatch.
 func findHandlersForAction(name string) ([]Napp, []*Instance) {
 	candidates := make([]Napp, 0, 2)
 	for _, n := range installedNapps() {
+		if n.Handles(name) {
+			candidates = append(candidates, n)
+		}
+	}
+	for _, n := range DevNapps() {
 		if n.Handles(name) {
 			candidates = append(candidates, n)
 		}
