@@ -111,7 +111,7 @@ func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer cancel()
 			if err := userKeyer.SignEvent(ctx, &evt); err != nil {
-				return nil, err
+				return nil, keyerErr(err)
 			}
 			return evt, nil
 
@@ -145,13 +145,17 @@ func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 			defer cancel()
 			switch method {
 			case "nip04.encrypt":
-				return userKeyer.Nip04Encrypt(ctx, p.Plaintext, pk)
+				res, err := userKeyer.Nip04Encrypt(ctx, p.Plaintext, pk)
+				return res, keyerErr(err)
 			case "nip04.decrypt":
-				return userKeyer.Nip04Decrypt(ctx, p.Ciphertext, pk)
+				res, err := userKeyer.Nip04Decrypt(ctx, p.Ciphertext, pk)
+				return res, keyerErr(err)
 			case "nip44.encrypt":
-				return userKeyer.Encrypt(ctx, p.Plaintext, pk)
+				res, err := userKeyer.Encrypt(ctx, p.Plaintext, pk)
+				return res, keyerErr(err)
 			default:
-				return userKeyer.Decrypt(ctx, p.Ciphertext, pk)
+				res, err := userKeyer.Decrypt(ctx, p.Ciphertext, pk)
+				return res, keyerErr(err)
 			}
 
 		// ─── window.nostrdb ──────────────────────────────────────

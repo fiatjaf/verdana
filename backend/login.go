@@ -2,6 +2,7 @@ package backend
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -12,6 +13,13 @@ import (
 var (
 	userKeyer  nostr.Keyer
 	userPubkey nostr.PubKey
+
+	// sessionCancel ends the current login session. A bunker signer's
+	// response subscription is bound to the ctx the keyer was created
+	// with, so that ctx must live until logout — killing it earlier
+	// (e.g. with the login handshake's timeout ctx) makes every later
+	// sign/encrypt fail with "context canceled".
+	sessionCancel context.CancelFunc
 )
 
 // Login takes an nsec or a bunker:// URL, resolves the signer and moves the
@@ -26,25 +34,65 @@ func Login(input string) {
 	log.Info().Msg("starting login")
 	setPhase(PhaseLoading)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
+	// A new login ends any previous session first.
+	if sessionCancel != nil {
+		sessionCancel()
+		sessionCancel = nil
+	}
+	userKeyer = nil
+
+	// The keyer outlives the handshake: a bunker signer listens for its
+	// responses on a subscription tied to this ctx, so it stays open
+	// until logout or the next login.
+	sessionCtx, cancelSession := context.WithCancel(context.Background())
+	sessionCancel = cancelSession
 
 	stateMu.Lock()
 	clientKey := state.ClientKey
 	stateMu.Unlock()
 
-	k, err := keyer.New(ctx, sys.Pool, input, &keyer.SignerOptions{
-		BunkerClientSecretKey: clientKey,
-		BunkerAuthHandler:     func(url string) {},
-	})
-	if err != nil {
-		log.Error().Err(err).Msg("login failed")
-		setLoginErr(err.Error())
+	// keyer.New blocks on the bunker's "connect" answer, so race it
+	// against the login deadline instead of handing it a ctx that dies
+	// on return (that would kill the response subscription too).
+	type keyerResult struct {
+		k   nostr.Keyer
+		err error
+	}
+	keyerDone := make(chan keyerResult, 1)
+	go func() {
+		k, err := keyer.New(sessionCtx, sys.Pool, input, &keyer.SignerOptions{
+			BunkerClientSecretKey: clientKey,
+			BunkerAuthHandler:     func(url string) {},
+		})
+		keyerDone <- keyerResult{k, err}
+	}()
+
+	var k nostr.Keyer
+	select {
+	case res := <-keyerDone:
+		if res.err != nil {
+			cancelSession()
+			sessionCancel = nil
+			log.Error().Err(res.err).Msg("login failed")
+			setLoginErr(res.err.Error())
+			return
+		}
+		k = res.k
+	case <-time.After(60 * time.Second):
+		cancelSession()
+		sessionCancel = nil
+		log.Error().Msg("login timed out")
+		setLoginErr("login timed out")
 		return
 	}
 
+	ctx, cancel := context.WithTimeout(sessionCtx, 60*time.Second)
+	defer cancel()
+
 	pk, err := k.GetPublicKey(ctx)
 	if err != nil {
+		cancelSession()
+		sessionCancel = nil
 		log.Error().Err(err).Msg("get public key failed")
 		setLoginErr(err.Error())
 		return
@@ -79,6 +127,10 @@ func Login(input string) {
 func Logout() {
 	CloseAllWindows()
 
+	if sessionCancel != nil {
+		sessionCancel()
+		sessionCancel = nil
+	}
 	userKeyer = nil
 	userPubkey = nostr.PubKey{}
 
@@ -90,6 +142,16 @@ func Logout() {
 	setProfile("", "", "")
 	setPhase(PhaseLogin)
 	log.Info().Msg("logged out")
+}
+
+// keyerErr translates signer errors into something a napp (and the logs)
+// can act on. The NIP-46 client reports a bunker that never answered as a
+// bare "context canceled", which looks like we gave up locally.
+func keyerErr(err error) error {
+	if err != nil && err.Error() == "context canceled" {
+		return errors.New("signer did not answer (is your bunker online?)")
+	}
+	return err
 }
 
 // LoggedIn says whether there is a signer to sign with.
