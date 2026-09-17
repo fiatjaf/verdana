@@ -44,6 +44,12 @@ var (
 	ui     gioState
 	gioWin *app.Window
 	log    zerolog.Logger
+
+	// filterEd and installedFilterEd are the discovery and installed tabs'
+	// filter boxes (one window, so one of each is enough; relaysEd stays
+	// with the window's other widgets).
+	filterEd          widget.Editor
+	installedFilterEd widget.Editor
 )
 
 const APP_TITLE = "Verdana"
@@ -98,6 +104,31 @@ func setConfirmLogout(v bool) {
 	}
 }
 
+// discoveryFilter returns the indices of st.Discovery that pass the filter
+// editor's text: a case-insensitive substring on name, description, author
+// pubkey and author name. Clicks and rendering both walk this same index
+// list, so buttons stay glued to their napp no matter what the filter hides.
+func discoveryFilter(st backend.State) []int {
+	q := strings.ToLower(strings.TrimSpace(filterEd.Text()))
+	return nappFilter(st.Discovery, q)
+}
+
+// installedFilter is the same thing for the installed list.
+func installedFilter(st backend.State) []int {
+	q := strings.ToLower(strings.TrimSpace(installedFilterEd.Text()))
+	return nappFilter(st.Installed, q)
+}
+
+func nappFilter(list []backend.Napp, q string) []int {
+	out := make([]int, 0, len(list))
+	for i, n := range list {
+		if n.MatchesQuery(q) {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
 func gioMain() {
 	th := material.NewTheme()
 	th.Shaper = text.NewShaper(text.WithCollection(fontCollection()))
@@ -120,14 +151,19 @@ func gioMain() {
 		confirmNoBtn  widget.Clickable
 		installedList widget.List
 		discoveryList widget.List
-		runBtns       []widget.Clickable
+		cardBtns      []widget.Clickable
+		uninstBtns    []widget.Clickable
 		actionBtns    []widget.Clickable
+		updateBtns    []widget.Clickable
+		checkUpdBtn   widget.Clickable
 		approveBtn    widget.Clickable
 		denyBtn       widget.Clickable
 		optBtns       []widget.Clickable
 	)
 	loginEd.SingleLine = true
 	relaysEd.SingleLine = false
+	filterEd.SingleLine = true
+	installedFilterEd.SingleLine = true
 	installedList.Axis = layout.Vertical
 	discoveryList.Axis = layout.Vertical
 	relaysEd.SetText(strings.Join(backend.Relays(), "\n"))
@@ -229,20 +265,40 @@ func gioMain() {
 						backend.SetRelays(parseRelays(relaysEd.Text()))
 						go backend.Fetch()
 					}
-					for len(runBtns) < len(st.Installed) {
-						runBtns = append(runBtns, widget.Clickable{})
+					for len(cardBtns) < len(st.Installed) {
+						cardBtns = append(cardBtns, widget.Clickable{})
+					}
+					for len(uninstBtns) < len(st.Installed) {
+						uninstBtns = append(uninstBtns, widget.Clickable{})
 					}
 					for len(actionBtns) < len(st.Discovery) {
 						actionBtns = append(actionBtns, widget.Clickable{})
 					}
+					for len(updateBtns) < len(st.Discovery) {
+						updateBtns = append(updateBtns, widget.Clickable{})
+					}
+					vis := discoveryFilter(st)
+					instVis := installedFilter(st)
 					if tab == 0 {
-						for i := range st.Installed {
-							if runBtns[i].Clicked(gtx) {
-								backend.Launch(st.Installed[i])
+						// buttons on top of the card's own click area go
+						// first: a click that hit a button must not also
+						// count as opening the napp.
+						acted := false
+						for _, i := range instVis {
+							if uninstBtns[i].Clicked(gtx) {
+								go backend.Uninstall(st.Installed[i].ID)
+								acted = true
+							}
+						}
+						if !acted {
+							for _, i := range instVis {
+								if cardBtns[i].Clicked(gtx) {
+									backend.Launch(st.Installed[i])
+								}
 							}
 						}
 					} else {
-						for i := range st.Discovery {
+						for _, i := range vis {
 							if actionBtns[i].Clicked(gtx) {
 								n := st.Discovery[i]
 								if busy[n.ID] {
@@ -254,11 +310,17 @@ func gioMain() {
 									go backend.Install(n)
 								}
 							}
+							if updateBtns[i].Clicked(gtx) {
+								go backend.Install(st.Discovery[i])
+							}
+						}
+						if checkUpdBtn.Clicked(gtx) && !st.UpdateCheckRunning {
+							go backend.CheckForUpdates()
 						}
 					}
 					return layoutMain(gtx, th, &tabNappsBtn, &tabDiscoBtn, &themeBtn, &logoutBtn, tab,
-						&installedList, &discoveryList, &relaysEd, &fetchBtn,
-						runBtns, actionBtns, st, installedSet, busy)
+						&installedList, &discoveryList, &relaysEd, &filterEd, &installedFilterEd, &fetchBtn, &checkUpdBtn,
+						cardBtns, uninstBtns, actionBtns, updateBtns, vis, instVis, st, installedSet, busy)
 				default:
 					return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 						return material.Body1(th, "Loading\u2026").Layout(gtx)

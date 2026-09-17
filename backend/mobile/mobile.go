@@ -165,14 +165,19 @@ func SetRelays(text string) {
 	backend.SetRelays(lines)
 }
 
-// Install downloads and installs a napp discovery found, by id.
+// Install downloads and installs a napp discovery found, by id. For an
+// already-installed napp it re-downloads it over: that is how an update
+// button on a discovery card applies the newer version.
 func Install(id string) {
-	if n, ok := backend.DiscoveredNapp(id); ok {
-		go backend.Install(n)
-		return
+	if !backend.InstallFromDiscovery(id) {
+		backend.SetFetchErr("nothing known about napp " + id)
 	}
-	backend.SetFetchErr("nothing known about napp " + id)
 }
+
+// CheckForUpdates looks for newer versions of every installed napp on the
+// discovery relays and each author's outbox relays, and flags the napps it
+// found updates for (watch the state's updateCheckRunning/updateAvailable).
+func CheckForUpdates() { go backend.CheckForUpdates() }
 
 // Uninstall removes an installed napp.
 func Uninstall(id string) { go backend.Uninstall(id) }

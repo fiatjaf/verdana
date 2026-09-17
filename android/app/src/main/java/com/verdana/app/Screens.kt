@@ -88,6 +88,8 @@ fun LauncherScreen(activity: MainActivity, st: LauncherState) {
     val theme = themeByName(st.theme)
     var tab by remember { mutableStateOf(0) }
     var relaysEd by remember(st.relays.hashCode()) { mutableStateOf(st.relays.joinToString("\n")) }
+    var discoveryFilter by remember { mutableStateOf("") }
+    var installedFilter by remember { mutableStateOf("") }
     var showLogoutConfirm by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize().padding(16.dp)) {
@@ -136,12 +138,26 @@ fun LauncherScreen(activity: MainActivity, st: LauncherState) {
         Spacer(Modifier.height(12.dp))
 
         if (tab == 0) {
-            InstalledTab(activity, st, theme)
+            InstalledTab(activity, st, theme, installedFilter, { installedFilter = it })
         } else {
-            DiscoveryTab(activity, st, theme, relaysEd) { relaysEd = it }
+            DiscoveryTab(activity, st, theme, relaysEd, { relaysEd = it }, discoveryFilter, { discoveryFilter = it })
         }
     }
 }
+
+// appMatches: the filter the two tabs share — a case-insensitive substring
+// match on name, description, author pubkey and author name (the name the
+// backend resolves into every napp it sends over).
+private fun Napp.matchesQuery(q: String): Boolean =
+    name.contains(q, ignoreCase = true) ||
+        description.contains(q, ignoreCase = true) ||
+        author.contains(q, ignoreCase = true) ||
+        authorName.contains(q, ignoreCase = true)
+
+private fun List<Napp>.matching(filter: String): List<Napp> =
+    filter.trim().let { q ->
+        if (q.isEmpty()) this else filter { n -> n.matchesQuery(q) }
+    }
 
 // LogoutConfirmDialog asks before logging out: it closes every open napp
 // window, so it deserves a second look — same flow as the desktop launcher.
@@ -193,22 +209,54 @@ private fun TabChip(label: String, active: Boolean, theme: Theme, onClick: () ->
 }
 
 @Composable
-private fun InstalledTab(activity: MainActivity, st: LauncherState, theme: Theme) {
-    if (st.windows.isNotEmpty()) {
-        Text(
-            "Open: " + st.windows.joinToString(", ") { it.name },
-            color = theme.muted,
-            fontSize = 12.sp,
+private fun InstalledTab(activity: MainActivity, st: LauncherState, theme: Theme, filter: String, setFilter: (String) -> Unit) {
+    Column(Modifier.fillMaxSize()) {
+        // the filter box, matching on name, description, author pubkey and
+        // author name (cards stay keyed by id either way)
+        OutlinedTextField(
+            value = filter,
+            onValueChange = setFilter,
+            modifier = Modifier.fillMaxWidth(),
+            placeholder = { Text("filter by name, author or description", color = theme.inputHint) },
+            colors = outlinedColors(theme),
+            singleLine = true,
         )
-        Spacer(Modifier.height(6.dp))
-    }
-    if (st.installed.isEmpty()) {
-        Text("No napps installed yet. Find some in Discovery.", color = theme.muted)
-        return
-    }
-    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        items(st.installed, key = { it.id }) { napp ->
-            NappCard(activity, napp, theme, "Open") { activity.launch(napp.id) }
+        Spacer(Modifier.height(8.dp))
+        val visible = st.installed.matching(filter)
+        if (st.windows.isNotEmpty()) {
+            Text(
+                "Open: " + st.windows.joinToString(", ") { it.name },
+                color = theme.muted,
+                fontSize = 12.sp,
+            )
+            Spacer(Modifier.height(6.dp))
+        }
+        if (st.installed.isEmpty()) {
+            Text("No napps installed yet. Find some in Discovery.", color = theme.muted)
+            return
+        }
+        if (visible.isEmpty()) {
+            Text("Nothing matches the filter.", color = theme.muted)
+            return
+        }
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f)) {
+            items(visible, key = { it.id }) { napp ->
+                NappCard(
+                    activity, napp, theme,
+                    onOpen = { activity.launch(napp.id) },
+                    primaryLabel = "Uninstall",
+                    onPrimary = { activity.uninstall(napp.id) },
+                )
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Button(
+            onClick = { activity.checkForUpdates() },
+            enabled = !st.updateCheckRunning,
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.buttonColors(containerColor = theme.chipBg, contentColor = theme.chipFg),
+        ) {
+            Text(if (st.updateCheckRunning) "Checking…" else "Check for updates")
         }
     }
 }
@@ -220,19 +268,37 @@ private fun DiscoveryTab(
     theme: Theme,
     relaysEd: String,
     setRelaysEd: (String) -> Unit,
+    filter: String,
+    setFilter: (String) -> Unit,
 ) {
+    // the filter matches on name, description, author pubkey and author
+    // name (see matchesQuery); applied to the snapshot's list, cards stay
+    // keyed by id either way
+    val visible = st.discovery.matching(filter)
     LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
-            Text("Relays (one per line)", color = theme.subtle, fontSize = 13.sp)
-            Spacer(Modifier.height(6.dp))
+            // the filter comes first
             OutlinedTextField(
-                value = relaysEd,
-                onValueChange = setRelaysEd,
+                value = filter,
+                onValueChange = setFilter,
                 modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("relay.example.com", color = theme.inputHint) },
+                placeholder = { Text("filter by name, author or description", color = theme.inputHint) },
                 colors = outlinedColors(theme),
-                minLines = 2,
+                singleLine = true,
             )
+            Spacer(Modifier.height(10.dp))
+            Column {
+                Text("Relays (one per line)", color = theme.subtle, fontSize = 13.sp)
+                Spacer(Modifier.height(6.dp))
+                OutlinedTextField(
+                    value = relaysEd,
+                    onValueChange = setRelaysEd,
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("relay.example.com", color = theme.inputHint) },
+                    colors = outlinedColors(theme),
+                    minLines = 2,
+                )
+            }
             Spacer(Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Button(
@@ -250,23 +316,30 @@ private fun DiscoveryTab(
                 }
             }
             Spacer(Modifier.height(12.dp))
-            if (st.discovery.isEmpty()) {
+            if (visible.isEmpty()) {
                 Text(
-                    if (st.fetching) "Searching relays…" else "No napps yet. Tap \"Fetch napps\".",
+                    when {
+                        st.fetching -> "Searching relays…"
+                        st.discovery.isNotEmpty() -> "Nothing matches the filter."                        else -> "No napps yet. Tap \"Fetch napps\"."
+                    },
                     color = theme.muted,
                 )
             }
         }
-        items(st.discovery, key = { it.id }) { napp ->
+        items(visible, key = { it.id }) { napp ->
             val installed = st.installed.any { it.id == napp.id }
             val busy = st.busy.contains(napp.id)
-            NappCard(activity, napp, theme, when {
-                busy -> "Working…"
-                installed -> "Uninstall"
-                else -> "Install"
-            }) {
-                if (installed) activity.uninstall(napp.id) else activity.install(napp.id)
-            }
+            NappCard(
+                activity, napp, theme,
+                primaryLabel = when {
+                    busy -> "Working…"
+                    installed -> "Uninstall"
+                    else -> "Install"
+                },
+                onPrimary = { if (installed) activity.uninstall(napp.id) else activity.install(napp.id) },
+                secondaryLabel = if (installed && napp.updateAvailable) "Update" else null,
+                onSecondary = { activity.install(napp.id) },
+            )
         }
     }
 }
@@ -276,8 +349,14 @@ private fun NappCard(
     activity: MainActivity,
     napp: Napp,
     theme: Theme,
-    actionLabel: String,
-    onAction: () -> Unit,
+    primaryLabel: String,
+    onPrimary: () -> Unit,
+    secondaryLabel: String? = null,
+    onSecondary: (() -> Unit)? = null,
+    // onOpen makes the whole card tappable to open the napp (installed cards
+    // only, so there is no Open button at all); buttons inside keep eating
+    // their own taps.
+    onOpen: (() -> Unit)? = null,
 ) {
     // icons load off the main thread, keyed by blob hash like the desktop
     val hash = napp.iconHash()
@@ -298,6 +377,7 @@ private fun NappCard(
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
             .background(theme.card)
+            .clickable(enabled = onOpen != null) { onOpen?.invoke() }
             .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -308,14 +388,33 @@ private fun NappCard(
             if (napp.description.isNotBlank()) {
                 Text(napp.description, color = theme.subtle, fontSize = 13.sp, maxLines = 2)
             }
+            // replaces the old "Open — update available!" button label
+            if (onOpen != null && napp.updateAvailable) {
+                Text(
+                    "update available — reinstall it in Discovery",
+                    color = theme.danger,
+                    fontSize = 11.sp,
+                )
+            }
         }
         Spacer(Modifier.width(8.dp))
+        if (secondaryLabel != null && onSecondary != null) {
+            Button(
+                onClick = onSecondary,
+                enabled = primaryLabel != "Working…",
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = theme.accent, contentColor = theme.accentText),
+            ) {
+                Text(secondaryLabel, fontSize = 13.sp)
+            }
+            Spacer(Modifier.width(6.dp))
+        }
         Button(
-            onClick = onAction,
-            enabled = actionLabel != "Working…",
+            onClick = onPrimary,
+            enabled = primaryLabel != "Working…",
             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
         ) {
-            Text(actionLabel, fontSize = 13.sp)
+            Text(primaryLabel, fontSize = 13.sp)
         }
     }
 }

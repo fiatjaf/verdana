@@ -343,6 +343,9 @@ func (ci *Instance) waitForHandler(ctx context.Context, name string) (int, bool)
 // Launch opens a napp window without waiting for it (what a launcher button
 // does). Failures show up as the launcher's error.
 func Launch(napp Napp) {
+	// a launch the user asked for is what the installed list is ordered by
+	markLaunched(napp.ID)
+
 	go func() {
 		if _, err := launch(context.Background(), napp); err != nil {
 			log.Error().Err(err).Str("napp", napp.ID).Msg("launch failed")

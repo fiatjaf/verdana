@@ -712,36 +712,19 @@ func parseFilters(raw json.RawMessage) ([]nostr.Filter, error) {
 // author's write relays, plus the inbox relays of everyone p-tagged, plus —
 // for a relay list — the indexers that are supposed to carry it.
 func publishTargets(ctx context.Context, evt nostr.Event, requested []string) []string {
-	seen := make(map[string]bool)
 	targets := make([]string, 0, 8)
-	add := func(url string) {
-		url = strings.TrimSpace(url)
-		if url == "" {
-			return
-		}
-		norm := nostr.NormalizeURL(url)
-		if norm == "" || seen[norm] {
-			return
-		}
-		seen[norm] = true
-		targets = append(targets, norm)
-	}
 
 	for _, url := range requested {
-		add(url)
+		targets = append(targets, url)
 	}
 	if len(targets) > 0 {
 		return targets
 	}
 
 	for _, url := range sys.FetchWriteRelays(ctx, evt.PubKey) {
-		add(url)
+		targets = append(targets, url)
 	}
-	if len(targets) == 0 {
-		for _, url := range sys.FetchOutboxRelays(ctx, evt.PubKey, 3) {
-			add(url)
-		}
-	}
+
 	for _, key := range []string{"p", "P"} {
 		for tag := range evt.Tags.FindAll(key) {
 			if len(tag) < 2 {
@@ -752,14 +735,15 @@ func publishTargets(ctx context.Context, evt nostr.Event, requested []string) []
 				continue
 			}
 			for _, url := range sys.FetchInboxRelays(ctx, pk, 3) {
-				add(url)
+				targets = append(targets, url)
 			}
 		}
 	}
+
 	if evt.Kind == 10002 {
-		add(sys.RelayListRelays.Next())
-		add(sys.FallbackRelays.Next())
+		targets = append(targets, sys.RelayListRelays.URLs...)
 	}
+
 	return targets
 }
 
@@ -769,20 +753,18 @@ func publishEvent(ci *Instance, evt nostr.Event, requested []string) (any, error
 	if sys == nil {
 		return nil, errors.New("system not ready")
 	}
-	if evt.ID == nostr.ZeroID || !evt.CheckID() {
-		return nil, errors.New("event is not signed (or its id is wrong)")
-	}
-	if !evt.VerifySignature() {
-		return nil, errors.New("event signature is invalid")
-	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+
+	log.Println("gathering targets")
 
 	targets := publishTargets(ctx, evt, requested)
 	if len(targets) == 0 {
 		return nil, errors.New("no relays to publish to")
 	}
+
+	log.Println("gathered targets: ", targets)
 
 	if !askApproval(ci, "publish an event",
 		fmt.Sprintf("Kind %d to %d relay(s): %s", evt.Kind, len(targets),

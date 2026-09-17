@@ -1,8 +1,8 @@
 run:
-    cd desktop && go build -o child/child ./child && go build -tags 'dev,novulkan' && WEBVIEW_DEBUG=true ./verdana
+    cd desktop && go build -o child/child ./child && go build -o verdana -tags 'dev,novulkan' && WEBVIEW_DEBUG=true ./verdana
 
 prod:
-    cd desktop && go build -o child/child ./child && go build -tags 'novulkan' .
+    cd desktop && go build -o child/child ./child && go build -o verdana -tags 'novulkan' .
 
 # android targets: the aar is rebuilt only when the backend changed (a gomobile
 # bind of everything takes a while), the apk takes it from app/libs.

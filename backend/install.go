@@ -10,25 +10,23 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 	"time"
 )
 
 // refreshInstalled republishes the installed list into the launcher state.
+// Ordering is installedNapps' business (most recently launched first).
 func refreshInstalled() {
-	list := installedNapps()
-	sort.Slice(list, func(i, j int) bool { return list[i].Name < list[j].Name })
-
 	ls.mu.Lock()
-	ls.installed = list
+	ls.installed = installedNapps()
 	ls.mu.Unlock()
 	notifyState()
 }
 
 // Install downloads a napp's files and records it as installed. Blocking:
-// call it from a goroutine (progress shows up as IsBusy).
+// call it from a goroutine (progress shows up as IsBusy). It also takes
+// updates: an already-installed napp is simply re-downloaded over.
 func Install(n Napp) {
 	log.Info().Str("napp", n.ID).Str("name", n.Name).Msg("installing napp")
 	setBusy(n.ID, true)
@@ -58,7 +56,8 @@ func Install(n Napp) {
 	log.Info().Str("napp", n.ID).Str("name", n.Name).Msg("install complete")
 }
 
-// Uninstall removes a napp's files and forgets it.
+// Uninstall removes a napp's files and forgets it. Installed-only by
+// convention: it silently no-ops for ids the launcher doesn't know.
 func Uninstall(id string) {
 	log.Info().Str("napp", id).Msg("uninstalling napp")
 	setBusy(id, true)
@@ -68,11 +67,26 @@ func Uninstall(id string) {
 
 	stateMu.Lock()
 	delete(state.InstalledNapps, id)
+	delete(state.LastLaunched, id)
 	saveState()
 	stateMu.Unlock()
 
 	refreshInstalled()
 	log.Info().Str("napp", id).Msg("uninstall complete")
+}
+
+// InstallFromDiscovery resolves an id the launcher knows — installed or just
+// discovered — into a napp and installs (or updates) it.
+func InstallFromDiscovery(id string) bool {
+	if n, ok := InstalledNapp(id); ok {
+		go Install(n)
+		return true
+	}
+	if n, ok := DiscoveredNapp(id); ok {
+		go Install(n)
+		return true
+	}
+	return false
 }
 
 // maxParallelAssets caps how many of a napp's files are in flight at once, so

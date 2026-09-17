@@ -1,6 +1,9 @@
 package backend
 
-import "sync"
+import (
+	"sync"
+	"sync/atomic"
+)
 
 // Everything a launcher UI draws lives here, so the Gio window and the Compose
 // screen render the same thing from the same source. A GUI never mutates it:
@@ -45,8 +48,12 @@ type State struct {
 	Installed []Napp `json:"installed"`
 	Discovery []Napp `json:"discovery"`
 
-	// Busy holds the ids of napps being installed or uninstalled.
+	// Busy holds the ids of napps being installed, uninstalled or updated.
 	Busy []string `json:"busy"`
+
+	// UpdateCheckRunning is true while the launcher is looking for newer
+	// versions of the installed napps (the "check for updates" button).
+	UpdateCheckRunning bool `json:"updateCheckRunning"`
 
 	// Windows are the napp instances currently open.
 	Windows []WindowInfo `json:"windows"`
@@ -80,6 +87,31 @@ type launcherState struct {
 
 var ls = launcherState{phase: PhaseLoading, busy: make(map[string]bool)}
 
+// The Napp model crosses the gomobile boundary by value, so per-napp "an
+// update is out there" flags can't be shared mutable state on it: Snapshot()
+// stamps them from this atomic set instead, keyed by napp id.
+var (
+	updateAvailable atomic.Pointer[updatesByID]
+	updateChecking  atomic.Bool
+)
+
+// updatesByID is the immutable set of napp ids with a newer version on the
+// relays. Replaced wholesale whenever a check round completes.
+type updatesByID map[string]bool
+
+func init() { updateAvailable.Store(&updatesByID{}) }
+
+// setUpdateAvailable replaces the "has an update" set and republishes the
+// launcher state.
+func setUpdateAvailable(ids []string) {
+	set := make(updatesByID, len(ids))
+	for _, id := range ids {
+		set[id] = true
+	}
+	updateAvailable.Store(&set)
+	notifyState()
+}
+
 // Snapshot is the current launcher state, safe to hold on to and read from a
 // render loop.
 func Snapshot() State {
@@ -106,6 +138,30 @@ func Snapshot() State {
 
 	s.Relays = Relays()
 	s.Windows = OpenWindows()
+	s.UpdateCheckRunning = updateChecking.Load()
+	upd := *updateAvailable.Load()
+	for i := range s.Installed {
+		if upd[s.Installed[i].ID] {
+			s.Installed[i].UpdateAvailable = true
+		}
+	}
+	for i := range s.Discovery {
+		if upd[s.Discovery[i].ID] && IsInstalled(s.Discovery[i].ID) {
+			s.Discovery[i].UpdateAvailable = true
+		}
+	}
+	// author names resolve in the background and are stamped on every
+	// snapshot, so the UIs get them for free (display and filtering).
+	for i := range s.Installed {
+		if s.Installed[i].AuthorName == "" {
+			s.Installed[i].AuthorName = s.Installed[i].AuthorShortName()
+		}
+	}
+	for i := range s.Discovery {
+		if s.Discovery[i].AuthorName == "" {
+			s.Discovery[i].AuthorName = s.Discovery[i].AuthorShortName()
+		}
+	}
 	return s
 }
 

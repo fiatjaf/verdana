@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"fiatjaf.com/nostr"
@@ -25,12 +26,18 @@ type Napp struct {
 	Description string          `json:"description"`
 	Icon        string          `json:"icon"`
 	Author      nostr.PubKey    `json:"author"`
+	AuthorName  string          `json:"authorName,omitempty"`
 	Actions     []string        `json:"actions"`
 	Requires    []string        `json:"requires"`
 	Singleton   bool            `json:"singleton"`
 	CreatedAt   nostr.Timestamp `json:"created_at"`
 	Paths       []NappPath      `json:"paths"`
 	Servers     []string        `json:"servers"`
+
+	// UpdateAvailable is stamped by Snapshot(): a newer version of this napp
+	// was seen on the relays (kind:35128, same author+d-tag, newer
+	// created_at). It is not part of the wire model.
+	UpdateAvailable bool `json:"updateAvailable"`
 }
 
 // Label is the napp's name, falling back to its id.
@@ -152,4 +159,78 @@ func (n Napp) AuthorProfile(ctx context.Context) (string, string) {
 	}
 	pm := sys.FetchProfileMetadata(ctx, n.Author)
 	return pm.ShortName(), pm.Picture
+}
+
+// ─── author names ────────────────────────────────────────────────
+
+var (
+	authorNameMu      sync.Mutex
+	authorNameCache   = make(map[nostr.PubKey]string)
+	authorNamePending = make(map[nostr.PubKey]bool)
+)
+
+// AuthorShortName is the napp author's short name, as far as it is known: from
+// the sdk cache or the launcher's user index, without touching the network.
+// When it is not known yet, a background resolution is kicked off (which
+// re-notifies the state when it lands) and "" is returned meanwhile. It never
+// blocks, so a render loop can call it per-napp per-frame.
+func (n Napp) AuthorShortName() string {
+	if n.Author == nostr.ZeroPK {
+		return ""
+	}
+
+	authorNameMu.Lock()
+	if name := authorNameCache[n.Author]; name != "" {
+		authorNameMu.Unlock()
+		return name
+	}
+	authorNameMu.Unlock()
+
+	// the user index often knows the author already (kind:0s in the local
+	// eventstore), which saves the network round entirely
+	userIndexMu.RLock()
+	if u, ok := userIndex[n.Author]; ok {
+		name := u.pm.ShortName()
+		userIndexMu.RUnlock()
+		authorNameMu.Lock()
+		authorNameCache[n.Author] = name
+		authorNameMu.Unlock()
+		return name
+	}
+	userIndexMu.RUnlock()
+
+	pk := n.Author
+	authorNameMu.Lock()
+	pending := authorNamePending[pk]
+	authorNamePending[pk] = true
+	authorNameMu.Unlock()
+	if pending {
+		return ""
+	}
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		defer cancel()
+		name := ""
+		if sys != nil {
+			name = sys.FetchProfileMetadata(ctx, pk).ShortName()
+		}
+		authorNameMu.Lock()
+		authorNameCache[pk] = name
+		authorNameMu.Unlock()
+		notifyState()
+	}()
+	return ""
+}
+
+// MatchesQuery says whether the napp matches a case-insensitive substring in
+// its name, description, author pubkey or author name.
+func (n Napp) MatchesQuery(q string) bool {
+	if q == "" {
+		return true
+	}
+	return strings.Contains(strings.ToLower(n.Name), q) ||
+		strings.Contains(strings.ToLower(n.Description), q) ||
+		strings.Contains(strings.ToLower(n.Author.Hex()), q) ||
+		strings.Contains(strings.ToLower(n.AuthorShortName()), q)
 }

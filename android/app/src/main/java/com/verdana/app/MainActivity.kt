@@ -247,6 +247,7 @@ class MainActivity : ComponentActivity(), UI {
     fun install(id: String) = Mobile.install(id)
     fun uninstall(id: String) = Mobile.uninstall(id)
     fun launch(id: String) = Mobile.launch(id)
+    fun checkForUpdates() = Mobile.checkForUpdates()
     fun answer(id: Long, ok: Boolean, index: Int) = Mobile.answerPrompt(id, ok, index.toLong())
     fun toggleTheme() {
         val next = if (state.theme == "dark") "light" else "dark"

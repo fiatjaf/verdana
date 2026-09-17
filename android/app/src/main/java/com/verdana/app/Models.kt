@@ -14,10 +14,12 @@ data class Napp(
     val description: String,
     val icon: String,
     val author: String,
+    val authorName: String,
     val actions: List<String>,
     val requires: List<String>,
     val singleton: Boolean,
     val paths: List<NappPath>,
+    val updateAvailable: Boolean = false,
 )
 
 data class WindowInfo(val instance: String, val nappId: String, val name: String, val action: String)
@@ -52,6 +54,7 @@ data class LauncherState(
     val discovery: List<Napp>,
     val busy: List<String>,
     val windows: List<WindowInfo>,
+    val updateCheckRunning: Boolean = false,
 )
 
 fun parseState(json: String): LauncherState {
@@ -67,6 +70,7 @@ fun parseState(json: String): LauncherState {
                 description = n.optString("description"),
                 icon = n.optString("icon"),
                 author = n.optString("author").trim('"'),
+                authorName = n.optString("authorName"),
                 actions = (0 until (n.optJSONArray("actions")?.length() ?: 0)).map {
                     n.optJSONArray("actions")!!.getString(it)
                 },
@@ -74,6 +78,7 @@ fun parseState(json: String): LauncherState {
                     n.optJSONArray("requires")!!.getString(it)
                 },
                 singleton = n.optBoolean("singleton"),
+                updateAvailable = n.optBoolean("updateAvailable"),
                 paths = (0 until pathsArr.length()).map {
                     val p = pathsArr.getJSONObject(it)
                     NappPath(p.optString("path"), p.optString("sha256"))
@@ -98,6 +103,7 @@ fun parseState(json: String): LauncherState {
         installed = napps("installed"),
         discovery = napps("discovery"),
         busy = (0 until busyArr.length()).map { busyArr.getString(it) },
+        updateCheckRunning = o.optBoolean("updateCheckRunning"),
         windows = (0 until windowsArr.length()).map { i ->
             val w = windowsArr.getJSONObject(i)
             WindowInfo(
