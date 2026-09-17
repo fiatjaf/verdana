@@ -189,7 +189,7 @@ func askApproval(ci *Instance, title, detail, code string) bool {
 
 // askActionHandler asks which napp should handle an action when more than one
 // can. Open windows come first — routing into one keeps the user's state.
-func askActionHandler(caller *Instance, action string, candidates []Napp, open []*Instance) (PromptOption, bool) {
+func askActionHandler(caller *Instance, action string, payload json.RawMessage, candidates []Napp, open []*Instance) (PromptOption, bool) {
 	callerName := "launcher"
 	if caller != nil {
 		callerName = caller.napp.Label()
@@ -211,7 +211,12 @@ func askActionHandler(caller *Instance, action string, candidates []Napp, open [
 		})
 	}
 
-	p := newPrompt(callerName, "Open “"+action+"” with…", "Fired by "+callerName+".", "", options)
+	code := ""
+	if len(payload) != 0 && string(payload) != "null" {
+		code = preview(string(payload), 500)
+	}
+
+	p := newPrompt(callerName, "Open “"+action+"” with…", "", code, options)
 	if caller != nil {
 		p.Instance = caller.instance
 	}

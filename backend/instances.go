@@ -503,7 +503,7 @@ func runNappAction(
 		return dispatchToInstance(ctx, ci, req)
 	}
 
-	choice, ok := askActionHandler(caller, name, candidates, open)
+	choice, ok := askActionHandler(caller, name, payload, candidates, open)
 	if !ok {
 		return nil, errors.New("action handler selection cancelled")
 	}
