@@ -712,6 +712,22 @@ func parseFilters(raw json.RawMessage) ([]nostr.Filter, error) {
 	return []nostr.Filter{filter}, nil
 }
 
+// nip51ListKind marks events addressed to their author's relays, not to the
+// inbox relays of people referenced by their p-tags.
+func nip51ListKind(kind nostr.Kind) bool {
+	switch kind {
+	case 3,
+		10000, 10001, 10002, 10003, 10004, 10005, 10006, 10007, 10008, 10009,
+		10011, 10012, 10013, 10015, 10017, 10018, 10020, 10030, 10050, 10054,
+		10063, 10064, 10101, 10102,
+		30000, 30001, 30002, 30003, 30004, 30005, 30006, 30007, 30008, 30015,
+		30030, 30063, 30267, 31924, 39089, 39092:
+		return true
+	default:
+		return false
+	}
+}
+
 // publishTargets is where an event goes when the napp didn't say: the
 // author's write relays, plus the inbox relays of everyone p-tagged, plus —
 // for a relay list — the indexers that are supposed to carry it.
@@ -729,17 +745,19 @@ func publishTargets(ctx context.Context, evt nostr.Event, requested []string) []
 		targets = append(targets, url)
 	}
 
-	for _, key := range []string{"p", "P"} {
-		for tag := range evt.Tags.FindAll(key) {
-			if len(tag) < 2 {
-				continue
-			}
-			pk, err := nostr.PubKeyFromHex(tag[1])
-			if err != nil {
-				continue
-			}
-			for _, url := range sys.FetchInboxRelays(ctx, pk, 3) {
-				targets = append(targets, url)
+	if !nip51ListKind(evt.Kind) {
+		for _, key := range []string{"p", "P"} {
+			for tag := range evt.Tags.FindAll(key) {
+				if len(tag) < 2 {
+					continue
+				}
+				pk, err := nostr.PubKeyFromHex(tag[1])
+				if err != nil {
+					continue
+				}
+				for _, url := range sys.FetchInboxRelays(ctx, pk, 3) {
+					targets = append(targets, url)
+				}
 			}
 		}
 	}
