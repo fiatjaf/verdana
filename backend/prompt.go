@@ -2,6 +2,7 @@ package backend
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -27,6 +28,7 @@ type PromptOption struct {
 	// instance) this option routes to.
 	NappID   string `json:"nappId"`
 	Instance string `json:"instance"`
+	Number   int    `json:"number,omitempty"`
 }
 
 // Prompt is a question the user has to answer before a napp can continue.
@@ -197,16 +199,16 @@ func askActionHandler(caller *Instance, action string, payload json.RawMessage, 
 	options := make([]PromptOption, 0, len(candidates)+len(open))
 	for _, ci := range open {
 		options = append(options, PromptOption{
-			Label:    ci.napp.Label() + " (open)",
-			Detail:   "instance " + ci.instance,
+			Label:    ci.napp.Label() + " - window #" + strconv.Itoa(ci.number),
 			NappID:   ci.napp.ID,
 			Instance: ci.instance,
+			Number:   ci.number,
 		})
 	}
 	for _, n := range candidates {
 		options = append(options, PromptOption{
 			Label:  n.Label(),
-			Detail: n.Description,
+			Detail: n.ID,
 			NappID: n.ID,
 		})
 	}

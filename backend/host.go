@@ -58,6 +58,8 @@ type WindowSpec struct {
 	// Instance is window.napp.instance: a serial, or the napp's id when it
 	// declares `singleton`.
 	Instance string
+	// Number is the desktop-facing window number, stable for this open window.
+	Number int
 
 	NappID      string
 	Name        string

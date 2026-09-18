@@ -102,13 +102,43 @@ func layoutPrompt(
 				}
 				return layout.Inset{Bottom: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 					pointer.CursorPointer.Add(gtx.Ops)
-					label := p.Options[i].Label
-					if p.Options[i].Detail != "" {
-						label += " — " + truncate(p.Options[i].Detail, 40)
-					}
-					b := material.Button(th, &optBtns[i], label)
-					b.TextSize = unit.Sp(14)
-					return b.Layout(gtx)
+					opt := p.Options[i]
+					p := currentTheme()
+					return optBtns[i].Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						open := opt.Instance != ""
+						bgColor, fgColor := p.chipBg, p.chipFg
+						if open {
+							bgColor, fgColor = p.contrastBg, p.contrastFg
+						}
+						macro := op.Record(gtx.Ops)
+						dims := layout.UniformInset(unit.Dp(10)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									l := material.Body1(th, opt.Label)
+									l.Color = fgColor
+									return l.Layout(gtx)
+								}),
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									if opt.Detail == "" {
+										return layout.Dimensions{}
+									}
+									l := material.Caption(th, truncate(opt.Detail, 80))
+									if open {
+										l.Color = fgColor
+									} else {
+										l.Color = p.muted
+									}
+									return l.Layout(gtx)
+								}),
+							)
+						})
+						call := macro.Stop()
+						bg := clip.RRect{Rect: image.Rectangle{Max: image.Point{X: gtx.Constraints.Max.X, Y: dims.Size.Y}}, NW: 6, NE: 6, SW: 6, SE: 6}
+						defer bg.Push(gtx.Ops).Pop()
+						paint.Fill(gtx.Ops, bgColor)
+						call.Add(gtx.Ops)
+						return dims
+					})
 				})
 			}))
 		}

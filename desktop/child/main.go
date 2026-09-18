@@ -39,6 +39,7 @@ type nappMeta struct {
 	Dir         string
 	URL         string
 	Instance    string
+	Number      string
 	Requires    []string
 	Theme       string
 	ThemeVars   string
@@ -67,6 +68,7 @@ func main() {
 		Name:        os.Getenv("VERDANA_NAPP_NAME"),
 		Description: os.Getenv("VERDANA_NAPP_DESC"),
 		Instance:    os.Getenv("VERDANA_INSTANCE_ID"),
+		Number:      os.Getenv("VERDANA_WINDOW_NUMBER"),
 		Theme:       os.Getenv("VERDANA_THEME"),
 		ThemeVars:   os.Getenv("VERDANA_THEME_VARS"),
 	}
@@ -86,7 +88,7 @@ func main() {
 	runtime.LockOSThread()
 
 	w := webview.New(os.Getenv("WEBVIEW_DEBUG") == "true")
-	w.SetTitle(meta.Name)
+	w.SetTitle(windowTitle(meta.Name, meta.Number))
 	w.SetSize(600, 450, webview.HintNone)
 	_ = w.Bind("__bridge_rpc", rpcBound)
 	_ = w.Bind("__verdana_prompt_answer", promptAnswer)
@@ -123,6 +125,18 @@ func jsString(s string) string {
 		return `""`
 	}
 	return string(b)
+}
+
+// windowTitle names the OS window after the napp and its instance, so the
+// user can match it to the "window #N" entries in action prompts.
+func windowTitle(name, number string) string {
+	if name == "" {
+		name = "Napp"
+	}
+	if number == "" {
+		return name
+	}
+	return name + " - window #" + number
 }
 
 // themeInitScript sets window.__nappTheme, which bridge.js applies as soon as
@@ -368,22 +382,24 @@ const promptLibScript = "(function(){" +
 	"c.textContent = p.code;" +
 	"box.appendChild(c);" +
 	"}" +
-	"function btn(label, detail, ok, index) {" +
+	"function btn(label, detail, instance, ok, index) {" +
 	"var b = document.createElement('button');" +
 	"b.style.cssText = 'display:block;width:100%;padding:10px 14px;margin-bottom:8px" +
-	";border:0;border-radius:8px;background:' + accent" +
-	"+ ';color:' + accentText + ';font-size:14px;text-align:left;cursor:pointer;';" +
-	"b.textContent = detail ? label + '  \\u2014  ' + detail : label;" +
+	";border:0;border-radius:8px;background:' + (instance ? accent : card)" +
+	"+ ';color:' + (instance ? accentText : fg) + ';font-size:14px;text-align:left;cursor:pointer;';" +
+	"var title = document.createElement('div'); title.textContent = label; b.appendChild(title);" +
+	"if (detail) { var sub = document.createElement('div'); sub.textContent = detail;" +
+	"sub.style.cssText = 'margin-top:3px;color:' + (instance ? accentText : muted) + ';font-size:11px;opacity:.75;'; b.appendChild(sub); }" +
 	"b.onclick = function() { window.__verdana_prompt_answer(p.id, ok, index) };" +
 	"return b;" +
 	"};" +
 	"var isPicker = p.options && p.options.length;" +
 	"if (isPicker) {" +
-	"p.options.forEach(function(opt, i) { box.appendChild(btn(opt.label, opt.detail, true, i)) });" +
+	"p.options.forEach(function(opt, i) { box.appendChild(btn(opt.label, opt.detail, opt.instance, true, i)) });" +
 	"} else {" +
-	"box.appendChild(btn('Allow', '', true, 0));" +
+	"box.appendChild(btn('Allow', '', '', true, 0));" +
 	"}" +
-	"var cancel = btn(isPicker ? 'Cancel' : 'Deny', '', false, 0);" +
+	"var cancel = btn(isPicker ? 'Cancel' : 'Deny', '', '', false, 0);" +
 	"cancel.style.background = card; cancel.style.color = fg;" +
 	"box.appendChild(cancel);" +
 	"o.appendChild(box);" +

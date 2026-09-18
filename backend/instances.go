@@ -25,6 +25,7 @@ type Instance struct {
 	// instance is what the napp sees as window.napp.instance: a serial,
 	// unique per window — or the napp's own id when it declares `singleton`.
 	instance string
+	number   int
 	napp     Napp
 
 	sendMu    sync.Mutex
@@ -74,6 +75,7 @@ var (
 	instancesMu    sync.Mutex
 	instances      []*Instance
 	instanceSerial atomic.Int64
+	windowSerial   atomic.Int64
 )
 
 // ─── registry ────────────────────────────────────────────────────
@@ -399,6 +401,7 @@ func launch(ctx context.Context, napp Napp) (*Instance, error) {
 	themeName, themeVars := Theme()
 	ci := &Instance{
 		instance:   nextInstanceID(napp),
+		number:     int(windowSerial.Add(1)),
 		napp:       napp,
 		subs:       make(map[int]context.CancelFunc),
 		actions:    make(map[string]int),
@@ -416,6 +419,7 @@ func launch(ctx context.Context, napp Napp) (*Instance, error) {
 
 	transport, err := host.OpenWindow(WindowSpec{
 		Instance:    ci.instance,
+		Number:      ci.number,
 		NappID:      napp.ID,
 		Name:        napp.Label(),
 		Description: napp.Description,

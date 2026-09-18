@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -41,6 +42,7 @@ func startChild(spec backend.WindowSpec) (backend.Transport, error) {
 		"VERDANA_NAPP_NAME="+spec.Name,
 		"VERDANA_NAPP_DESC="+spec.Description,
 		"VERDANA_INSTANCE_ID="+spec.Instance,
+		"VERDANA_WINDOW_NUMBER="+strconv.Itoa(spec.Number),
 		"VERDANA_NAPP_REQUIRES="+strings.Join(spec.Requires, ","),
 		"VERDANA_THEME="+spec.Theme,
 		"VERDANA_THEME_VARS="+spec.ThemeVars,
