@@ -25,8 +25,8 @@ import (
 // this process (never in state.json), show up in the launcher's Dev list, and
 // are served from a throwaway http server on loopback.
 //
-// A dev napp comes from either a local folder (its files are read into memory
-// and served as necessary) or a dev-server url like http://localhost:5173 (used
+// A dev napp comes from either a local folder (its files are served directly
+// from disk) or a dev-server url like http://localhost:5173 (used
 // directly: the shell's bridge bindings don't depend on the page's origin, so
 // no proxying is needed and HMR keeps working untouched).
 //
@@ -59,9 +59,6 @@ type devNapp struct {
 
 	// target is set for url napps: the normalized dev server url.
 	target string
-
-	// files holds a folder napp's files in memory, keyed by "/..." path.
-	files map[string][]byte
 }
 
 var (
@@ -135,14 +132,14 @@ func nappFromDevMetadata(meta devMetadata) (Napp, error) {
 // ─── loading ─────────────────────────────────────────────────────
 
 // devFileCap and devTotalCap keep a mistaken folder pick (a home directory, a
-// checkout with build artifacts) from eating all memory.
+// checkout with build artifacts) from taking too long to index.
 const (
 	devFileCap  = 32 << 20
 	devTotalCap = 256 << 20
 )
 
-// DevLoadFolder reads a napp folder into memory and registers it as a dev
-// napp. Blocking: call it from a goroutine. Errors land in DevErr.
+// DevLoadFolder indexes a napp folder and registers it as a dev napp. Blocking:
+// call it from a goroutine. Errors land in DevErr.
 func DevLoadFolder(dir string) {
 	dir = strings.TrimSpace(dir)
 	if dir == "" {
@@ -152,17 +149,17 @@ func DevLoadFolder(dir string) {
 	setDevLoading(true)
 	defer setDevLoading(false)
 
-	napp, files, err := readDevFolder(dir)
+	napp, err := readDevFolder(dir)
 	if err != nil {
 		setDevErr(err.Error())
 		return
 	}
 	devMu.Lock()
-	devNapps[napp.ID] = &devNapp{napp: napp, source: "folder", dir: dir, files: files}
+	devNapps[napp.ID] = &devNapp{napp: napp, source: "folder", dir: dir}
 	devMu.Unlock()
 	setDevErr("")
 	refreshDev()
-	log.Info().Str("napp", napp.ID).Str("dir", dir).Int("files", len(files)).Msg("dev napp loaded from folder")
+	log.Info().Str("napp", napp.ID).Str("dir", dir).Int("files", len(napp.Paths)).Msg("dev napp loaded from folder")
 }
 
 // DevLoadURL registers a dev-server url as a dev napp, reading its
@@ -233,30 +230,30 @@ func LaunchDev(id string) {
 	Launch(d.napp)
 }
 
-// readDevFolder reads metadata.json plus every regular file under dir.
-func readDevFolder(dir string) (Napp, map[string][]byte, error) {
+// readDevFolder reads metadata.json and indexes every regular file under dir.
+// File contents are only streamed while calculating their hashes.
+func readDevFolder(dir string) (Napp, error) {
 	st, err := os.Stat(dir)
 	if err != nil {
-		return Napp{}, nil, fmt.Errorf("can't read %s: %w", dir, err)
+		return Napp{}, fmt.Errorf("can't read %s: %w", dir, err)
 	}
 	if !st.IsDir() {
-		return Napp{}, nil, fmt.Errorf("%s is not a folder", dir)
+		return Napp{}, fmt.Errorf("%s is not a folder", dir)
 	}
 
 	raw, err := os.ReadFile(filepath.Join(dir, "metadata.json"))
 	if err != nil {
-		return Napp{}, nil, fmt.Errorf("no metadata.json in %s", dir)
+		return Napp{}, fmt.Errorf("no metadata.json in %s", dir)
 	}
 	var meta devMetadata
 	if err := json.Unmarshal(raw, &meta); err != nil {
-		return Napp{}, nil, fmt.Errorf("unreadable metadata.json: %w", err)
+		return Napp{}, fmt.Errorf("unreadable metadata.json: %w", err)
 	}
 	napp, err := nappFromDevMetadata(meta)
 	if err != nil {
-		return Napp{}, nil, err
+		return Napp{}, err
 	}
 
-	files := make(map[string][]byte)
 	var total int64
 	err = filepath.WalkDir(dir, func(p string, de os.DirEntry, err error) error {
 		if err != nil || !de.Type().IsRegular() {
@@ -269,32 +266,41 @@ func readDevFolder(dir string) (Napp, map[string][]byte, error) {
 		if info.Size() > devFileCap {
 			return fmt.Errorf("%s is bigger than %dMB, refusing", p, devFileCap>>20)
 		}
-		data, err := os.ReadFile(p)
+		file, err := os.Open(p)
 		if err != nil {
 			return err
 		}
-		total += int64(len(data))
+		total += info.Size()
 		if total > devTotalCap {
+			file.Close()
 			return fmt.Errorf("folder holds more than %dMB, refusing", devTotalCap>>20)
+		}
+		sum := sha256.New()
+		_, copyErr := io.Copy(sum, file)
+		closeErr := file.Close()
+		if copyErr != nil {
+			return copyErr
+		}
+		if closeErr != nil {
+			return closeErr
 		}
 		rel, err := filepath.Rel(dir, p)
 		if err != nil {
 			return err
 		}
 		key := "/" + filepath.ToSlash(rel)
-		files[key] = data
-		sum := sha256.Sum256(data)
-		napp.Paths = append(napp.Paths, NappPath{Path: key, Sha256: hex.EncodeToString(sum[:])})
+		napp.Paths = append(napp.Paths, NappPath{Path: key, Sha256: hex.EncodeToString(sum.Sum(nil))})
 		return nil
 	})
 	if err != nil {
-		return Napp{}, nil, err
+		return Napp{}, err
 	}
-	if _, ok := files["/index.html"]; !ok {
-		return Napp{}, nil, fmt.Errorf("no index.html in %s", dir)
+	indexInfo, err := os.Stat(filepath.Join(dir, "index.html"))
+	if err != nil || !indexInfo.Mode().IsRegular() {
+		return Napp{}, fmt.Errorf("no index.html in %s", dir)
 	}
 	sort.Slice(napp.Paths, func(i, j int) bool { return napp.Paths[i].Path < napp.Paths[j].Path })
-	return napp, files, nil
+	return napp, nil
 }
 
 // readDevURL normalizes the url and fetches the metadata.json the dev server
@@ -342,7 +348,7 @@ func readDevURL(rawurl string) (string, devMetadata, error) {
 
 // ─── icons ───────────────────────────────────────────────────────
 
-// devIconBlob serves a dev napp's icon: from the in-memory files for folder
+// devIconBlob serves a dev napp's icon: from disk for folder
 // napps, from the dev server itself for url napps. The second result is false
 // when this isn't a dev napp's icon, and IconBlob falls through to disk.
 func devIconBlob(ctx context.Context, n Napp) ([]byte, bool) {
@@ -355,10 +361,21 @@ func devIconBlob(ctx context.Context, n Napp) ([]byte, bool) {
 		return nil, false
 	}
 	if d.source == "folder" {
-		if data, ok := d.files["/"+want]; ok {
-			return data, true
+		filePath := filepath.Join(d.dir, filepath.FromSlash(want))
+		rel, err := filepath.Rel(d.dir, filePath)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return nil, false
 		}
-		return nil, false
+		file, err := os.Open(filePath)
+		if err != nil {
+			return nil, false
+		}
+		defer file.Close()
+		if info, err := file.Stat(); err != nil || !info.Mode().IsRegular() {
+			return nil, false
+		}
+		data, err := io.ReadAll(io.LimitReader(file, 5<<20))
+		return data, err == nil
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, d.target+"/"+want, nil)
 	if err != nil {
@@ -402,13 +419,37 @@ func devServerBase() string {
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/dev/", serveDevFile)
+	mux.HandleFunc("/", serveDevRootFile)
 	go http.Serve(ln, mux)
 	devSrvBase = "http://" + ln.Addr().String()
 	log.Info().Str("addr", devSrvBase).Msg("dev server up")
 	return devSrvBase
 }
 
-// serveDevFile serves one folder dev napp's in-memory files at
+// serveDevRootFile handles absolute asset URLs such as /index.js. The page's
+// same-origin Referer identifies which folder napp owns the request.
+func serveDevRootFile(wr http.ResponseWriter, r *http.Request) {
+	ref, err := url.Parse(r.Referer())
+	if err != nil {
+		http.NotFound(wr, r)
+		return
+	}
+	rest := strings.TrimPrefix(ref.Path, "/dev/")
+	id, _, ok := strings.Cut(rest, "/")
+	if !ok || id == "" {
+		http.NotFound(wr, r)
+		return
+	}
+	if d := devLookup(id); d == nil || d.source != "folder" {
+		http.NotFound(wr, r)
+		return
+	}
+	request := r.Clone(r.Context())
+	request.URL.Path = "/dev/" + id + r.URL.Path
+	serveDevFile(wr, request)
+}
+
+// serveDevFile serves one folder dev napp's files directly from disk at
 // /dev/<id>/..., with the same SPA fallback to index.html the napp shells
 // use for installed napps.
 func serveDevFile(wr http.ResponseWriter, r *http.Request) {
@@ -421,21 +462,35 @@ func serveDevFile(wr http.ResponseWriter, r *http.Request) {
 		return
 	}
 	key := path.Clean("/" + f)
-	data, ok := d.files[key]
-	if !ok {
+	filePath := filepath.Join(d.dir, filepath.FromSlash(strings.TrimPrefix(key, "/")))
+	file, err := os.Open(filePath)
+	if err == nil {
+		info, statErr := file.Stat()
+		if statErr != nil || !info.Mode().IsRegular() {
+			file.Close()
+			err = os.ErrNotExist
+		}
+	}
+	if err != nil {
 		// extensionless app routes fall back to the entrypoint
 		if key != "/index.html" && !strings.Contains(path.Base(key), ".") {
-			data, ok = d.files["/index.html"]
+			file, err = os.Open(filepath.Join(d.dir, "index.html"))
 		}
-		if !ok {
-			http.NotFound(wr, r)
-			return
-		}
+	}
+	if err != nil {
+		http.NotFound(wr, r)
+		return
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		http.NotFound(wr, r)
+		return
 	}
 	if ct := mime.TypeByExtension(path.Ext(key)); ct != "" {
 		wr.Header().Set("Content-Type", ct)
 	}
-	http.ServeContent(wr, r, path.Base(key), time.Time{}, strings.NewReader(string(data)))
+	http.ServeContent(wr, r, info.Name(), info.ModTime(), file)
 }
 
 // ─── errors ──────────────────────────────────────────────────────
