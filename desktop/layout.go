@@ -107,7 +107,9 @@ func layoutPrompt(
 					return optBtns[i].Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 						open := opt.Instance != ""
 						bgColor, fgColor := p.chipBg, p.chipFg
-						if open {
+						if opt.Dev {
+							bgColor, fgColor = p.devBg, p.devFg
+						} else if open {
 							bgColor, fgColor = p.contrastBg, p.contrastFg
 						}
 						macro := op.Record(gtx.Ops)
@@ -123,7 +125,7 @@ func layoutPrompt(
 										return layout.Dimensions{}
 									}
 									l := material.Caption(th, truncate(opt.Detail, 80))
-									if open {
+									if open || opt.Dev {
 										l.Color = fgColor
 									} else {
 										l.Color = p.muted
@@ -209,7 +211,7 @@ func layoutLogin(gtx layout.Context, th *material.Theme, ed *widget.Editor, btn 
 	)
 }
 
-func layoutMain(gtx layout.Context, th *material.Theme, tabNappsBtn, tabDiscoBtn, tabDevBtn, themeBtn, logoutBtn *widget.Clickable, tab int, installedList, discoveryList, devList *widget.List, relaysEd, filterEd, installedFilterEd, devURLed, devPathEd *widget.Editor, fetchBtn, checkUpdBtn, loadURLBtn, browseBtn, loadFolderBtn *widget.Clickable, cardBtns, uninstBtns, actionBtns, updateBtns, devOpenBtns, devUnloadBtns, devReloadBtns []widget.Clickable, vis, instVis []int, st backend.State, installedSet, busy map[string]bool) layout.Dimensions {
+func layoutMain(gtx layout.Context, th *material.Theme, tabNappsBtn, tabDiscoBtn, tabDevBtn, themeBtn, logoutBtn *widget.Clickable, tab int, installedList, discoveryList, devList *widget.List, relaysEd, filterEd, installedFilterEd, devURLed, devPathEd *widget.Editor, fetchBtn, checkUpdBtn, loadURLBtn, browseBtn, loadFolderBtn *widget.Clickable, cardBtns, uninstBtns, actionBtns, updateBtns, devOpenBtns, devUnloadBtns []widget.Clickable, vis, instVis []int, st backend.State, installedSet, busy map[string]bool) layout.Dimensions {
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layoutProfile(gtx, th, themeBtn, logoutBtn, st.ProfileName, st.ProfilePicture)
@@ -228,7 +230,7 @@ func layoutMain(gtx layout.Context, th *material.Theme, tabNappsBtn, tabDiscoBtn
 					updateBtns, vis, st.FetchErr, st.Fetching, st.Discovery, installedSet, busy)
 			}
 			return layoutDevTab(gtx, th, devList, devURLed, devPathEd, loadURLBtn, browseBtn, loadFolderBtn,
-				devOpenBtns, devUnloadBtns, devReloadBtns, st)
+				devOpenBtns, devUnloadBtns, st)
 		}),
 	)
 }
@@ -408,10 +410,10 @@ func layoutDiscoveryTab(gtx layout.Context, th *material.Theme, list *widget.Lis
 }
 
 // layoutDevTab is the dev-build tab for loading ephemeral napps: either a
-// dev-server url (used directly) or a local folder (read into memory and
-// served from the throwaway server). The cards open on tap, like the
+// dev-server url (used directly) or a local folder (served from disk by the
+// throwaway server). The cards open on tap, like the
 // installed tab's.
-func layoutDevTab(gtx layout.Context, th *material.Theme, list *widget.List, urlEd, pathEd *widget.Editor, loadURLBtn, browseBtn, loadFolderBtn *widget.Clickable, openBtns, unloadBtns, reloadBtns []widget.Clickable, st backend.State) layout.Dimensions {
+func layoutDevTab(gtx layout.Context, th *material.Theme, list *widget.List, urlEd, pathEd *widget.Editor, loadURLBtn, browseBtn, loadFolderBtn *widget.Clickable, openBtns, unloadBtns []widget.Clickable, st backend.State) layout.Dimensions {
 	smallBtn := func(gtx layout.Context, btn *widget.Clickable, label string) layout.Dimensions {
 		pointer.CursorPointer.Add(gtx.Ops)
 		b := material.Button(th, btn, label)
@@ -487,21 +489,14 @@ func layoutDevTab(gtx layout.Context, th *material.Theme, list *widget.List, url
 				return layout.Dimensions{}
 			}
 			return material.List(th, list).Layout(gtx, len(st.Dev), func(gtx layout.Context, i int) layout.Dimensions {
-				var openBtn, unloadBtn, reloadBtn *widget.Clickable
+				var openBtn, unloadBtn *widget.Clickable
 				if i < len(openBtns) {
 					openBtn = &openBtns[i]
 				}
 				if i < len(unloadBtns) {
 					unloadBtn = &unloadBtns[i]
 				}
-				// folder napps can be re-read from disk; url napps just
-				// point at their server, so there is nothing to reload
-				reloadLabel := ""
-				if i < len(reloadBtns) && backend.DevSourceKind(st.Dev[i].ID) == "folder" {
-					reloadBtn = &reloadBtns[i]
-					reloadLabel = "Reload"
-				}
-				return renderNappCard(gtx, th, openBtn, reloadBtn, unloadBtn, reloadLabel, "Unload", st.Dev[i])
+				return renderNappCard(gtx, th, openBtn, nil, unloadBtn, "", "Unload", st.Dev[i])
 			})
 		}),
 	)

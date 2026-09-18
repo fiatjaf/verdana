@@ -23,6 +23,7 @@ const promptTimeout = 2 * time.Minute
 type PromptOption struct {
 	Label  string `json:"label"`
 	Detail string `json:"detail"`
+	Dev    bool   `json:"dev,omitempty"`
 
 	// For the action picker: which napp (and, when it's already open, which
 	// instance) this option routes to.
@@ -197,20 +198,30 @@ func askActionHandler(caller *Instance, action string, payload json.RawMessage, 
 		callerName = caller.napp.Label()
 	}
 	options := make([]PromptOption, 0, len(candidates)+len(open))
-	for _, ci := range open {
-		options = append(options, PromptOption{
-			Label:    ci.napp.Label() + " - window #" + strconv.Itoa(ci.number),
-			NappID:   ci.napp.ID,
-			Instance: ci.instance,
-			Number:   ci.number,
-		})
-	}
-	for _, n := range candidates {
-		options = append(options, PromptOption{
-			Label:  n.Label(),
-			Detail: n.ID,
-			NappID: n.ID,
-		})
+	for _, dev := range []bool{true, false} {
+		for _, ci := range open {
+			if strings.HasPrefix(ci.napp.ID, "dev~") != dev {
+				continue
+			}
+			options = append(options, PromptOption{
+				Label:    ci.napp.Label() + " - window #" + strconv.Itoa(ci.number),
+				NappID:   ci.napp.ID,
+				Instance: ci.instance,
+				Number:   ci.number,
+				Dev:      dev,
+			})
+		}
+		for _, n := range candidates {
+			if strings.HasPrefix(n.ID, "dev~") != dev {
+				continue
+			}
+			options = append(options, PromptOption{
+				Label:  n.Label(),
+				Detail: n.ID,
+				NappID: n.ID,
+				Dev:    dev,
+			})
+		}
 	}
 
 	code := ""

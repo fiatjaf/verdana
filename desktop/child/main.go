@@ -355,6 +355,8 @@ const promptLibScript = "(function(){" +
 	"var muted = tok('text-faint', dark ? '#7d818a' : '#999999');" +
 	"var accent = tok('accent', dark ? '#5c6bc0' : '#3f51b5');" +
 	"var accentText = tok('accent-text', '#ffffff');" +
+	"var dev = tok('dev', dark ? '#5a3b1a' : '#ffe5b4');" +
+	"var devText = tok('dev-text', dark ? '#ffd79a' : '#704000');" +
 	"var border = tok('border', dark ? '#3a3d45' : '#cccccc');" +
 	"var o = document.createElement('div');" +
 	"o.id = '__verdana_prompt';" +
@@ -382,24 +384,25 @@ const promptLibScript = "(function(){" +
 	"c.textContent = p.code;" +
 	"box.appendChild(c);" +
 	"}" +
-	"function btn(label, detail, instance, ok, index) {" +
+	"function btn(label, detail, instance, isDev, ok, index) {" +
 	"var b = document.createElement('button');" +
 	"b.style.cssText = 'display:block;width:100%;padding:10px 14px;margin-bottom:8px" +
 	";border:0;border-radius:8px;background:' + (instance ? accent : card)" +
-	"+ ';color:' + (instance ? accentText : fg) + ';font-size:14px;text-align:left;cursor:pointer;';" +
+	"+ ';color:' + (isDev ? devText : (instance ? accentText : fg)) + ';font-size:14px;text-align:left;cursor:pointer;';" +
+	"if (isDev) b.style.background = dev;" +
 	"var title = document.createElement('div'); title.textContent = label; b.appendChild(title);" +
 	"if (detail) { var sub = document.createElement('div'); sub.textContent = detail;" +
-	"sub.style.cssText = 'margin-top:3px;color:' + (instance ? accentText : muted) + ';font-size:11px;opacity:.75;'; b.appendChild(sub); }" +
+	"sub.style.cssText = 'margin-top:3px;color:' + (isDev ? devText : (instance ? accentText : muted)) + ';font-size:11px;opacity:.75;'; b.appendChild(sub); }" +
 	"b.onclick = function() { window.__verdana_prompt_answer(p.id, ok, index) };" +
 	"return b;" +
 	"};" +
 	"var isPicker = p.options && p.options.length;" +
 	"if (isPicker) {" +
-	"p.options.forEach(function(opt, i) { box.appendChild(btn(opt.label, opt.detail, opt.instance, true, i)) });" +
+	"p.options.forEach(function(opt, i) { box.appendChild(btn(opt.label, opt.detail, opt.instance, opt.dev, true, i)) });" +
 	"} else {" +
-	"box.appendChild(btn('Allow', '', '', true, 0));" +
+	"box.appendChild(btn('Allow', '', '', false, true, 0));" +
 	"}" +
-	"var cancel = btn(isPicker ? 'Cancel' : 'Deny', '', '', false, 0);" +
+	"var cancel = btn(isPicker ? 'Cancel' : 'Deny', '', '', false, false, 0);" +
 	"cancel.style.background = card; cancel.style.color = fg;" +
 	"box.appendChild(cancel);" +
 	"o.appendChild(box);" +

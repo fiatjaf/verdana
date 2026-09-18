@@ -160,7 +160,6 @@ func gioMain() {
 		loadFolderBtn widget.Clickable
 		devOpenBtns   []widget.Clickable
 		devUnloadBtns []widget.Clickable
-		devReloadBtns []widget.Clickable
 		cardBtns      []widget.Clickable
 		uninstBtns    []widget.Clickable
 		actionBtns    []widget.Clickable
@@ -299,9 +298,6 @@ func gioMain() {
 					for len(devUnloadBtns) < len(st.Dev) {
 						devUnloadBtns = append(devUnloadBtns, widget.Clickable{})
 					}
-					for len(devReloadBtns) < len(st.Dev) {
-						devReloadBtns = append(devReloadBtns, widget.Clickable{})
-					}
 					vis := discoveryFilter(st)
 					instVis := installedFilter(st)
 					if tab == 0 {
@@ -365,10 +361,6 @@ func gioMain() {
 								backend.DevUnload(st.Dev[i].ID)
 								acted = true
 							}
-							if devReloadBtns[i].Clicked(gtx) {
-								go backend.DevReload(st.Dev[i].ID)
-								acted = true
-							}
 						}
 						if !acted {
 							for i := range st.Dev {
@@ -385,7 +377,7 @@ func gioMain() {
 					return layoutMain(gtx, th, &tabNappsBtn, &tabDiscoBtn, devBtn, &themeBtn, &logoutBtn, tab,
 						&installedList, &discoveryList, &devList, &relaysEd, &filterEd, &installedFilterEd,
 						&devURLed, &devPathEd, &fetchBtn, &checkUpdBtn, &loadURLBtn, &browseBtn, &loadFolderBtn,
-						cardBtns, uninstBtns, actionBtns, updateBtns, devOpenBtns, devUnloadBtns, devReloadBtns,
+						cardBtns, uninstBtns, actionBtns, updateBtns, devOpenBtns, devUnloadBtns,
 						vis, instVis, st, installedSet, busy)
 				default:
 					return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {

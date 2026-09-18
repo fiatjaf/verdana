@@ -28,6 +28,8 @@ type themePalette struct {
 	fg         color.NRGBA
 	contrastBg color.NRGBA
 	contrastFg color.NRGBA
+	devBg      color.NRGBA
+	devFg      color.NRGBA
 
 	// the rest of what layout.go paints with
 	card     color.NRGBA
@@ -53,6 +55,8 @@ var lightPalette = themePalette{
 	fg:         rgb(0x000000),
 	contrastBg: rgb(0x3f51b5),
 	contrastFg: rgb(0xffffff),
+	devBg:      rgb(0xffe5b4),
+	devFg:      rgb(0x704000),
 	card:       rgb(0xf2f2f2),
 	chipBg:     rgb(0xe8e8e8),
 	chipFg:     rgb(0x333333),
@@ -72,6 +76,8 @@ var darkPalette = themePalette{
 	fg:         rgb(0xe8e8ea),
 	contrastBg: rgb(0x5c6bc0),
 	contrastFg: rgb(0xffffff),
+	devBg:      rgb(0x5a3b1a),
+	devFg:      rgb(0xffd79a),
 	card:       rgb(0x23252b),
 	chipBg:     rgb(0x2b2e35),
 	chipFg:     rgb(0xd8d8dc),
@@ -144,6 +150,8 @@ func (p themePalette) vars() map[string]string {
 		"border":      cssHex(p.border),
 		"accent":      cssHex(p.contrastBg),
 		"accent-text": cssHex(p.contrastFg),
+		"dev":         cssHex(p.devBg),
+		"dev-text":    cssHex(p.devFg),
 		"danger":      cssHex(p.danger),
 	}
 }
