@@ -211,7 +211,7 @@ func layoutLogin(gtx layout.Context, th *material.Theme, ed *widget.Editor, btn 
 	)
 }
 
-func layoutMain(gtx layout.Context, th *material.Theme, tabNappsBtn, tabDiscoBtn, tabDevBtn, themeBtn, logoutBtn *widget.Clickable, tab int, installedList, discoveryList, devList *widget.List, relaysEd, filterEd, installedFilterEd, devURLed, devPathEd *widget.Editor, fetchBtn, checkUpdBtn, loadURLBtn, browseBtn, loadFolderBtn *widget.Clickable, cardBtns, uninstBtns, actionBtns, updateBtns, devOpenBtns, devUnloadBtns []widget.Clickable, vis, instVis []int, st backend.State, installedSet, busy map[string]bool) layout.Dimensions {
+func layoutMain(gtx layout.Context, th *material.Theme, tabNappsBtn, tabDiscoBtn, tabDevBtn, themeBtn, logoutBtn *widget.Clickable, tab int, installedList, discoveryList, devList *widget.List, relaysEd, filterEd, installedFilterEd, devURLed, devPathEd *widget.Editor, fetchBtn, checkUpdBtn, loadURLBtn, browseBtn, loadFolderBtn *widget.Clickable, cardBtns, uninstBtns, actionBtns, updateBtns, devOpenBtns, devUnloadBtns, devPublishBtns []widget.Clickable, vis, instVis []int, st backend.State, installedSet, busy map[string]bool) layout.Dimensions {
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layoutProfile(gtx, th, themeBtn, logoutBtn, st.ProfileName, st.ProfilePicture)
@@ -230,7 +230,7 @@ func layoutMain(gtx layout.Context, th *material.Theme, tabNappsBtn, tabDiscoBtn
 					updateBtns, vis, st.FetchErr, st.Fetching, st.Discovery, installedSet, busy)
 			}
 			return layoutDevTab(gtx, th, devList, devURLed, devPathEd, loadURLBtn, browseBtn, loadFolderBtn,
-				devOpenBtns, devUnloadBtns, st)
+				devOpenBtns, devUnloadBtns, devPublishBtns, st)
 		}),
 	)
 }
@@ -413,7 +413,7 @@ func layoutDiscoveryTab(gtx layout.Context, th *material.Theme, list *widget.Lis
 // dev-server url (used directly) or a local folder (served from disk by the
 // throwaway server). The cards open on tap, like the
 // installed tab's.
-func layoutDevTab(gtx layout.Context, th *material.Theme, list *widget.List, urlEd, pathEd *widget.Editor, loadURLBtn, browseBtn, loadFolderBtn *widget.Clickable, openBtns, unloadBtns []widget.Clickable, st backend.State) layout.Dimensions {
+func layoutDevTab(gtx layout.Context, th *material.Theme, list *widget.List, urlEd, pathEd *widget.Editor, loadURLBtn, browseBtn, loadFolderBtn *widget.Clickable, openBtns, unloadBtns, publishBtns []widget.Clickable, st backend.State) layout.Dimensions {
 	smallBtn := func(gtx layout.Context, btn *widget.Clickable, label string) layout.Dimensions {
 		pointer.CursorPointer.Add(gtx.Ops)
 		b := material.Button(th, btn, label)
@@ -489,14 +489,17 @@ func layoutDevTab(gtx layout.Context, th *material.Theme, list *widget.List, url
 				return layout.Dimensions{}
 			}
 			return material.List(th, list).Layout(gtx, len(st.Dev), func(gtx layout.Context, i int) layout.Dimensions {
-				var openBtn, unloadBtn *widget.Clickable
+				var openBtn, unloadBtn, publishBtn *widget.Clickable
 				if i < len(openBtns) {
 					openBtn = &openBtns[i]
 				}
 				if i < len(unloadBtns) {
 					unloadBtn = &unloadBtns[i]
 				}
-				return renderNappCard(gtx, th, openBtn, nil, unloadBtn, "", "Unload", st.Dev[i])
+				if i < len(publishBtns) && backend.DevSourceKind(st.Dev[i].ID) == "folder" {
+					publishBtn = &publishBtns[i]
+				}
+				return renderNappCard(gtx, th, openBtn, publishBtn, unloadBtn, "Publish", "Unload", st.Dev[i])
 			})
 		}),
 	)

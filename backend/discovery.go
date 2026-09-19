@@ -8,9 +8,7 @@ import (
 	"fiatjaf.com/nostr"
 )
 
-// Fetch looks for napps (kind:35128) on the discovery relays and fills the
-// launcher's discovery list as they arrive. Blocking: call it from a
-// goroutine.
+// Fetch looks for napps (kind:35128) on the discovery relays and fills the launcher's discovery list as they arrive.
 func Fetch() {
 	urls := Relays()
 	if len(urls) == 0 {
@@ -48,7 +46,7 @@ func Fetch() {
 }
 
 func tagValue(tags nostr.Tags, key string) string {
-	if t := tags.Find(key); len(t) > 1 {
+	if t := tags.Find(key); t != nil {
 		return t[1]
 	}
 	return ""

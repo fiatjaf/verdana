@@ -139,35 +139,36 @@ func gioMain() {
 	gioWin = w
 
 	var (
-		loginEd       widget.Editor
-		loginBtn      widget.Clickable
-		relaysEd      widget.Editor
-		fetchBtn      widget.Clickable
-		tabNappsBtn   widget.Clickable
-		tabDiscoBtn   widget.Clickable
-		tabDevBtn     widget.Clickable
-		themeBtn      widget.Clickable
-		logoutBtn     widget.Clickable
-		confirmYesBtn widget.Clickable
-		confirmNoBtn  widget.Clickable
-		installedList widget.List
-		discoveryList widget.List
-		devList       widget.List
-		devURLed      widget.Editor
-		devPathEd     widget.Editor
-		loadURLBtn    widget.Clickable
-		browseBtn     widget.Clickable
-		loadFolderBtn widget.Clickable
-		devOpenBtns   []widget.Clickable
-		devUnloadBtns []widget.Clickable
-		cardBtns      []widget.Clickable
-		uninstBtns    []widget.Clickable
-		actionBtns    []widget.Clickable
-		updateBtns    []widget.Clickable
-		checkUpdBtn   widget.Clickable
-		approveBtn    widget.Clickable
-		denyBtn       widget.Clickable
-		optBtns       []widget.Clickable
+		loginEd        widget.Editor
+		loginBtn       widget.Clickable
+		relaysEd       widget.Editor
+		fetchBtn       widget.Clickable
+		tabNappsBtn    widget.Clickable
+		tabDiscoBtn    widget.Clickable
+		tabDevBtn      widget.Clickable
+		themeBtn       widget.Clickable
+		logoutBtn      widget.Clickable
+		confirmYesBtn  widget.Clickable
+		confirmNoBtn   widget.Clickable
+		installedList  widget.List
+		discoveryList  widget.List
+		devList        widget.List
+		devURLed       widget.Editor
+		devPathEd      widget.Editor
+		loadURLBtn     widget.Clickable
+		browseBtn      widget.Clickable
+		loadFolderBtn  widget.Clickable
+		devOpenBtns    []widget.Clickable
+		devUnloadBtns  []widget.Clickable
+		devPublishBtns []widget.Clickable
+		cardBtns       []widget.Clickable
+		uninstBtns     []widget.Clickable
+		actionBtns     []widget.Clickable
+		updateBtns     []widget.Clickable
+		checkUpdBtn    widget.Clickable
+		approveBtn     widget.Clickable
+		denyBtn        widget.Clickable
+		optBtns        []widget.Clickable
 	)
 	loginEd.SingleLine = true
 	relaysEd.SingleLine = false
@@ -298,6 +299,9 @@ func gioMain() {
 					for len(devUnloadBtns) < len(st.Dev) {
 						devUnloadBtns = append(devUnloadBtns, widget.Clickable{})
 					}
+					for len(devPublishBtns) < len(st.Dev) {
+						devPublishBtns = append(devPublishBtns, widget.Clickable{})
+					}
 					vis := discoveryFilter(st)
 					instVis := installedFilter(st)
 					if tab == 0 {
@@ -361,6 +365,10 @@ func gioMain() {
 								backend.DevUnload(st.Dev[i].ID)
 								acted = true
 							}
+							if devPublishBtns[i].Clicked(gtx) {
+								openDevPublishWindow(st.Dev[i].ID)
+								acted = true
+							}
 						}
 						if !acted {
 							for i := range st.Dev {
@@ -377,7 +385,7 @@ func gioMain() {
 					return layoutMain(gtx, th, &tabNappsBtn, &tabDiscoBtn, devBtn, &themeBtn, &logoutBtn, tab,
 						&installedList, &discoveryList, &devList, &relaysEd, &filterEd, &installedFilterEd,
 						&devURLed, &devPathEd, &fetchBtn, &checkUpdBtn, &loadURLBtn, &browseBtn, &loadFolderBtn,
-						cardBtns, uninstBtns, actionBtns, updateBtns, devOpenBtns, devUnloadBtns,
+						cardBtns, uninstBtns, actionBtns, updateBtns, devOpenBtns, devUnloadBtns, devPublishBtns,
 						vis, instVis, st, installedSet, busy)
 				default:
 					return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
