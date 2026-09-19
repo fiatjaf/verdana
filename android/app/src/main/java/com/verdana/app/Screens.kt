@@ -2,6 +2,7 @@ package com.verdana.app
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -418,6 +419,28 @@ private fun NappCard(
             Text(napp.name.ifBlank { napp.id }, fontWeight = FontWeight.Bold, color = theme.fg)
             if (napp.description.isNotBlank()) {
                 Text(napp.description, color = theme.subtle, fontSize = 13.sp, maxLines = 2)
+            }
+            if (napp.actions.any { it.isNotBlank() }) {
+                Row(
+                    Modifier
+                        .padding(top = 5.dp)
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    napp.actions.filter { it.isNotBlank() }.forEach { action ->
+                        Surface(
+                            color = theme.chipBg,
+                            shape = RoundedCornerShape(5.dp),
+                        ) {
+                            Text(
+                                action,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                                color = theme.chipFg,
+                                fontSize = 11.sp,
+                            )
+                        }
+                    }
+                }
             }
             // replaces the old "Open — update available!" button label
             if (onOpen != null && napp.updateAvailable) {

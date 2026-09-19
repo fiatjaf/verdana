@@ -639,6 +639,20 @@ func imageSquare(gtx layout.Context, size int, imgOp paint.ImageOp, ok bool) lay
 	return layout.Dimensions{Size: sq}
 }
 
+func actionChip(gtx layout.Context, th *material.Theme, action string) layout.Dimensions {
+	p := currentTheme()
+	macro := op.Record(gtx.Ops)
+	label := material.Caption(th, action)
+	label.Color = p.chipFg
+	dims := layout.UniformInset(unit.Dp(4)).Layout(gtx, label.Layout)
+	call := macro.Stop()
+	bg := clip.RRect{Rect: image.Rectangle{Max: dims.Size}, NW: 5, NE: 5, SW: 5, SE: 5}
+	defer bg.Push(gtx.Ops).Pop()
+	paint.Fill(gtx.Ops, p.chipBg)
+	call.Add(gtx.Ops)
+	return dims
+}
+
 func editorBox(gtx layout.Context, th *material.Theme, ed *widget.Editor, hint string) layout.Dimensions {
 	border := widget.Border{
 		Color:        currentTheme().border,
@@ -680,6 +694,29 @@ func renderNappCard(gtx layout.Context, th *material.Theme, cardBtn, btn, second
 							label := material.Body1(th, napp.Name)
 							label.Font.Weight = font.Bold
 							return label.Layout(gtx)
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							actions := make([]string, 0, len(napp.Actions))
+							for _, action := range napp.Actions {
+								if strings.TrimSpace(action) != "" {
+									actions = append(actions, action)
+								}
+							}
+							if len(actions) == 0 {
+								return layout.Dimensions{}
+							}
+							return layout.Inset{Top: unit.Dp(5)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+								children := make([]layout.FlexChild, 0, len(actions)*2)
+								for i, action := range actions {
+									if i > 0 {
+										children = append(children, layout.Rigid(layout.Spacer{Width: unit.Dp(4)}.Layout))
+									}
+									children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+										return actionChip(gtx, th, action)
+									}))
+								}
+								return layout.Flex{Axis: layout.Horizontal}.Layout(gtx, children...)
+							})
 						}),
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 							if napp.Description == "" {
