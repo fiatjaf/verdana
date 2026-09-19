@@ -163,7 +163,6 @@
   }
   window.addEventListener("popstate", e => reportActionState(e.state))
 
-  // ── window.nostr (NIP-07) ───────────────────────────────────────
   window.nostr = {
     getPublicKey: () => rpc("getPublicKey"),
     signEvent: evt => rpc("signEvent", evt),
@@ -177,7 +176,6 @@
     }
   }
 
-  // ── window.nostrdb (NIP-DB draft) ───────────────────────────────
   window.nostrdb = {
     add: event => rpc("nostrdb.add", { event }),
     query: filters => rpc("nostrdb.query", { filters }),
@@ -189,7 +187,6 @@
     supports: async () => []
   }
 
-  // ── feeds ───────────────────────────────────────────────────────
   function feedRpc(method, params, callback) {
     if (typeof callback !== "function") throw new Error("no callback specified")
     const callbackId = serial++
@@ -219,6 +216,7 @@
     }
     return chk >>> 0
   }
+
   function hrpExpand(hrp) {
     const out = []
     for (let i = 0; i < hrp.length; i++) out.push(hrp.charCodeAt(i) >>> 5)
@@ -226,6 +224,7 @@
     for (let i = 0; i < hrp.length; i++) out.push(hrp.charCodeAt(i) & 31)
     return out
   }
+
   function bech32Decode(str) {
     if (typeof str !== "string") return null
     if (str !== str.toLowerCase() && str !== str.toUpperCase()) return null
@@ -242,18 +241,21 @@
     if (polymod(hrpExpand(hrp).concat(data)) !== 1) return null
     return { hrp, words: data.slice(0, data.length - 6) }
   }
+
   function checksum(hrp, data) {
     const mod = polymod(hrpExpand(hrp).concat(data, [0, 0, 0, 0, 0, 0])) ^ 1
     const out = []
     for (let i = 0; i < 6; i++) out.push((mod >>> (5 * (5 - i))) & 31)
     return out
   }
+
   function bech32Encode(hrp, data) {
     const combined = data.concat(checksum(hrp, data))
     let s = hrp + "1"
     for (let i = 0; i < combined.length; i++) s += CHARSET[combined[i]]
     return s
   }
+
   function convertBits(data, from, to, pad) {
     let acc = 0
     let bits = 0
@@ -276,17 +278,20 @@
     }
     return out
   }
+
   const bytesToHex = bytes => {
     let s = ""
     for (let i = 0; i < bytes.length; i++) s += (bytes[i] & 255).toString(16).padStart(2, "0")
     return s
   }
+
   const hexToBytes = hex => {
     if (typeof hex !== "string" || hex.length % 2) throw new Error("invalid hex")
     const out = new Uint8Array(hex.length / 2)
     for (let i = 0; i < out.length; i++) out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16)
     return out
   }
+
   const utf8Decode = b => new TextDecoder().decode(new Uint8Array(b))
   const utf8Encode = s => new TextEncoder().encode(s)
   const uint32be = b => ((b[0] << 24) | (b[1] << 16) | (b[2] << 8) | b[3]) >>> 0
@@ -304,6 +309,7 @@
     }
     return result
   }
+
   function encodeTLV(entries) {
     const parts = []
     for (let e = 0; e < entries.length; e++) {
@@ -357,9 +363,11 @@
     }
     throw new Error("unsupported prefix: " + type)
   }
+
   const encodeBytes = (hrp, bytes) => bech32Encode(hrp, convertBits(Array.from(bytes), 8, 5, true))
   const npubEncode = hex => encodeBytes("npub", hexToBytes(hex))
   const noteEncode = hex => encodeBytes("note", hexToBytes(hex))
+
   // nostr-tools emits TLV types in reverse order (3,2,1,0); match it so our
   // strings are byte-identical to the library's.
   function neventEncode(p) {
@@ -370,6 +378,7 @@
     entries.push([0, hexToBytes(p.id)])
     return encodeBytes("nevent", encodeTLV(entries))
   }
+
   function naddrEncode(p) {
     const entries = [
       [3, be32(p.kind)],
@@ -381,6 +390,7 @@
   }
 
   const isHex64 = s => typeof s === "string" && /^[0-9a-f]{64}$/i.test(s)
+
   function parseCoordinate(coord) {
     if (typeof coord !== "string") return null
     const a = coord.indexOf(":")
@@ -391,7 +401,9 @@
     if (!Number.isInteger(kind) || !isHex64(pubkey)) return null
     return { kind, pubkey, identifier: coord.slice(b + 1) }
   }
+
   const formatCoordinate = c => `${c.kind}:${c.pubkey}:${c.identifier}`
+
   function satsFromBolt11(invoice) {
     if (typeof invoice !== "string") return null
     const s = invoice.toLowerCase().trim()

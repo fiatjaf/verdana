@@ -174,6 +174,9 @@ func startNappServer(root string) string {
 	}
 	fs := http.FileServer(http.Dir(root))
 	handler := http.HandlerFunc(func(wr http.ResponseWriter, r *http.Request) {
+		// Keep top-level navigation inside this napp origin. External URLs must
+		// be opened through window.napp.link(), which goes through the host.
+		wr.Header().Set("Content-Security-Policy", "navigate-to 'self'")
 		clean := filepath.Join(root, filepath.FromSlash(path.Clean("/"+r.URL.Path)))
 		if st, statErr := os.Stat(clean); statErr != nil || st.IsDir() {
 			if r.URL.Path != "/" && !strings.Contains(path.Base(r.URL.Path), ".") {

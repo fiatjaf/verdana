@@ -2,6 +2,7 @@ package com.verdana.app
 
 import android.annotation.SuppressLint
 import android.graphics.Bitmap
+import android.net.Uri
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
@@ -94,11 +95,10 @@ class NappWebView(
             ): WebResourceResponse? = serve(request.url.path ?: "/")
 
             override fun shouldOverrideUrlLoading(v: WebView, request: WebResourceRequest): Boolean {
-                // a napp never navigates away from itself on its own; external
-                // links go through napp.link() (and a prompt) instead
-                val url = request.url
-                if (url.toString().startsWith(NappOrigins.originFor(instance))) return false
-                return true
+                // Only the napp's exact origin may navigate the main frame.
+                // External URLs must use window.napp.link() instead.
+                if (!request.isForMainFrame) return false
+                return !isNappOrigin(request.url)
             }
 
             override fun onPageStarted(v: WebView, url: String, favicon: Bitmap?) {
@@ -193,11 +193,21 @@ class NappWebView(
 
         return try {
             val stream = f.inputStream()
-            WebResourceResponse(mimeFor(f.name), null, stream)
+            val headers = if (f.name.endsWith(".html")) {
+                mapOf("Content-Security-Policy" to "navigate-to 'self'")
+            } else {
+                emptyMap()
+            }
+            WebResourceResponse(mimeFor(f.name), null, 200, "OK", headers, stream)
         } catch (_: IOException) {
             null
         }
     }
+
+    private fun isNappOrigin(url: Uri): Boolean =
+        url.scheme == "https" &&
+            url.host == NappOrigins.hostFor(instance) &&
+            (url.port == -1 || url.port == 443)
 
     private fun mimeFor(name: String): String = when {
         name.endsWith(".html") -> "text/html"
