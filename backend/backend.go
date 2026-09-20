@@ -66,6 +66,7 @@ func Start(opts Options) (func(), error) {
 
 	loadState()
 	refreshInstalled()
+	go restoreWindows()
 	go buildUserIndex()
 
 	// resume the stored login, or ask for one

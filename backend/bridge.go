@@ -353,6 +353,7 @@ func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 
 		case "napp.close":
 			log.Info().Str("instance", ci.instance).Msg("napp asked to close its window")
+			removeSavedWindow(ci.instance)
 			ci.send(WireMsg{T: "close"})
 			return nil, nil
 

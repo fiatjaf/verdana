@@ -73,6 +73,7 @@ func (h mobileHost) OpenWindow(spec backend.WindowSpec) (backend.Transport, erro
 	}
 	return mobileTransport{ui: h.ui, instance: spec.Instance}, nil
 }
+func (h mobileHost) RestoreAllWindows() bool { return true }
 
 func (h mobileHost) StateChanged()                               { h.ui.StateChanged() }
 func (h mobileHost) PromptsChanged()                             { h.ui.PromptsChanged() }

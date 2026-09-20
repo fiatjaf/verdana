@@ -52,6 +52,7 @@ type Instance struct {
 	// lastAction is the action the window is currently showing, either
 	// dispatched by the host or pushed by the napp itself via history.
 	lastAction atomic.Pointer[actionRequest]
+	replaying  atomic.Bool
 
 	// dispatches maps a dispatch id to the channel waiting for the napp's
 	// answer (bridge.js replies with the napp.dispatchResult rpc).
@@ -224,6 +225,8 @@ func HandleMessage(instance string, m WireMsg) {
 		return
 	}
 	switch m.T {
+	case "pin":
+		SetWindowPinned(instance, m.Method == "true")
 	case "promptAnswer":
 		// the answer of the prompt overlaying this window. Answered
 		// inline, not in a goroutine: it mutates the prompt state and
@@ -276,7 +279,6 @@ func WindowClosed(instance string) {
 		}
 	}
 	instancesMu.Unlock()
-
 	log.Info().Str("instance", ci.instance).Str("napp", ci.napp.ID).Msg("napp window closed")
 	notifyState()
 }
@@ -368,6 +370,10 @@ func LaunchByID(id string) {
 // launch opens a napp window and returns its instance. A singleton that is
 // already open is surfaced instead of opened again.
 func launch(ctx context.Context, napp Napp) (*Instance, error) {
+	return launchWithInstance(ctx, napp, "")
+}
+
+func launchWithInstance(ctx context.Context, napp Napp, requestedInstance string) (*Instance, error) {
 	id := napp.ID
 	if id == "" {
 		return nil, errors.New("napp has no id")
@@ -399,8 +405,12 @@ func launch(ctx context.Context, napp Napp) (*Instance, error) {
 	}
 
 	themeName, themeVars := Theme()
+	instance := requestedInstance
+	if instance == "" {
+		instance = nextInstanceID(napp)
+	}
 	ci := &Instance{
-		instance:   nextInstanceID(napp),
+		instance:   instance,
 		number:     int(windowSerial.Add(1)),
 		napp:       napp,
 		subs:       make(map[int]context.CancelFunc),
@@ -428,13 +438,95 @@ func launch(ctx context.Context, napp Napp) (*Instance, error) {
 		Requires:    napp.Requires,
 		Theme:       themeName,
 		ThemeVars:   themeVars,
+		Pinned:      savedWindowPinned(ci.instance),
 	})
 	if err != nil {
 		WindowClosed(ci.instance)
 		return nil, err
 	}
 	ci.attach(transport)
+	rememberWindow(ci, savedWindowPinned(ci.instance))
 	return ci, nil
+}
+
+func savedWindowPinned(instance string) bool {
+	for _, w := range savedWindows() {
+		if w.Instance == instance {
+			return w.Pinned
+		}
+	}
+	return false
+}
+
+func savedWindow(instance string) *SavedWindow {
+	for _, w := range savedWindows() {
+		if w.Instance == instance {
+			return &w
+		}
+	}
+	return nil
+}
+
+func rememberWindow(ci *Instance, pinned bool) {
+	if !host.RestoreAllWindows() && !pinned {
+		return
+	}
+	w := SavedWindow{Instance: ci.instance, NappID: ci.napp.ID, Pinned: pinned}
+	if old := savedWindow(ci.instance); old != nil {
+		w.Actions = old.Actions
+	}
+	saveWindow(w)
+}
+
+func SetWindowPinned(instance string, pinned bool) {
+	ci := lookupInstance(instance)
+	if ci == nil {
+		return
+	}
+	if !pinned {
+		removeSavedWindow(instance)
+		return
+	}
+	rememberWindow(ci, true)
+}
+
+func recordAction(ci *Instance, req *actionRequest) {
+	if ci.replaying.Load() || (!host.RestoreAllWindows() && !savedWindowPinned(ci.instance)) {
+		return
+	}
+	w := savedWindow(ci.instance)
+	if w == nil {
+		w = &SavedWindow{Instance: ci.instance, NappID: ci.napp.ID, Pinned: host.RestoreAllWindows()}
+	}
+	w.Actions = append(w.Actions, SavedAction{Name: req.name, Payload: append(json.RawMessage(nil), req.payload...)})
+	saveWindow(*w)
+}
+
+func restoreWindows() {
+	for _, saved := range savedWindows() {
+		if !host.RestoreAllWindows() && !saved.Pinned {
+			continue
+		}
+		napp, ok := InstalledNapp(saved.NappID)
+		if !ok {
+			continue
+		}
+		go func(saved SavedWindow, napp Napp) {
+			ci, err := launchWithInstance(context.Background(), napp, saved.Instance)
+			if err != nil {
+				log.Warn().Err(err).Str("napp", saved.NappID).Msg("could not restore napp window")
+				return
+			}
+			ci.replaying.Store(true)
+			defer ci.replaying.Store(false)
+			for _, action := range saved.Actions {
+				if _, err := dispatchToInstance(context.Background(), ci, &actionRequest{name: action.Name, payload: action.Payload}); err != nil {
+					log.Warn().Err(err).Str("instance", saved.Instance).Msg("could not replay napp action")
+					break
+				}
+			}
+		}(saved, napp)
+	}
 }
 
 // ─── action dispatch ─────────────────────────────────────────────
@@ -566,6 +658,7 @@ func dispatchToInstance(ctx context.Context, ci *Instance, req *actionRequest) (
 			return nil, fmt.Errorf("stopped routing of %s: couldn't find the event", req.name)
 		}
 	}
+	recordAction(ci, &actionRequest{name: req.name, payload: payload})
 
 	waitCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	idx, ok := ci.waitForHandler(waitCtx, req.name)
@@ -576,7 +669,6 @@ func dispatchToInstance(ctx context.Context, ci *Instance, req *actionRequest) (
 		ci.sendAction(-1, req.name, payload, nil)
 		return nil, nil
 	}
-
 	ci.lastAction.Store(&actionRequest{name: req.name, payload: payload})
 	notifyState()
 

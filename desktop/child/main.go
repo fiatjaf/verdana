@@ -43,6 +43,7 @@ type nappMeta struct {
 	Requires    []string
 	Theme       string
 	ThemeVars   string
+	Pinned      bool
 }
 
 var (
@@ -71,6 +72,7 @@ func main() {
 		Number:      os.Getenv("VERDANA_WINDOW_NUMBER"),
 		Theme:       os.Getenv("VERDANA_THEME"),
 		ThemeVars:   os.Getenv("VERDANA_THEME_VARS"),
+		Pinned:      os.Getenv("VERDANA_PINNED") == "true",
 	}
 	if req := strings.TrimSpace(os.Getenv("VERDANA_NAPP_REQUIRES")); req != "" {
 		meta.Requires = strings.Split(req, ",")
@@ -92,6 +94,7 @@ func main() {
 	w.SetSize(600, 450, webview.HintNone)
 	_ = w.Bind("__bridge_rpc", rpcBound)
 	_ = w.Bind("__verdana_prompt_answer", promptAnswer)
+	_ = w.Bind("__verdana_pin", pinWindow)
 
 	// window.name is where bridge.js picks up window.napp.instance, and it
 	// survives same-origin navigations — so a reload keeps the instance id.
@@ -102,6 +105,7 @@ func main() {
 		themeInitScript(meta.Theme, meta.ThemeVars))
 	// the very same bridge.js the Android app injects
 	w.Init(nappbridge.JS())
+	w.Init(chromeScript(meta.Pinned))
 
 	// a dev napp navigates straight to its page (its dev-server url, or the
 	// launcher's throwaway server): the bridge bindings below don't depend
@@ -125,6 +129,23 @@ func jsString(s string) string {
 		return `""`
 	}
 	return string(b)
+}
+
+func pinWindow(pinned bool) { writeMsg(wireMsg{T: "pin", Method: strconv.FormatBool(pinned)}) }
+
+func chromeScript(pinned bool) string {
+	state := "false"
+	if pinned {
+		state = "true"
+	}
+	return `(function(){
+var ready=function(){
+ var b=document.createElement('div'); b.id='__verdana_frame';
+ b.style.cssText='position:fixed;z-index:2147483646;top:0;left:0;right:0;height:30px;background:rgba(128,128,128,.16);display:flex;align-items:center;justify-content:flex-end;padding:0 8px;box-sizing:border-box;';
+ var pinned=` + state + `; var p=document.createElement('button'); p.textContent=pinned?'Unpin':'Pin';
+ p.style.cssText='font:12px sans-serif;padding:3px 9px;border:1px solid #888;border-radius:5px;background:transparent;cursor:pointer;';
+ p.onclick=function(){pinned=!pinned;p.textContent=pinned?'Unpin':'Pin';window.__verdana_pin(pinned);}; b.appendChild(p);document.documentElement.appendChild(b);
+}; if(document.body) ready(); else document.addEventListener('DOMContentLoaded',ready,{once:true});})()`
 }
 
 // windowTitle names the OS window after the napp and its instance, so the

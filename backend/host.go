@@ -16,6 +16,7 @@ type Host interface {
 	// The platform must call WindowClosed when the window goes away and
 	// HandleWireMessage for everything the napp's bridge sends up.
 	OpenWindow(spec WindowSpec) (Transport, error)
+	RestoreAllWindows() bool
 
 	// StateChanged says the launcher's State() changed and whatever renders
 	// it should render it again.
@@ -80,6 +81,7 @@ type WindowSpec struct {
 	// paints right from its first frame instead of flashing.
 	Theme     string
 	ThemeVars string
+	Pinned    bool
 }
 
 // noopHost stands in when a caller (a test, a one-off tool) has no GUI.
@@ -88,6 +90,7 @@ type noopHost struct{}
 func (noopHost) OpenWindow(WindowSpec) (Transport, error) {
 	return nil, errors.New("this host cannot open windows")
 }
+func (noopHost) RestoreAllWindows() bool                 { return false }
 func (noopHost) StateChanged()                           {}
 func (noopHost) PromptsChanged()                         {}
 func (noopHost) CopyText(string) error                   { return errors.New("no clipboard") }

@@ -34,7 +34,19 @@ type AppState struct {
 
 	// Theme is "light" or "dark": what the launcher draws with and what
 	// every napp window is told to track.
-	Theme string `json:"theme"`
+	Theme   string                 `json:"theme"`
+	Windows map[string]SavedWindow `json:"windows"`
+}
+
+type SavedAction struct {
+	Name    string          `json:"name"`
+	Payload json.RawMessage `json:"payload"`
+}
+type SavedWindow struct {
+	Instance string        `json:"instance"`
+	NappID   string        `json:"napp_id"`
+	Pinned   bool          `json:"pinned"`
+	Actions  []SavedAction `json:"actions"`
 }
 
 var (
@@ -67,11 +79,39 @@ func loadState() {
 	if state.Theme != "light" && state.Theme != "dark" {
 		state.Theme = "light"
 	}
+	if state.Windows == nil {
+		state.Windows = make(map[string]SavedWindow)
+	}
 	themeMu.Lock()
 	themeName = state.Theme
 	themeMu.Unlock()
 	saveState()
 	log.Info().Int("napps", len(state.InstalledNapps)).Msg("state loaded")
+}
+
+func savedWindows() []SavedWindow {
+	stateMu.Lock()
+	defer stateMu.Unlock()
+	out := make([]SavedWindow, 0, len(state.Windows))
+	for _, w := range state.Windows {
+		w.Actions = append([]SavedAction(nil), w.Actions...)
+		out = append(out, w)
+	}
+	return out
+}
+func saveWindow(w SavedWindow) {
+	stateMu.Lock()
+	state.Windows[w.Instance] = w
+	saveState()
+	stateMu.Unlock()
+}
+func removeSavedWindow(instance string) {
+	stateMu.Lock()
+	if _, ok := state.Windows[instance]; ok {
+		delete(state.Windows, instance)
+		saveState()
+	}
+	stateMu.Unlock()
 }
 
 // saveState must be called with stateMu held.

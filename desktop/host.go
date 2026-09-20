@@ -21,6 +21,7 @@ type gioHost struct{}
 func (gioHost) OpenWindow(spec backend.WindowSpec) (backend.Transport, error) {
 	return startChild(spec)
 }
+func (gioHost) RestoreAllWindows() bool { return false }
 
 func (gioHost) StateChanged() {
 	if gioWin != nil {
