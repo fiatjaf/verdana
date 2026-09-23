@@ -245,6 +245,7 @@ func layoutMain(
 	reopenBtns,
 	cardBtns,
 	uninstBtns,
+	installedUpdateBtns,
 	actionBtns,
 	updateBtns,
 	devOpenBtns,
@@ -270,7 +271,7 @@ func layoutMain(
 				return layoutWindowsTab(gtx, th, windowsList, pinBtns, closeBtns, reopenBtns, st.ManagedWindows)
 			}
 			if tab == 1 {
-				return layoutNappsTab(gtx, th, installedList, installedFilterEd, cardBtns, uninstBtns, checkUpdBtn, instVis, st)
+				return layoutNappsTab(gtx, th, installedList, installedFilterEd, cardBtns, uninstBtns, installedUpdateBtns, checkUpdBtn, instVis, st)
 			}
 			if tab == 2 {
 				return layoutDiscoveryTab(gtx, th, discoveryList, relaysEd, filterEd, fetchBtn, actionBtns,
@@ -406,6 +407,7 @@ func layoutNappsTab(
 	filterEd *widget.Editor,
 	cardBtns,
 	uninstBtns []widget.Clickable,
+	installedUpdateBtns []widget.Clickable,
 	checkUpdBtn *widget.Clickable,
 	vis []int,
 	st backend.State,
@@ -438,7 +440,11 @@ func layoutNappsTab(
 					uninstBtn = &uninstBtns[row]
 				}
 				// the card itself opens the napp: no open button
-				return renderNappCard(gtx, th, cardBtn, nil, uninstBtn, "", "Uninstall", st.Installed[row])
+				var updateBtn *widget.Clickable
+				if row < len(installedUpdateBtns) && st.Installed[row].UpdateAvailable != nil {
+					updateBtn = &installedUpdateBtns[row]
+				}
+				return renderNappCard(gtx, th, cardBtn, uninstBtn, updateBtn, "Uninstall", "Update", st.Installed[row])
 			})
 		}),
 		// the update check button sits at the bottom of the list
@@ -547,7 +553,7 @@ func layoutDiscoveryTab(
 					label = "Working\u2026"
 				}
 				updLabel := ""
-				if installedSet[n.ID] && n.UpdateAvailable {
+				if installedSet[n.ID] && n.UpdateAvailable != nil {
 					updLabel = "Update"
 				}
 				return renderNappCard(gtx, th, nil, btn, updBtn, label, updLabel, n)
@@ -922,18 +928,6 @@ func renderNappCard(
 										return c.Layout(gtx)
 									}),
 								)
-							})
-						}),
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							// an update-available badge replaces the old
-							// "Open — update available!" button label
-							if cardBtn == nil || !napp.UpdateAvailable {
-								return layout.Dimensions{}
-							}
-							return layout.Inset{Top: unit.Dp(4)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-								c := material.Caption(th, "update available — reinstall it in the Discovery tab")
-								c.Color = currentTheme().danger
-								return c.Layout(gtx)
 							})
 						}),
 					)

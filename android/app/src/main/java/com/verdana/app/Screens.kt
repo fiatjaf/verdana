@@ -273,11 +273,14 @@ private fun InstalledTab(activity: MainActivity, st: LauncherState, theme: Theme
         }
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f)) {
             items(visible, key = { it.id }) { napp ->
+                val busy = st.busy.contains(napp.id)
                 NappCard(
                     activity, napp, theme,
                     onOpen = { activity.launch(napp.id) },
-                    primaryLabel = "Uninstall",
+                    primaryLabel = if (busy) "Working…" else "Uninstall",
                     onPrimary = { activity.uninstall(napp.id) },
+                    secondaryLabel = if (napp.updateAvailable) "Update" else null,
+                    onSecondary = { activity.update(napp.id) },
                 )
             }
         }
@@ -441,14 +444,6 @@ private fun NappCard(
                         }
                     }
                 }
-            }
-            // replaces the old "Open — update available!" button label
-            if (onOpen != null && napp.updateAvailable) {
-                Text(
-                    "update available — reinstall it in Discovery",
-                    color = theme.danger,
-                    fontSize = 11.sp,
-                )
             }
         }
         Spacer(Modifier.width(8.dp))

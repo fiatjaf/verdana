@@ -258,6 +258,7 @@ class MainActivity : ComponentActivity(), UI {
         Mobile.setRelays(text)
     }
     fun install(id: String) = Mobile.install(id)
+    fun update(id: String) = Mobile.update(id)
     fun uninstall(id: String) = Mobile.uninstall(id)
     fun launch(id: String) = Mobile.launch(id)
     fun checkForUpdates() = Mobile.checkForUpdates()

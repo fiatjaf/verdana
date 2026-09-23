@@ -134,41 +134,42 @@ func gioMain() {
 	gioWin = w
 
 	var (
-		loginEd        widget.Editor
-		loginBtn       widget.Clickable
-		relaysEd       widget.Editor
-		fetchBtn       widget.Clickable
-		tabNappsBtn    widget.Clickable
-		tabDiscoBtn    widget.Clickable
-		tabDevBtn      widget.Clickable
-		tabWindowsBtn  widget.Clickable
-		themeBtn       widget.Clickable
-		logoutBtn      widget.Clickable
-		confirmYesBtn  widget.Clickable
-		confirmNoBtn   widget.Clickable
-		installedList  widget.List
-		discoveryList  widget.List
-		devList        widget.List
-		windowsList    widget.List
-		devURLed       widget.Editor
-		devPathEd      widget.Editor
-		loadURLBtn     widget.Clickable
-		browseBtn      widget.Clickable
-		loadFolderBtn  widget.Clickable
-		devOpenBtns    []widget.Clickable
-		devUnloadBtns  []widget.Clickable
-		devPublishBtns []widget.Clickable
-		pinBtns        []widget.Clickable
-		closeBtns      []widget.Clickable
-		reopenBtns     []widget.Clickable
-		cardBtns       []widget.Clickable
-		uninstBtns     []widget.Clickable
-		actionBtns     []widget.Clickable
-		updateBtns     []widget.Clickable
-		checkUpdBtn    widget.Clickable
-		approveBtn     widget.Clickable
-		denyBtn        widget.Clickable
-		optBtns        []widget.Clickable
+		loginEd             widget.Editor
+		loginBtn            widget.Clickable
+		relaysEd            widget.Editor
+		fetchBtn            widget.Clickable
+		tabNappsBtn         widget.Clickable
+		tabDiscoBtn         widget.Clickable
+		tabDevBtn           widget.Clickable
+		tabWindowsBtn       widget.Clickable
+		themeBtn            widget.Clickable
+		logoutBtn           widget.Clickable
+		confirmYesBtn       widget.Clickable
+		confirmNoBtn        widget.Clickable
+		installedList       widget.List
+		discoveryList       widget.List
+		devList             widget.List
+		windowsList         widget.List
+		devURLed            widget.Editor
+		devPathEd           widget.Editor
+		loadURLBtn          widget.Clickable
+		browseBtn           widget.Clickable
+		loadFolderBtn       widget.Clickable
+		devOpenBtns         []widget.Clickable
+		devUnloadBtns       []widget.Clickable
+		devPublishBtns      []widget.Clickable
+		pinBtns             []widget.Clickable
+		closeBtns           []widget.Clickable
+		reopenBtns          []widget.Clickable
+		cardBtns            []widget.Clickable
+		uninstBtns          []widget.Clickable
+		installedUpdateBtns []widget.Clickable
+		actionBtns          []widget.Clickable
+		updateBtns          []widget.Clickable
+		checkUpdBtn         widget.Clickable
+		approveBtn          widget.Clickable
+		denyBtn             widget.Clickable
+		optBtns             []widget.Clickable
 	)
 	loginEd.SingleLine = true
 	relaysEd.SingleLine = false
@@ -291,6 +292,9 @@ func gioMain() {
 					for len(uninstBtns) < len(st.Installed) {
 						uninstBtns = append(uninstBtns, widget.Clickable{})
 					}
+					for len(installedUpdateBtns) < len(st.Installed) {
+						installedUpdateBtns = append(installedUpdateBtns, widget.Clickable{})
+					}
 					for len(actionBtns) < len(st.Discovery) {
 						actionBtns = append(actionBtns, widget.Clickable{})
 					}
@@ -332,9 +336,17 @@ func gioMain() {
 						// count as opening the napp.
 						acted := false
 						for _, i := range instVis {
-							if uninstBtns[i].Clicked(gtx) {
-								go backend.Uninstall(st.Installed[i].ID)
+							if installedUpdateBtns[i].Clicked(gtx) {
+								go backend.Update(st.Installed[i].ID)
 								acted = true
+							}
+						}
+						if !acted {
+							for _, i := range instVis {
+								if uninstBtns[i].Clicked(gtx) {
+									go backend.Uninstall(st.Installed[i].ID)
+									acted = true
+								}
 							}
 						}
 						if !acted {
@@ -435,6 +447,7 @@ func gioMain() {
 						reopenBtns,
 						cardBtns,
 						uninstBtns,
+						installedUpdateBtns,
 						actionBtns,
 						updateBtns,
 						devOpenBtns,

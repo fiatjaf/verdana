@@ -44,7 +44,7 @@ func CheckForUpdates() {
 		}
 
 		log.Info().Strs("ids", ids).Msg("update check found new versions")
-		setUpdateAvailable(ids)
+		setUpdateAvailable(updated)
 	}
 }
 
@@ -164,9 +164,14 @@ func applyUpdate(current, newer Napp) {
 	stateMu.Unlock()
 
 	// the previously available update is now the installed version
-	upd := *updateAvailable.Load()
+	updateMu.Lock()
+	upd := make(map[string]Napp, len(updateAvailable))
+	for id, n := range updateAvailable {
+		upd[id] = n
+	}
 	delete(upd, current.ID)
-	updateAvailable.Store(&upd)
+	updateAvailable = upd
+	updateMu.Unlock()
 
 	refreshInstalled()
 	log.Info().Str("napp", current.ID).Msg("update complete")
@@ -176,6 +181,13 @@ func applyUpdate(current, newer Napp) {
 // from the in-memory cache a check round built, falling back to a live relay
 // lookup on the discovery relays and the author's outbox.
 func newerVersion(n Napp) *Napp {
+	updateMu.RLock()
+	if latest, ok := updateAvailable[n.ID]; ok && latest.CreatedAt > n.CreatedAt {
+		updateMu.RUnlock()
+		return &latest
+	}
+	updateMu.RUnlock()
+
 	if ts, ok := updateCache.Get(n.ID); ok && ts > n.CreatedAt {
 		if evt := fetchCurrentEvent(n.Author, n.D); evt != nil {
 			nn := nappFromEvent(*evt)
@@ -187,7 +199,7 @@ func newerVersion(n Napp) *Napp {
 	}
 
 	// nothing cached: ask the relays right now
-	if found := checkAllUpdates([]Napp{n}); found {
+	if found := checkAllUpdates([]Napp{n}); len(found) > 0 {
 		if ts, ok := updateCache.Get(n.ID); ok && ts > n.CreatedAt {
 			if evt := fetchCurrentEvent(n.Author, n.D); evt != nil {
 				nn := nappFromEvent(*evt)

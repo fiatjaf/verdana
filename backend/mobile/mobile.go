@@ -175,6 +175,9 @@ func Install(id string) {
 	}
 }
 
+// Update applies newer event already found by update check.
+func Update(id string) { go backend.Update(id) }
+
 // CheckForUpdates looks for newer versions of every installed napp on the
 // discovery relays and each author's outbox relays, and flags the napps it
 // found updates for (watch the state's updateCheckRunning/updateAvailable).

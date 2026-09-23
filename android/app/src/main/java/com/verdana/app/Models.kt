@@ -78,7 +78,8 @@ fun parseState(json: String): LauncherState {
                     n.optJSONArray("requires")!!.getString(it)
                 },
                 singleton = n.optBoolean("singleton"),
-                updateAvailable = n.optBoolean("updateAvailable"),
+                // backend carries newer event object here; presence is flag.
+                updateAvailable = n.has("updateAvailable") && !n.isNull("updateAvailable"),
                 paths = (0 until pathsArr.length()).map {
                     val p = pathsArr.getJSONObject(it)
                     NappPath(p.optString("path"), p.optString("sha256"))

@@ -110,6 +110,7 @@ var ls = launcherState{phase: PhaseLoading, busy: make(map[string]bool)}
 // update is out there" flags can't be shared mutable state on it: Snapshot()
 // stamps them from this atomic set instead, keyed by napp id.
 var (
+	updateMu        sync.RWMutex
 	updateAvailable map[string]Napp
 	updateChecking  atomic.Bool
 )
@@ -117,7 +118,9 @@ var (
 // setUpdateAvailable replaces the "has an update" set and republishes the
 // launcher state.
 func setUpdateAvailable(apps map[string]Napp) {
+	updateMu.Lock()
 	updateAvailable = apps
+	updateMu.Unlock()
 	notifyState()
 }
 
@@ -152,11 +155,13 @@ func Snapshot() State {
 	s.Windows = OpenWindows()
 	s.ManagedWindows = ManagedWindows()
 	s.UpdateCheckRunning = updateChecking.Load()
+	updateMu.RLock()
 	for i := range s.Installed {
 		if newVersion, ok := updateAvailable[s.Installed[i].ID]; ok {
 			s.Installed[i].UpdateAvailable = &newVersion
 		}
 	}
+	updateMu.RUnlock()
 	// author names resolve in the background and are stamped on every
 	// snapshot, so the UIs get them for free (display and filtering).
 	for i := range s.Installed {
