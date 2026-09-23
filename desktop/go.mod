@@ -61,10 +61,15 @@ replace fiatjaf.com/nostr => ../../nostrlib
 require verdana/backend v0.0.0
 
 require (
+	github.com/RoaringBitmap/roaring v1.9.4 // indirect
 	github.com/andybalholm/brotli v1.1.1 // indirect
+	github.com/bits-and-blooms/bitset v1.17.0 // indirect
 	github.com/klauspost/compress v1.18.0 // indirect
+	github.com/kljensen/snowball v0.10.0 // indirect
+	github.com/mschoch/smat v0.2.0 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasthttp v1.59.0 // indirect
+	github.com/wizenheimer/blaze v0.0.0-20251014083344-98727d655839 // indirect
 	golang.org/x/mobile v0.0.0-20260908204917-8b95e45f8d3e // indirect
 	golang.org/x/mod v0.41.0 // indirect
 	golang.org/x/tools v0.50.0 // indirect

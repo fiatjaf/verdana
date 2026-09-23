@@ -2,16 +2,16 @@ package backend
 
 import (
 	"context"
-	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"fiatjaf.com/nostr"
 	"fiatjaf.com/nostr/sdk"
+	"github.com/wizenheimer/blaze"
 )
 
-// The launcher keeps a full-text-ish index of every profile it has ever seen,
+// The launcher keeps a full-text index of every profile it has ever seen,
 // so napps can offer instant user search without touching the network:
 // built from the kind:0s already in the eventstore at startup, and augmented
 // by every loadNostrUser/searchUser afterwards.
@@ -19,31 +19,40 @@ import (
 const searchResultLimit = 20
 
 type indexedUser struct {
-	pm       sdk.ProfileMetadata
-	haystack string
+	pm sdk.ProfileMetadata
 }
 
 var (
-	userIndexMu sync.RWMutex
-	userIndex   = make(map[nostr.PubKey]indexedUser)
+	userSearchMu    sync.RWMutex
+	userSearchIndex = blaze.NewInvertedIndex()
+	indexedUsers    []indexedUser
 )
 
 func indexUser(pm sdk.ProfileMetadata) {
 	if pm.PubKey == (nostr.PubKey{}) {
 		return
 	}
-	haystack := strings.ToLower(strings.Join([]string{
+	document := strings.Join([]string{
 		pm.Name, pm.DisplayName, pm.NIP05, pm.About, pm.Npub(), pm.PubKey.Hex(),
-	}, " "))
+	}, " ")
 
-	userIndexMu.Lock()
-	if prev, ok := userIndex[pm.PubKey]; ok && pm.Event != nil && prev.pm.Event != nil &&
-		prev.pm.Event.CreatedAt > pm.Event.CreatedAt {
-		userIndexMu.Unlock()
-		return
+	userSearchMu.Lock()
+	for i := len(indexedUsers) - 1; i >= 0; i-- {
+		prev := indexedUsers[i].pm
+		if prev.PubKey == pm.PubKey {
+			if pm.Event != nil && prev.Event != nil && prev.Event.CreatedAt < pm.Event.CreatedAt {
+				break
+			}
+			if prev.Event != nil && pm.Event != nil && prev.Event.CreatedAt >= pm.Event.CreatedAt {
+				userSearchMu.Unlock()
+				return
+			}
+		}
 	}
-	userIndex[pm.PubKey] = indexedUser{pm: pm, haystack: haystack}
-	userIndexMu.Unlock()
+	docID := len(indexedUsers) + 1
+	indexedUsers = append(indexedUsers, indexedUser{pm: pm})
+	userSearchIndex.Index(docID, document)
+	userSearchMu.Unlock()
 }
 
 // buildUserIndex indexes every kind:0 in the local store. Fire-and-forget at
@@ -68,50 +77,48 @@ func buildUserIndex() {
 	log.Info().Int("profiles", len(newest)).Msg("user search index built")
 }
 
-// searchUserLocal ranks indexed profiles by where the term matches: a name
-// that starts with it first, then any other hit.
+// searchUserLocal searches indexed profiles with Blaze and keeps newest profile
+// document when older metadata remains in its append-only index.
 func searchUserLocal(term string) []map[string]any {
 	q := strings.ToLower(strings.TrimSpace(term))
 	if q == "" {
 		return []map[string]any{}
 	}
 
-	type hit struct {
-		user  indexedUser
-		score int
-	}
-	hits := make([]hit, 0, searchResultLimit)
-
-	userIndexMu.RLock()
-	for _, u := range userIndex {
-		idx := strings.Index(u.haystack, q)
-		if idx < 0 {
+	userSearchMu.RLock()
+	matches := userSearchIndex.RankBM25(q, searchResultLimit*4)
+	hits := make([]indexedUser, 0, min(len(matches), searchResultLimit))
+	seen := make(map[nostr.PubKey]bool, len(matches))
+	for _, match := range matches {
+		if match.DocID <= 0 || match.DocID > len(indexedUsers) {
 			continue
 		}
-		score := idx
-		if strings.HasPrefix(strings.ToLower(u.pm.Name), q) ||
-			strings.HasPrefix(strings.ToLower(u.pm.DisplayName), q) {
-			score = -1
+		user := indexedUsers[match.DocID-1]
+		if seen[user.pm.PubKey] || !isLatestIndexedUser(user.pm.PubKey, match.DocID) {
+			continue
 		}
-		hits = append(hits, hit{user: u, score: score})
+		seen[user.pm.PubKey] = true
+		hits = append(hits, user)
 	}
-	userIndexMu.RUnlock()
-
-	sort.Slice(hits, func(i, j int) bool {
-		if hits[i].score != hits[j].score {
-			return hits[i].score < hits[j].score
-		}
-		return hits[i].user.pm.ShortName() < hits[j].user.pm.ShortName()
-	})
+	userSearchMu.RUnlock()
 
 	out := make([]map[string]any, 0, min(len(hits), searchResultLimit))
-	for _, h := range hits {
-		out = append(out, nostrUser(h.user.pm))
+	for _, user := range hits {
+		out = append(out, nostrUser(user.pm))
 		if len(out) >= searchResultLimit {
 			break
 		}
 	}
 	return out
+}
+
+func isLatestIndexedUser(pubkey nostr.PubKey, docID int) bool {
+	for i := len(indexedUsers) - 1; i >= 0; i-- {
+		if indexedUsers[i].pm.PubKey == pubkey {
+			return i+1 == docID
+		}
+	}
+	return false
 }
 
 // searchUser runs a NIP-50 kind:0 search on the user's own search relays
