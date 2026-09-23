@@ -17,8 +17,6 @@ var (
 // Theme is the current theme name and its CSS custom properties as JSON (the
 // `--surface`/`--text`/… tokens behavior.md documents, without the dashes).
 func Theme() (string, string) {
-	themeMu.Lock()
-	defer themeMu.Unlock()
 	return themeName, themeVars
 }
 
@@ -39,10 +37,8 @@ func SetTheme(name, varsJSON string) {
 		varsJSON = "{}"
 	}
 
-	themeMu.Lock()
 	changed := themeName != name || themeVars != varsJSON
 	themeName, themeVars = name, varsJSON
-	themeMu.Unlock()
 	if !changed {
 		return
 	}

@@ -79,9 +79,7 @@ func loadState() {
 	if state.Windows == nil {
 		state.Windows = make(map[string]SavedWindow)
 	}
-	themeMu.Lock()
 	themeName = state.Theme
-	themeMu.Unlock()
 	saveState()
 	log.Info().Int("napps", len(state.InstalledNapps)).Msg("state loaded")
 }
@@ -120,8 +118,6 @@ func saveState() {
 
 // Relays are the relays napps are discovered on.
 func Relays() []string {
-	stateMu.Lock()
-	defer stateMu.Unlock()
 	return append([]string(nil), state.Relays...)
 }
 
@@ -150,8 +146,6 @@ func SetRelays(relays []string) {
 
 // StoredLogin is the nsec/bunker input the user logged in with last time.
 func StoredLogin() string {
-	stateMu.Lock()
-	defer stateMu.Unlock()
 	return strings.TrimSpace(state.Login)
 }
 

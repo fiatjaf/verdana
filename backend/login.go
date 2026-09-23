@@ -47,9 +47,7 @@ func Login(input string) {
 	sessionCtx, cancelSession := context.WithCancel(context.Background())
 	sessionCancel = cancelSession
 
-	stateMu.Lock()
 	clientKey := state.ClientKey
-	stateMu.Unlock()
 
 	// keyer.New blocks on the bunker's "connect" answer, so race it
 	// against the login deadline instead of handing it a ctx that dies
@@ -62,7 +60,9 @@ func Login(input string) {
 	go func() {
 		k, err := keyer.New(sessionCtx, sys.Pool, input, &keyer.SignerOptions{
 			BunkerClientSecretKey: clientKey,
-			BunkerAuthHandler:     func(url string) {},
+			BunkerAuthHandler: func(url string) {
+				log.Info().Str("url", url).Msg("bunker auth")
+			},
 		})
 		keyerDone <- keyerResult{k, err}
 	}()

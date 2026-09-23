@@ -5,10 +5,9 @@ import (
 	"fmt"
 	"image/color"
 	"sync"
+	"verdana/backend"
 
 	"gioui.org/widget/material"
-
-	"verdana/backend"
 )
 
 // The launcher has one theme at a time and every napp tracks it: the Gio
@@ -104,8 +103,6 @@ func paletteByName(name string) themePalette {
 }
 
 func currentTheme() themePalette {
-	themeMu.Lock()
-	defer themeMu.Unlock()
 	return curTheme
 }
 
@@ -114,11 +111,7 @@ func currentTheme() themePalette {
 // start already themed.
 func applyStoredTheme() {
 	p := paletteByName(backend.ThemeName())
-
-	themeMu.Lock()
 	curTheme = p
-	themeMu.Unlock()
-
 	backend.SetTheme(p.name, p.varsJSON())
 }
 
@@ -170,13 +163,11 @@ func (p themePalette) varsJSON() string {
 func setTheme(name string) {
 	p := paletteByName(name)
 
-	themeMu.Lock()
 	if curTheme.name == p.name {
-		themeMu.Unlock()
 		return
 	}
+
 	curTheme = p
-	themeMu.Unlock()
 
 	if gioWin != nil {
 		gioWin.Invalidate()

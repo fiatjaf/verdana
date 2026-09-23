@@ -86,18 +86,14 @@ func main() {
 }
 
 func setTab(t int) {
-	ui.mu.Lock()
 	ui.tab = t
-	ui.mu.Unlock()
 	if gioWin != nil {
 		gioWin.Invalidate()
 	}
 }
 
 func setConfirmLogout(v bool) {
-	ui.mu.Lock()
 	ui.confirmLogout = v
-	ui.mu.Unlock()
 	if gioWin != nil {
 		gioWin.Invalidate()
 	}
