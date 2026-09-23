@@ -37,16 +37,21 @@ func CheckForUpdates() {
 	}()
 	notifyState()
 
-	if ok := checkAllUpdates(napps); ok {
-		log.Info().Int("updates", len(updateCache)).Msg("update check found new versions")
+	if updated := checkAllUpdates(napps); len(updated) > 0 {
+		ids := make([]string, 0, len(updated))
+		for _, upd := range updated {
+			ids = append(ids, upd.ID)
+		}
+
+		log.Info().Strs("ids", ids).Msg("update check found new versions")
+		setUpdateAvailable(ids)
 	}
-	setUpdateAvailable(updateCache.keys())
 }
 
 // checkAllUpdates asks the relays about every napp at once (one filter per
 // relay set, so the outbox queries stay separate from the discovery query),
 // then refreshes the update cache. Returns whether every relay answered.
-func checkAllUpdates(napps []Napp) bool {
+func checkAllUpdates(napps []Napp) map[string]Napp {
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer cancel()
 
@@ -55,42 +60,44 @@ func checkAllUpdates(napps []Napp) bool {
 	for _, n := range napps {
 		known[n.ID] = n.CreatedAt
 	}
+	found := make(map[string]Napp, len(napps))
 
-	found := make(map[string]nostr.Timestamp, len(napps))
-	complete := true
-	handle := func(evt nostr.Event) {
-		n := nappFromEvent(evt)
-		if kn, ok := known[n.ID]; ok && evt.CreatedAt > kn && evt.CreatedAt > found[n.ID] {
-			found[n.ID] = evt.CreatedAt
-		}
-	}
-
-	urls := Relays()
-	if !scanRelays(ctx, urls, napps, handle) {
-		complete = false
-	}
-
-	// authors' outbox relays: where the new version is most likely to be
-	outbox := make(map[string][]Napp)
+	ds := make([]string, 0, len(napps))
 	for _, n := range napps {
-		rctx, rcancel := context.WithTimeout(ctx, 10*time.Second)
-		relays := sys.FetchOutboxRelays(rctx, n.Author, 4)
-		rcancel()
-		for _, u := range relays {
-			outbox[u] = append(outbox[u], nappsByAuthor(napps, n.Author)...)
-		}
+		ds = append(ds, n.D)
 	}
-	for u, list := range outbox {
-		if !scanRelays(ctx, []string{u}, list, handle) {
-			complete = false
+
+	for re := range sys.Pool.FetchMany(ctx, Relays(), nostr.Filter{
+		Kinds: []nostr.Kind{35130},
+		Tags:  nostr.TagMap{"d": ds},
+	}, nostr.SubscriptionOptions{}) {
+		napp := nappFromEvent(re.Event)
+		if ts, exists := known[napp.ID]; exists && ts < napp.CreatedAt {
+			known[napp.ID] = napp.CreatedAt
+			found[napp.ID] = napp
 		}
 	}
 
-	if complete {
-		// a full round replaces what we believe; a partial one only adds
-		updateCache = updateCache.with(found)
+	for _, napp := range napps {
+		re := sys.Pool.QuerySingle(ctx, sys.FetchWriteRelays(ctx, napp.Author), nostr.Filter{
+			Kinds:   []nostr.Kind{35130},
+			Authors: []nostr.PubKey{napp.Author},
+			Tags:    nostr.TagMap{"d": []string{napp.D}},
+			Limit:   1,
+		}, nostr.SubscriptionOptions{
+			Label: "verdana-napp-update",
+		})
+
+		if re != nil {
+			napp := nappFromEvent(re.Event)
+			if ts, exists := known[napp.ID]; exists && ts < napp.CreatedAt {
+				known[napp.ID] = napp.CreatedAt
+				found[napp.ID] = napp
+			}
+		}
 	}
-	return complete
+
+	return found
 }
 
 // scanRelays queries one relay set for the current kind:35130 of the given
@@ -99,22 +106,6 @@ func checkAllUpdates(napps []Napp) bool {
 // cache instead of narrowing it to what a truncated round saw.
 func scanRelays(ctx context.Context, urls []string, napps []Napp, handle func(nostr.Event)) bool {
 	complete := true
-
-	ds := make([]string, 0, len(napps))
-	for _, n := range napps {
-		ds = append(ds, n.D)
-	}
-
-	for re := range sys.Pool.FetchMany(ctx, urls, nostr.Filter{
-		Kinds:   []nostr.Kind{35130},
-		Authors: nappAuthors(napps),
-		Tags:    nostr.TagMap{"d": ds},
-	}, nostr.SubscriptionOptions{}) {
-		if re.Relay == nil {
-			complete = false
-		}
-		handle(re.Event)
-	}
 
 	return complete
 }
@@ -185,7 +176,7 @@ func applyUpdate(current, newer Napp) {
 // from the in-memory cache a check round built, falling back to a live relay
 // lookup on the discovery relays and the author's outbox.
 func newerVersion(n Napp) *Napp {
-	if ts, ok := updateCache[n.ID]; ok && ts > n.CreatedAt {
+	if ts, ok := updateCache.Get(n.ID); ok && ts > n.CreatedAt {
 		if evt := fetchCurrentEvent(n.Author, n.D); evt != nil {
 			nn := nappFromEvent(*evt)
 			if nn.CreatedAt > n.CreatedAt {
@@ -197,7 +188,7 @@ func newerVersion(n Napp) *Napp {
 
 	// nothing cached: ask the relays right now
 	if found := checkAllUpdates([]Napp{n}); found {
-		if ts, ok := updateCache[n.ID]; ok && ts > n.CreatedAt {
+		if ts, ok := updateCache.Get(n.ID); ok && ts > n.CreatedAt {
 			if evt := fetchCurrentEvent(n.Author, n.D); evt != nil {
 				nn := nappFromEvent(*evt)
 				if nn.CreatedAt > n.CreatedAt {
@@ -234,40 +225,10 @@ func fetchCurrentEvent(author nostr.PubKey, d string) *nostr.Event {
 	return nil
 }
 
-// ─── the update cache ────────────────────────────────────────────
-
-// updateCache remembers the newest created_at seen per napp id from the last
-// complete check round. It is only touched from the goroutine running a
-// round, so a plain map guarded by discipline is enough.
-var updateCache = updatesByTs{}
-
-type updatesByTs map[string]nostr.Timestamp
-
-// with merges found into the cache, keeping the newest timestamp per id.
-func (u updatesByTs) with(found map[string]nostr.Timestamp) updatesByTs {
-	out := make(updatesByTs, len(u)+len(found))
-	for id, ts := range u {
-		out[id] = ts
-	}
-	for id, ts := range found {
-		if ts > out[id] {
-			out[id] = ts
-		}
-	}
-	return out
-}
-
-// keys is the ids the cache holds, for setUpdateAvailable.
-func (u updatesByTs) keys() []string {
-	out := make([]string, 0, len(u))
-	for id := range u {
-		out = append(out, id)
-	}
-	return out
-}
+// updateCache remembers newest created_at seen per napp id from last complete check round.
+var updateCache = mustNewCache[string, nostr.Timestamp](4096)
 
 // ─── helpers ─────────────────────────────────────────────────────
-
 func nappAuthors(napps []Napp) []nostr.PubKey {
 	out := make([]nostr.PubKey, 0, len(napps))
 	for _, n := range napps {

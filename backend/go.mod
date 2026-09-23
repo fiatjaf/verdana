@@ -4,6 +4,7 @@ go 1.26.2
 
 require (
 	fiatjaf.com/nostr v0.0.0-20260615112943-0616b30ab35c
+	github.com/dgraph-io/ristretto/v2 v2.3.0
 	github.com/rs/zerolog v1.35.1
 	golang.org/x/mobile v0.0.0-20260908204917-8b95e45f8d3e
 )
@@ -21,7 +22,6 @@ require (
 	github.com/coder/websocket v1.8.13 // indirect
 	github.com/decred/dcrd/crypto/blake256 v1.1.0 // indirect
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.0 // indirect
-	github.com/dgraph-io/ristretto/v2 v2.3.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/elnosh/gonuts v0.4.2 // indirect
 	github.com/fxamacker/cbor/v2 v2.7.0 // indirect

@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	"fiatjaf.com/nostr"
@@ -37,7 +36,7 @@ type Napp struct {
 	// UpdateAvailable is stamped by Snapshot(): a newer version of this napp
 	// was seen on the relays (kind:35130, same author+d-tag, newer
 	// created_at). It is not part of the wire model.
-	UpdateAvailable bool `json:"updateAvailable"`
+	UpdateAvailable *Napp `json:"updateAvailable"`
 }
 
 // Label is the napp's name, falling back to its id.
@@ -165,13 +164,6 @@ func (n Napp) AuthorProfile(ctx context.Context) (string, string) {
 }
 
 // ─── author names ────────────────────────────────────────────────
-
-var (
-	authorNameMu      sync.Mutex
-	authorNameCache   = make(map[nostr.PubKey]string)
-	authorNamePending = make(map[nostr.PubKey]bool)
-)
-
 // AuthorShortName is the napp author's short name, as far as it is known: from
 // the sdk cache or the launcher's user index, without touching the network.
 // When it is not known yet, a background resolution is kicked off (which
@@ -182,45 +174,14 @@ func (n Napp) AuthorShortName() string {
 		return ""
 	}
 
-	authorNameMu.Lock()
-	if name := authorNameCache[n.Author]; name != "" {
-		authorNameMu.Unlock()
-		return name
-	}
-	authorNameMu.Unlock()
-
-	// the user index often knows the author already (kind:0s in the local
-	// eventstore), which saves the network round entirely
-	userIndexMu.RLock()
-	if u, ok := userIndex[n.Author]; ok {
-		name := u.pm.ShortName()
-		userIndexMu.RUnlock()
-		authorNameMu.Lock()
-		authorNameCache[n.Author] = name
-		authorNameMu.Unlock()
-		return name
-	}
-	userIndexMu.RUnlock()
-
-	pk := n.Author
-	authorNameMu.Lock()
-	pending := authorNamePending[pk]
-	authorNamePending[pk] = true
-	authorNameMu.Unlock()
-	if pending {
-		return ""
+	if v, ok := sys.MetadataCache.Get(n.Author); ok {
+		return v.ShortName()
 	}
 
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 		defer cancel()
-		name := ""
-		if sys != nil {
-			name = sys.FetchProfileMetadata(ctx, pk).ShortName()
-		}
-		authorNameMu.Lock()
-		authorNameCache[pk] = name
-		authorNameMu.Unlock()
+		sys.FetchProfileMetadata(ctx, n.Author)
 		notifyState()
 	}()
 	return ""

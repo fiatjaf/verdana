@@ -3,7 +3,6 @@ package backend
 import (
 	"context"
 	"strings"
-	"sync"
 	"time"
 
 	"fiatjaf.com/nostr"
@@ -620,10 +619,7 @@ type relayInfoEntry struct {
 	expires time.Time
 }
 
-var (
-	relayInfoMu    sync.Mutex
-	relayInfoCache = make(map[string]relayInfoEntry)
-)
+var relayInfoCache = mustNewCache[string, relayInfoEntry](256)
 
 func loadRelayInfo(ctx context.Context, url string) map[string]any {
 	url = strings.TrimSpace(url)
@@ -632,9 +628,7 @@ func loadRelayInfo(ctx context.Context, url string) map[string]any {
 	}
 	normalized := nostr.NormalizeURL(url)
 
-	relayInfoMu.Lock()
-	entry, ok := relayInfoCache[normalized]
-	relayInfoMu.Unlock()
+	entry, ok := relayInfoCache.Get(normalized)
 	if ok && time.Now().Before(entry.expires) {
 		return entry.doc
 	}
@@ -680,9 +674,7 @@ func loadRelayInfo(ctx context.Context, url string) map[string]any {
 		doc["supported_nips"] = nips
 	}
 
-	relayInfoMu.Lock()
-	relayInfoCache[normalized] = relayInfoEntry{doc: doc, expires: time.Now().Add(6 * time.Hour)}
-	relayInfoMu.Unlock()
+	relayInfoCache.SetWithTTL(normalized, relayInfoEntry{doc: doc, expires: time.Now().Add(6 * time.Hour)}, 1, 6*time.Hour)
 	return doc
 }
 

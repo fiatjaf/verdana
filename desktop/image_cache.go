@@ -13,10 +13,10 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"verdana/backend"
 
 	"gioui.org/op/paint"
-
-	"verdana/backend"
+	"github.com/dgraph-io/ristretto/v2"
 )
 
 type imgEntry struct {
@@ -26,7 +26,19 @@ type imgEntry struct {
 	failed atomic.Bool
 }
 
-var imgCache sync.Map
+var imgCache = mustNewCache[string, *imgEntry](256)
+
+func mustNewCache[K ristretto.Key, V any](size int) *ristretto.Cache[K, V] {
+	c, err := ristretto.NewCache(&ristretto.Config[K, V]{
+		NumCounters: int64(size * 10),
+		MaxCost:     int64(size),
+		BufferItems: 64,
+	})
+	if err != nil {
+		panic(err)
+	}
+	return c
+}
 
 // cachedImage decodes an image once per key and hands the same ImageOp to
 // every frame after that. load runs on its own goroutine — a layout function
@@ -36,8 +48,12 @@ func cachedImage(key string, load func(context.Context) ([]byte, error)) (paint.
 	if key == "" {
 		return paint.ImageOp{}, false
 	}
-	v, _ := imgCache.LoadOrStore(key, &imgEntry{})
-	e := v.(*imgEntry)
+	e, ok := imgCache.Get(key)
+	if !ok {
+		e = &imgEntry{}
+		imgCache.Set(key, e, 1)
+		imgCache.Wait()
+	}
 	e.once.Do(func() {
 		go func() {
 			log.Debug().Str("image", key).Msg("loading image")

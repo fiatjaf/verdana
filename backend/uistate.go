@@ -110,24 +110,14 @@ var ls = launcherState{phase: PhaseLoading, busy: make(map[string]bool)}
 // update is out there" flags can't be shared mutable state on it: Snapshot()
 // stamps them from this atomic set instead, keyed by napp id.
 var (
-	updateAvailable atomic.Pointer[updatesByID]
+	updateAvailable map[string]Napp
 	updateChecking  atomic.Bool
 )
 
-// updatesByID is the immutable set of napp ids with a newer version on the
-// relays. Replaced wholesale whenever a check round completes.
-type updatesByID map[string]bool
-
-func init() { updateAvailable.Store(&updatesByID{}) }
-
 // setUpdateAvailable replaces the "has an update" set and republishes the
 // launcher state.
-func setUpdateAvailable(ids []string) {
-	set := make(updatesByID, len(ids))
-	for _, id := range ids {
-		set[id] = true
-	}
-	updateAvailable.Store(&set)
+func setUpdateAvailable(apps map[string]Napp) {
+	updateAvailable = apps
 	notifyState()
 }
 
@@ -162,15 +152,9 @@ func Snapshot() State {
 	s.Windows = OpenWindows()
 	s.ManagedWindows = ManagedWindows()
 	s.UpdateCheckRunning = updateChecking.Load()
-	upd := *updateAvailable.Load()
 	for i := range s.Installed {
-		if upd[s.Installed[i].ID] {
-			s.Installed[i].UpdateAvailable = true
-		}
-	}
-	for i := range s.Discovery {
-		if upd[s.Discovery[i].ID] && IsInstalled(s.Discovery[i].ID) {
-			s.Discovery[i].UpdateAvailable = true
+		if newVersion, ok := updateAvailable[s.Installed[i].ID]; ok {
+			s.Installed[i].UpdateAvailable = &newVersion
 		}
 	}
 	// author names resolve in the background and are stamped on every
