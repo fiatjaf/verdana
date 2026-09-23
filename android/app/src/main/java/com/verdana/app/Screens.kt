@@ -87,7 +87,7 @@ fun LoginScreen(activity: MainActivity, st: LauncherState) {
 @Composable
 fun LauncherScreen(activity: MainActivity, st: LauncherState) {
     val theme = themeByName(st.theme)
-    var tab by remember { mutableStateOf(0) }
+    var tab by remember { mutableStateOf(if (st.installed.isNotEmpty()) 0 else 1) }
     var relaysEd by remember(st.relays.hashCode()) { mutableStateOf(st.relays.joinToString("\n")) }
     var discoveryFilter by remember { mutableStateOf("") }
     var installedFilter by remember { mutableStateOf("") }

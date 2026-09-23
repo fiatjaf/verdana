@@ -3,7 +3,6 @@ package backend
 import (
 	"context"
 	"errors"
-	"strings"
 	"time"
 
 	"fiatjaf.com/nostr"
@@ -25,7 +24,6 @@ var (
 // Login takes an nsec or a bunker:// URL, resolves the signer and moves the
 // launcher to its main phase. Blocking: call it from a goroutine.
 func Login(input string) {
-	input = strings.TrimSpace(input)
 	if input == "" {
 		setLoginErr("no key or bunker url given")
 		return
@@ -78,7 +76,7 @@ func Login(input string) {
 			return
 		}
 		k = res.k
-	case <-time.After(60 * time.Second):
+	case <-time.After(20 * time.Second):
 		cancelSession()
 		sessionCancel = nil
 		log.Error().Msg("login timed out")

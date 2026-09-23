@@ -78,6 +78,13 @@ func main() {
 	// the palette the user last chose, and its CSS tokens for napps
 	applyStoredTheme()
 
+	// startup tab: installed if any napps, else discovery
+	if len(backend.Snapshot().Installed) > 0 {
+		ui.tab = 1
+	} else {
+		ui.tab = 2
+	}
+
 	go gioMain()
 	app.Main()
 
@@ -257,9 +264,9 @@ func gioMain() {
 				switch st.Phase {
 				case backend.PhaseLogin:
 					if loginBtn.Clicked(gtx) {
-						in := strings.TrimSpace(loginEd.Text())
-						if in != "" {
-							go backend.Login(in)
+						input := strings.TrimSpace(loginEd.Text())
+						if input != "" {
+							go backend.Login(input)
 						}
 					}
 					return layoutLogin(gtx, th, &loginEd, &loginBtn, st.LoginErr)
