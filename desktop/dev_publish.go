@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"verdana/backend"
 
 	"gioui.org/app"
 	"gioui.org/layout"
@@ -15,21 +16,17 @@ import (
 	"gioui.org/unit"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
-
-	"verdana/backend"
 )
 
-// openDevPublishWindow opens a separate Gio form for local folder napps.
 func openDevPublishWindow(id string) {
 	info, err := backend.DevPublishInfoFor(id)
 	if err != nil {
 		log.Error().Err(err).Str("napp", id).Msg("could not prepare dev publish window")
 		return
 	}
-	go func() {
-		servers, relays := backend.DevPublishDefaults(context.Background())
-		runDevPublishWindow(info, servers, relays)
-	}()
+
+	servers, relays := backend.DevPublishDefaults()
+	go runDevPublishWindow(info, servers, relays)
 }
 
 type devPublishState struct {

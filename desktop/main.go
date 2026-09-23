@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"verdana/backend"
 
 	"gioui.org/app"
 	"gioui.org/io/clipboard"
@@ -17,8 +18,6 @@ import (
 	"gioui.org/widget"
 	"gioui.org/widget/material"
 	"github.com/rs/zerolog"
-
-	"verdana/backend"
 )
 
 // This is the desktop launcher: a Gio window, and nothing else. Everything it
@@ -146,6 +145,7 @@ func gioMain() {
 		tabNappsBtn    widget.Clickable
 		tabDiscoBtn    widget.Clickable
 		tabDevBtn      widget.Clickable
+		tabWindowsBtn  widget.Clickable
 		themeBtn       widget.Clickable
 		logoutBtn      widget.Clickable
 		confirmYesBtn  widget.Clickable
@@ -153,6 +153,7 @@ func gioMain() {
 		installedList  widget.List
 		discoveryList  widget.List
 		devList        widget.List
+		windowsList    widget.List
 		devURLed       widget.Editor
 		devPathEd      widget.Editor
 		loadURLBtn     widget.Clickable
@@ -161,6 +162,9 @@ func gioMain() {
 		devOpenBtns    []widget.Clickable
 		devUnloadBtns  []widget.Clickable
 		devPublishBtns []widget.Clickable
+		pinBtns        []widget.Clickable
+		closeBtns      []widget.Clickable
+		reopenBtns     []widget.Clickable
 		cardBtns       []widget.Clickable
 		uninstBtns     []widget.Clickable
 		actionBtns     []widget.Clickable
@@ -179,6 +183,7 @@ func gioMain() {
 	installedList.Axis = layout.Vertical
 	discoveryList.Axis = layout.Vertical
 	devList.Axis = layout.Vertical
+	windowsList.Axis = layout.Vertical
 	relaysEd.SetText(strings.Join(backend.Relays(), "\n"))
 
 	var ops op.Ops
@@ -262,14 +267,17 @@ func gioMain() {
 					}
 					return layoutLogin(gtx, th, &loginEd, &loginBtn, st.LoginErr)
 				case backend.PhaseMain:
-					if tabNappsBtn.Clicked(gtx) {
+					if tabWindowsBtn.Clicked(gtx) {
 						setTab(0)
 					}
-					if tabDiscoBtn.Clicked(gtx) {
+					if tabNappsBtn.Clicked(gtx) {
 						setTab(1)
 					}
-					if devEnabled && tabDevBtn.Clicked(gtx) {
+					if tabDiscoBtn.Clicked(gtx) {
 						setTab(2)
+					}
+					if devEnabled && tabDevBtn.Clicked(gtx) {
+						setTab(3)
 					}
 					if themeBtn.Clicked(gtx) {
 						toggleTheme()
@@ -279,7 +287,7 @@ func gioMain() {
 					}
 					if fetchBtn.Clicked(gtx) {
 						backend.SetRelays(parseRelays(relaysEd.Text()))
-						go backend.Fetch()
+						go backend.Discover()
 					}
 					for len(cardBtns) < len(st.Installed) {
 						cardBtns = append(cardBtns, widget.Clickable{})
@@ -302,9 +310,27 @@ func gioMain() {
 					for len(devPublishBtns) < len(st.Dev) {
 						devPublishBtns = append(devPublishBtns, widget.Clickable{})
 					}
+					for len(pinBtns) < len(st.ManagedWindows) {
+						pinBtns = append(pinBtns, widget.Clickable{})
+						closeBtns = append(closeBtns, widget.Clickable{})
+						reopenBtns = append(reopenBtns, widget.Clickable{})
+					}
 					vis := discoveryFilter(st)
 					instVis := installedFilter(st)
 					if tab == 0 {
+						for i, w := range st.ManagedWindows {
+							if pinBtns[i].Clicked(gtx) {
+								backend.SetWindowPinned(w.Instance, !w.Pinned)
+							}
+							if w.Open {
+								if closeBtns[i].Clicked(gtx) {
+									backend.CloseWindow(w.Instance)
+								}
+							} else if reopenBtns[i].Clicked(gtx) {
+								backend.ReopenWindow(w.Instance)
+							}
+						}
+					} else if tab == 1 {
 						// buttons on top of the card's own click area go
 						// first: a click that hit a button must not also
 						// count as opening the napp.
@@ -322,7 +348,7 @@ func gioMain() {
 								}
 							}
 						}
-					} else if tab == 1 {
+					} else if tab == 2 {
 						for _, i := range vis {
 							if actionBtns[i].Clicked(gtx) {
 								n := st.Discovery[i]
@@ -382,11 +408,49 @@ func gioMain() {
 					if devEnabled {
 						devBtn = &tabDevBtn
 					}
-					return layoutMain(gtx, th, &tabNappsBtn, &tabDiscoBtn, devBtn, &themeBtn, &logoutBtn, tab,
-						&installedList, &discoveryList, &devList, &relaysEd, &filterEd, &installedFilterEd,
-						&devURLed, &devPathEd, &fetchBtn, &checkUpdBtn, &loadURLBtn, &browseBtn, &loadFolderBtn,
-						cardBtns, uninstBtns, actionBtns, updateBtns, devOpenBtns, devUnloadBtns, devPublishBtns,
-						vis, instVis, st, installedSet, busy)
+					return layoutMain(gtx,
+						th,
+						&tabWindowsBtn,
+						&tabNappsBtn,
+						&tabDiscoBtn,
+						devBtn,
+						&themeBtn,
+						&logoutBtn,
+						tab,
+
+						&windowsList,
+						&installedList,
+						&discoveryList,
+						&devList,
+						&relaysEd,
+						&filterEd,
+						&installedFilterEd,
+
+						&devURLed,
+						&devPathEd,
+						&fetchBtn,
+						&checkUpdBtn,
+						&loadURLBtn,
+						&browseBtn,
+						&loadFolderBtn,
+
+						pinBtns,
+						closeBtns,
+						reopenBtns,
+						cardBtns,
+						uninstBtns,
+						actionBtns,
+						updateBtns,
+						devOpenBtns,
+						devUnloadBtns,
+						devPublishBtns,
+
+						vis,
+						instVis,
+						st,
+						installedSet,
+						busy,
+					)
 				default:
 					return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 						return material.Body1(th, "Loading\u2026").Layout(gtx)

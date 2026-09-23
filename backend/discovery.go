@@ -2,90 +2,101 @@ package backend
 
 import (
 	"context"
-	"sort"
-	"time"
+	"sync/atomic"
 
 	"fiatjaf.com/nostr"
 )
 
-// Fetch looks for napps (kind:35128) on the discovery relays and fills the launcher's discovery list as they arrive.
-func Fetch() {
-	urls := Relays()
-	if len(urls) == 0 {
-		urls = append([]string(nil), DefaultRelays...)
-		SetRelays(urls)
+var cancelDiscover context.CancelFunc
+
+func Discover() {
+	if cancelDiscover != nil {
+		cancelDiscover()
 	}
 
+	urls := Relays()
 	log.Info().Strs("relays", urls).Msg("fetching napps from relays")
 
 	setFetching(true)
 	defer setFetching(false)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancelDiscover = cancel
 
-	seen := make(map[nostr.ID]bool)
 	var collected []Napp
+	var eosed atomic.Bool
 
-	for re := range sys.Pool.FetchMany(ctx, urls,
-		nostr.Filter{Kinds: []nostr.Kind{35128}},
-		nostr.SubscriptionOptions{},
-	) {
-		if seen[re.ID] {
-			continue
-		}
-		seen[re.ID] = true
+	events, eose := sys.Pool.SubscribeManyNotifyEOSE(ctx, urls,
+		nostr.Filter{
+			Kinds: []nostr.Kind{35130},
+		},
+		nostr.SubscriptionOptions{
+			Label: "verdana-discovery",
+		},
+	)
+
+	go func() {
+		<-eose
+		log.Info().Int("count", len(collected)).Msg("fetch complete")
+		eosed.Store(true)
+		setDiscovery(collected)
+	}()
+
+	for re := range events {
 		collected = append(collected, nappFromEvent(re.Event))
-
-		sorted := append([]Napp(nil), collected...)
-		sort.Slice(sorted, func(i, j int) bool { return sorted[i].Name < sorted[j].Name })
-		setDiscovery(sorted)
+		if eosed.Load() {
+			setDiscovery(collected)
+		}
 	}
 
-	log.Info().Int("count", len(collected)).Msg("fetch complete")
-}
-
-func tagValue(tags nostr.Tags, key string) string {
-	if t := tags.Find(key); t != nil {
-		return t[1]
-	}
-	return ""
+	log.Info().Err(context.Cause(ctx)).Msg("discovery subscription ended")
 }
 
 func nappFromEvent(evt nostr.Event) Napp {
 	d := evt.Tags.GetD()
 	n := Napp{
-		D:           d,
-		ID:          evt.PubKey.Hex()[:16] + "~" + d,
-		Name:        tagValue(evt.Tags, "title"),
-		Description: tagValue(evt.Tags, "description"),
-		Icon:        tagValue(evt.Tags, "icon"),
-		Author:      evt.PubKey,
-		CreatedAt:   evt.CreatedAt,
+		D:         d,
+		ID:        evt.PubKey.Hex()[:16] + "~" + d,
+		Author:    evt.PubKey,
+		CreatedAt: evt.CreatedAt,
 	}
+
+	for _, tag := range evt.Tags {
+		if len(tag) < 1 {
+			continue
+		}
+
+		if tag[0] == "singleton" {
+			n.Singleton = true
+		}
+
+		if len(tag) < 2 {
+			continue
+		}
+		switch tag[0] {
+		case "title":
+			n.Name = tag[1]
+		case "description":
+			n.Description = tag[1]
+		case "icon":
+			n.Icon = tag[1]
+		case "action":
+			n.Actions = append(n.Actions, tag[1])
+		case "requires":
+			n.Requires = append(n.Requires, tag[1])
+		case "path":
+			if len(tag) < 3 {
+				continue
+			}
+			n.Paths = append(n.Paths, NappPath{Path: tag[1], Sha256: tag[2]})
+		case "server":
+			n.Servers = append(n.Servers, tag[1])
+		}
+	}
+
 	if n.Name == "" {
 		n.Name = d
 	}
-	n.Singleton = evt.Tags.Has("singleton")
-	for t := range evt.Tags.FindAll("action") {
-		if len(t) > 1 {
-			n.Actions = append(n.Actions, t[1])
-		}
-	}
-	for t := range evt.Tags.FindAll("requires") {
-		if len(t) > 1 {
-			n.Requires = append(n.Requires, t[1])
-		}
-	}
-	for t := range evt.Tags.FindAll("path") {
-		if len(t) > 2 {
-			n.Paths = append(n.Paths, NappPath{Path: t[1], Sha256: t[2]})
-		}
-	}
-	for t := range evt.Tags.FindAll("server") {
-		if len(t) > 1 {
-			n.Servers = append(n.Servers, t[1])
-		}
-	}
+
 	return n
 }

@@ -36,7 +36,7 @@ func Install(n Napp) {
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
-	servers := n.blossomServers(ctx)
+	servers := n.BlossomServers(ctx)
 	if err := fetchNappAssets(ctx, n, base, servers); err != nil {
 		log.Error().Err(err).Str("napp", n.ID).Msg("install failed")
 		os.RemoveAll(base)

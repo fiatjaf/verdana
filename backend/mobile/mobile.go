@@ -12,7 +12,6 @@ import (
 	"encoding/json"
 	"strings"
 	"time"
-
 	"verdana/backend"
 	"verdana/backend/webview"
 )
@@ -159,7 +158,7 @@ func Login(input string) { go backend.Login(input) }
 func Logout() { backend.Logout() }
 
 // Fetch looks for napps on the discovery relays.
-func Fetch() { go backend.Fetch() }
+func Fetch() { go backend.Discover() }
 
 // SetRelays replaces the discovery relay list, one relay per line.
 func SetRelays(text string) {

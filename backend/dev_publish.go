@@ -28,34 +28,24 @@ type DevPublishInfo struct {
 }
 
 // DevPublishDefaults returns useful initial targets for the publish form.
-func DevPublishDefaults(ctx context.Context) (servers, relays []string) {
+func DevPublishDefaults() (servers, relays []string) {
 	servers = []string{"https://relay.nostrapps.com", "https://nostr.download"}
-	if sys != nil && userPubkey != nostr.ZeroPK {
-		listCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		list := sys.FetchBlossomServerList(listCtx, userPubkey)
-		cancel()
-		for _, server := range list.Items {
-			servers = appendUniqueURL(servers, string(server))
-		}
-	}
 	relays = Relays()
-	if len(relays) == 0 {
-		relays = append([]string(nil), DefaultRelays...)
-	}
-	return servers, relays
-}
 
-func appendUniqueURL(list []string, raw string) []string {
-	raw = strings.TrimRight(strings.TrimSpace(raw), "/")
-	if raw == "" {
-		return list
-	}
-	for _, item := range list {
-		if item == raw {
-			return list
+	if sys != nil && userPubkey != nostr.ZeroPK {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		for _, server := range sys.FetchBlossomServerList(ctx, userPubkey).Items {
+			servers = nostr.AppendUnique(servers, server.Value())
+		}
+
+		for _, relay := range sys.FetchWriteRelays(ctx, userPubkey) {
+			relays = nostr.AppendUnique(relays, relay)
 		}
 	}
-	return append(list, raw)
+
+	return servers, relays
 }
 
 // DevPublishInfoFor reads current metadata and file sizes for a folder dev napp.
@@ -79,7 +69,7 @@ func DevPublishInfoFor(id string) (DevPublishInfo, error) {
 	return DevPublishInfo{Napp: napp, Files: files}, nil
 }
 
-// PublishDev uploads a folder dev napp, signs its kind-35128 manifest, and
+// PublishDev uploads a folder dev napp, signs its kind-35130 manifest, and
 // publishes it to selected relays. Every file must reach at least one server.
 func PublishDev(ctx context.Context, id string, servers, relays []string, protected bool) (int, int, error) {
 	if userKeyer == nil {
@@ -92,8 +82,6 @@ func PublishDev(ctx context.Context, id string, servers, relays []string, protec
 	if d == nil || d.source != "folder" {
 		return 0, 0, errors.New("dev napp is not a local folder")
 	}
-	servers = cleanTargets(servers)
-	relays = cleanTargets(relays)
 	if len(servers) == 0 {
 		return 0, 0, errors.New("no Blossom servers selected")
 	}
@@ -162,7 +150,7 @@ func PublishDev(ctx context.Context, id string, servers, relays []string, protec
 		tags = append(tags, nostr.Tag{"-"})
 	}
 	tags = append(tags, nostr.Tag{"d", napp.D})
-	event := nostr.Event{Kind: 35128, CreatedAt: nostr.Now(), Tags: tags}
+	event := nostr.Event{Kind: 35130, CreatedAt: nostr.Now(), Tags: tags}
 	if err := userKeyer.SignEvent(ctx, &event); err != nil {
 		return 0, 0, fmt.Errorf("signing manifest: %w", err)
 	}
@@ -184,24 +172,4 @@ func PublishDev(ctx context.Context, id string, servers, relays []string, protec
 		invalidateList(event.Kind, event.PubKey)
 	}
 	return results, failed, nil
-}
-
-func cleanTargets(targets []string) []string {
-	out := make([]string, 0, len(targets))
-	for _, target := range targets {
-		target = strings.TrimRight(strings.TrimSpace(target), "/")
-		if target != "" && !contains(out, target) {
-			out = append(out, target)
-		}
-	}
-	return out
-}
-
-func contains(items []string, want string) bool {
-	for _, item := range items {
-		if item == want {
-			return true
-		}
-	}
-	return false
 }

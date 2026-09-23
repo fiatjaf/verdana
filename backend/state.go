@@ -12,13 +12,6 @@ import (
 	"fiatjaf.com/nostr"
 )
 
-// DefaultRelays is where the launcher looks for napps when the user hasn't
-// said otherwise.
-var DefaultRelays = []string{
-	"relay.nostrapps.com",
-	"relay.nostrapps.com/public",
-}
-
 // AppState is everything the launcher remembers between runs.
 type AppState struct {
 	ClientKey      nostr.SecretKey `json:"client_key"`
@@ -46,6 +39,7 @@ type SavedWindow struct {
 	Instance string        `json:"instance"`
 	NappID   string        `json:"napp_id"`
 	Pinned   bool          `json:"pinned"`
+	Closed   bool          `json:"closed"`
 	Actions  []SavedAction `json:"actions"`
 }
 
@@ -68,7 +62,10 @@ func loadState() {
 		log.Debug().Msg("generated new client key")
 	}
 	if len(state.Relays) == 0 {
-		state.Relays = append([]string(nil), DefaultRelays...)
+		state.Relays = []string{
+			"relay.nostrapps.com",
+			"relay.nostrapps.com/public",
+		}
 	}
 	if state.InstalledNapps == nil {
 		state.InstalledNapps = make(map[string]Napp)
@@ -99,18 +96,11 @@ func savedWindows() []SavedWindow {
 	}
 	return out
 }
+
 func saveWindow(w SavedWindow) {
 	stateMu.Lock()
 	state.Windows[w.Instance] = w
 	saveState()
-	stateMu.Unlock()
-}
-func removeSavedWindow(instance string) {
-	stateMu.Lock()
-	if _, ok := state.Windows[instance]; ok {
-		delete(state.Windows, instance)
-		saveState()
-	}
 	stateMu.Unlock()
 }
 

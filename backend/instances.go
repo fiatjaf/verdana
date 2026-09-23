@@ -77,6 +77,7 @@ var (
 	instances      []*Instance
 	instanceSerial atomic.Int64
 	windowSerial   atomic.Int64
+	shuttingDown   atomic.Bool
 )
 
 // ─── registry ────────────────────────────────────────────────────
@@ -128,6 +129,8 @@ func OpenWindows() []WindowInfo {
 			Instance: ci.instance,
 			NappID:   ci.napp.ID,
 			Name:     ci.napp.Label(),
+			Open:     true,
+			Pinned:   savedWindowPinned(ci.instance),
 		}
 		if last := ci.lastAction.Load(); last != nil {
 			info.Action = last.name
@@ -135,6 +138,29 @@ func OpenWindows() []WindowInfo {
 		out = append(out, info)
 	}
 	return out
+}
+
+func ManagedWindows() []WindowInfo {
+	active := OpenWindows()
+	byID := make(map[string]WindowInfo, len(active))
+	for _, w := range active {
+		byID[w.Instance] = w
+	}
+	for _, saved := range savedWindows() {
+		if _, ok := byID[saved.Instance]; ok {
+			continue
+		}
+		napp, ok := InstalledNapp(saved.NappID)
+		if !ok {
+			continue
+		}
+		info := WindowInfo{Instance: saved.Instance, NappID: saved.NappID, Name: napp.Label(), Pinned: saved.Pinned, Open: false}
+		if len(saved.Actions) > 0 {
+			info.Action = saved.Actions[len(saved.Actions)-1].Name
+		}
+		active = append(active, info)
+	}
+	return active
 }
 
 // nextInstanceID is the napp's own id when it is a singleton (stable across
@@ -190,6 +216,7 @@ func (ci *Instance) Close() {
 
 // CloseWindow closes an instance by id.
 func CloseWindow(instance string) {
+	markWindowClosed(instance)
 	if ci := lookupInstance(instance); ci != nil {
 		ci.Close()
 	}
@@ -197,6 +224,7 @@ func CloseWindow(instance string) {
 
 // CloseAllWindows closes every open napp, for a launcher shutting down.
 func CloseAllWindows() {
+	shuttingDown.Store(true)
 	open := allInstances()
 	for _, ci := range open {
 		ci.Close()
@@ -279,6 +307,9 @@ func WindowClosed(instance string) {
 		}
 	}
 	instancesMu.Unlock()
+	if !shuttingDown.Load() && !host.RestoreAllWindows() {
+		markWindowClosed(instance)
+	}
 	log.Info().Str("instance", ci.instance).Str("napp", ci.napp.ID).Msg("napp window closed")
 	notifyState()
 }
@@ -438,7 +469,6 @@ func launchWithInstance(ctx context.Context, napp Napp, requestedInstance string
 		Requires:    napp.Requires,
 		Theme:       themeName,
 		ThemeVars:   themeVars,
-		Pinned:      savedWindowPinned(ci.instance),
 	})
 	if err != nil {
 		WindowClosed(ci.instance)
@@ -468,9 +498,6 @@ func savedWindow(instance string) *SavedWindow {
 }
 
 func rememberWindow(ci *Instance, pinned bool) {
-	if !host.RestoreAllWindows() && !pinned {
-		return
-	}
 	w := SavedWindow{Instance: ci.instance, NappID: ci.napp.ID, Pinned: pinned}
 	if old := savedWindow(ci.instance); old != nil {
 		w.Actions = old.Actions
@@ -480,14 +507,55 @@ func rememberWindow(ci *Instance, pinned bool) {
 
 func SetWindowPinned(instance string, pinned bool) {
 	ci := lookupInstance(instance)
-	if ci == nil {
+	w := savedWindow(instance)
+	if w == nil && ci == nil {
 		return
 	}
-	if !pinned {
-		removeSavedWindow(instance)
+	if w == nil {
+		rememberWindow(ci, pinned)
 		return
 	}
-	rememberWindow(ci, true)
+	w.Pinned = pinned
+	saveWindow(*w)
+}
+
+func markWindowClosed(instance string) {
+	if w := savedWindow(instance); w != nil {
+		w.Closed = true
+		saveWindow(*w)
+	}
+}
+
+func ReopenWindow(instance string) {
+	for _, saved := range savedWindows() {
+		if saved.Instance != instance {
+			continue
+		}
+		napp, ok := InstalledNapp(saved.NappID)
+		if !ok {
+			return
+		}
+		go func(saved SavedWindow, napp Napp) {
+			ci, err := launchWithInstance(context.Background(), napp, saved.Instance)
+			if err != nil {
+				log.Warn().Err(err).Str("instance", saved.Instance).Msg("could not reopen napp window")
+				return
+			}
+			replaySaved(ci, saved)
+		}(saved, napp)
+		return
+	}
+}
+
+func replaySaved(ci *Instance, saved SavedWindow) {
+	ci.replaying.Store(true)
+	defer ci.replaying.Store(false)
+	for _, action := range saved.Actions {
+		if _, err := dispatchToInstance(context.Background(), ci, &actionRequest{name: action.Name, payload: action.Payload}); err != nil {
+			log.Warn().Err(err).Str("instance", saved.Instance).Msg("could not replay napp action")
+			break
+		}
+	}
 }
 
 func recordAction(ci *Instance, req *actionRequest) {
@@ -504,7 +572,7 @@ func recordAction(ci *Instance, req *actionRequest) {
 
 func restoreWindows() {
 	for _, saved := range savedWindows() {
-		if !host.RestoreAllWindows() && !saved.Pinned {
+		if saved.Closed || (!host.RestoreAllWindows() && !saved.Pinned) {
 			continue
 		}
 		napp, ok := InstalledNapp(saved.NappID)
@@ -517,14 +585,7 @@ func restoreWindows() {
 				log.Warn().Err(err).Str("napp", saved.NappID).Msg("could not restore napp window")
 				return
 			}
-			ci.replaying.Store(true)
-			defer ci.replaying.Store(false)
-			for _, action := range saved.Actions {
-				if _, err := dispatchToInstance(context.Background(), ci, &actionRequest{name: action.Name, payload: action.Payload}); err != nil {
-					log.Warn().Err(err).Str("instance", saved.Instance).Msg("could not replay napp action")
-					break
-				}
-			}
+			replaySaved(ci, saved)
 		}(saved, napp)
 	}
 }

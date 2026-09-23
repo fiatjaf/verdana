@@ -81,7 +81,6 @@ type WindowSpec struct {
 	// paints right from its first frame instead of flashing.
 	Theme     string
 	ThemeVars string
-	Pinned    bool
 }
 
 // noopHost stands in when a caller (a test, a one-off tool) has no GUI.

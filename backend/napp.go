@@ -18,7 +18,7 @@ type NappPath struct {
 	Sha256 string `json:"sha256"`
 }
 
-// Napp is a napp as its kind:35128 event describes it.
+// Napp is a napp as its kind:35130 event describes it.
 type Napp struct {
 	ID          string          `json:"id"`
 	D           string          `json:"d"`
@@ -35,7 +35,7 @@ type Napp struct {
 	Servers     []string        `json:"servers"`
 
 	// UpdateAvailable is stamped by Snapshot(): a newer version of this napp
-	// was seen on the relays (kind:35128, same author+d-tag, newer
+	// was seen on the relays (kind:35130, same author+d-tag, newer
 	// created_at). It is not part of the wire model.
 	UpdateAvailable bool `json:"updateAvailable"`
 }
@@ -110,7 +110,7 @@ func (n Napp) IconBlob(ctx context.Context) ([]byte, error) {
 	if data, err := os.ReadFile(local); err == nil {
 		return data, nil
 	}
-	return downloadBlob(ctx, n.blossomServers(ctx), asset.Sha256)
+	return downloadBlob(ctx, n.BlossomServers(ctx), asset.Sha256)
 }
 
 // ─── blossom servers ─────────────────────────────────────────────
@@ -118,7 +118,7 @@ func (n Napp) IconBlob(ctx context.Context) ([]byte, error) {
 // blossomServers is where a napp's blobs may live, most specific first: the
 // servers the napp event named itself, then the author's own blossom server
 // list (kind:10063, through the sdk), then ours as a last resort.
-func (n Napp) blossomServers(ctx context.Context) []string {
+func (n Napp) BlossomServers(ctx context.Context) []string {
 	servers := make([]string, 0, 8)
 	add := func(raw string) {
 		url, err := nostr.NormalizeHTTPURL(raw)

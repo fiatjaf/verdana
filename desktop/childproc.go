@@ -46,7 +46,6 @@ func startChild(spec backend.WindowSpec) (backend.Transport, error) {
 		"VERDANA_NAPP_REQUIRES="+strings.Join(spec.Requires, ","),
 		"VERDANA_THEME="+spec.Theme,
 		"VERDANA_THEME_VARS="+spec.ThemeVars,
-		"VERDANA_PINNED="+strconv.FormatBool(spec.Pinned),
 	)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {

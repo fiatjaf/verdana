@@ -67,6 +67,10 @@ type State struct {
 
 	// Windows are the napp instances currently open.
 	Windows []WindowInfo `json:"windows"`
+
+	// ManagedWindows includes open and saved desktop windows. Closed entries
+	// stay visible so they can be reopened without losing pin state.
+	ManagedWindows []WindowInfo `json:"managedWindows"`
 }
 
 // WindowInfo is one open napp instance, for a window list or tab switcher.
@@ -78,6 +82,8 @@ type WindowInfo struct {
 	// Action is what the window is currently showing, when the napp told us
 	// (a dispatched action, or one it pushed itself).
 	Action string `json:"action"`
+	Open   bool   `json:"open"`
+	Pinned bool   `json:"pinned"`
 }
 
 type launcherState struct {
@@ -154,6 +160,7 @@ func Snapshot() State {
 
 	s.Relays = Relays()
 	s.Windows = OpenWindows()
+	s.ManagedWindows = ManagedWindows()
 	s.UpdateCheckRunning = updateChecking.Load()
 	upd := *updateAvailable.Load()
 	for i := range s.Installed {
@@ -173,6 +180,7 @@ func Snapshot() State {
 			s.Installed[i].AuthorName = s.Installed[i].AuthorShortName()
 		}
 	}
+
 	for i := range s.Discovery {
 		if s.Discovery[i].AuthorName == "" {
 			s.Discovery[i].AuthorName = s.Discovery[i].AuthorShortName()
@@ -247,9 +255,7 @@ func setFetching(fetching bool) {
 }
 
 func setDiscovery(list []Napp) {
-	ls.mu.Lock()
 	ls.discovery = list
-	ls.mu.Unlock()
 	notifyState()
 }
 

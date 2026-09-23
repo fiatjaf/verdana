@@ -4,6 +4,7 @@ import (
 	"context"
 	"image"
 	"strings"
+	"verdana/backend"
 
 	"gioui.org/f32"
 	"gioui.org/font"
@@ -15,8 +16,6 @@ import (
 	"gioui.org/unit"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
-
-	"verdana/backend"
 )
 
 // emph is an italic Verdana label for emphasis-ish subtle text.
@@ -176,7 +175,13 @@ func layoutPrompt(
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
 }
 
-func layoutLogin(gtx layout.Context, th *material.Theme, ed *widget.Editor, btn *widget.Clickable, loginErr string) layout.Dimensions {
+func layoutLogin(
+	gtx layout.Context,
+	th *material.Theme,
+	ed *widget.Editor,
+	btn *widget.Clickable,
+	loginErr string,
+) layout.Dimensions {
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			t := material.H5(th, "Log in to Verdana")
@@ -211,21 +216,63 @@ func layoutLogin(gtx layout.Context, th *material.Theme, ed *widget.Editor, btn 
 	)
 }
 
-func layoutMain(gtx layout.Context, th *material.Theme, tabNappsBtn, tabDiscoBtn, tabDevBtn, themeBtn, logoutBtn *widget.Clickable, tab int, installedList, discoveryList, devList *widget.List, relaysEd, filterEd, installedFilterEd, devURLed, devPathEd *widget.Editor, fetchBtn, checkUpdBtn, loadURLBtn, browseBtn, loadFolderBtn *widget.Clickable, cardBtns, uninstBtns, actionBtns, updateBtns, devOpenBtns, devUnloadBtns, devPublishBtns []widget.Clickable, vis, instVis []int, st backend.State, installedSet, busy map[string]bool) layout.Dimensions {
+func layoutMain(
+	gtx layout.Context,
+	th *material.Theme,
+	tabWindowsBtn,
+	tabNappsBtn,
+	tabDiscoBtn,
+	tabDevBtn,
+	themeBtn,
+	logoutBtn *widget.Clickable,
+	tab int,
+	windowsList,
+	installedList,
+	discoveryList,
+	devList *widget.List,
+	relaysEd,
+	filterEd,
+	installedFilterEd,
+	devURLed,
+	devPathEd *widget.Editor,
+	fetchBtn,
+	checkUpdBtn,
+	loadURLBtn,
+	browseBtn,
+	loadFolderBtn *widget.Clickable,
+	pinBtns,
+	closeBtns,
+	reopenBtns,
+	cardBtns,
+	uninstBtns,
+	actionBtns,
+	updateBtns,
+	devOpenBtns,
+	devUnloadBtns,
+	devPublishBtns []widget.Clickable,
+	vis,
+	instVis []int,
+	st backend.State,
+	installedSet,
+	busy map[string]bool,
+) layout.Dimensions {
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layoutProfile(gtx, th, themeBtn, logoutBtn, st.ProfileName, st.ProfilePicture)
 		}),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layoutTabs(gtx, th, tabNappsBtn, tabDiscoBtn, tabDevBtn, tab, len(st.Installed), len(st.Discovery))
+			return layoutTabs(gtx, th, tabWindowsBtn, tabNappsBtn, tabDiscoBtn, tabDevBtn, tab, len(st.Installed), len(st.Discovery))
 		}),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			if tab == 0 {
-				return layoutNappsTab(gtx, th, installedList, installedFilterEd, cardBtns, uninstBtns, checkUpdBtn, instVis, st)
+				return layoutWindowsTab(gtx, th, windowsList, pinBtns, closeBtns, reopenBtns, st.ManagedWindows)
 			}
 			if tab == 1 {
+				return layoutNappsTab(gtx, th, installedList, installedFilterEd, cardBtns, uninstBtns, checkUpdBtn, instVis, st)
+			}
+			if tab == 2 {
 				return layoutDiscoveryTab(gtx, th, discoveryList, relaysEd, filterEd, fetchBtn, actionBtns,
 					updateBtns, vis, st.FetchErr, st.Fetching, st.Discovery, installedSet, busy)
 			}
@@ -244,7 +291,17 @@ func truncate(s string, max int) string {
 	return s
 }
 
-func layoutTabs(gtx layout.Context, th *material.Theme, nappsBtn, discoBtn, devBtn *widget.Clickable, tab, nInstalled, nDiscovery int) layout.Dimensions {
+func layoutTabs(
+	gtx layout.Context,
+	th *material.Theme,
+	windowsBtn,
+	nappsBtn,
+	discoBtn,
+	devBtn *widget.Clickable,
+	tab,
+	nInstalled,
+	nDiscovery int,
+) layout.Dimensions {
 	tabBtn := func(gtx layout.Context, btn *widget.Clickable, label string, active bool) layout.Dimensions {
 		pointer.CursorPointer.Add(gtx.Ops)
 		b := material.Button(th, btn, label)
@@ -258,11 +315,15 @@ func layoutTabs(gtx layout.Context, th *material.Theme, nappsBtn, discoBtn, devB
 	}
 	children := []layout.FlexChild{
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return tabBtn(gtx, nappsBtn, "Installed", tab == 0)
+			return tabBtn(gtx, windowsBtn, "Windows", tab == 0)
 		}),
 		layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return tabBtn(gtx, discoBtn, "Discovery", tab == 1)
+			return tabBtn(gtx, nappsBtn, "Installed", tab == 1)
+		}),
+		layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return tabBtn(gtx, discoBtn, "Discovery", tab == 2)
 		}),
 	}
 	// devBtn is nil outside dev builds: no dev tab there
@@ -270,14 +331,85 @@ func layoutTabs(gtx layout.Context, th *material.Theme, nappsBtn, discoBtn, devB
 		children = append(children,
 			layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return tabBtn(gtx, devBtn, "Dev", tab == 2)
+				return tabBtn(gtx, devBtn, "Dev", tab == 3)
 			}),
 		)
 	}
 	return layout.Flex{Axis: layout.Horizontal}.Layout(gtx, children...)
 }
 
-func layoutNappsTab(gtx layout.Context, th *material.Theme, list *widget.List, filterEd *widget.Editor, cardBtns, uninstBtns []widget.Clickable, checkUpdBtn *widget.Clickable, vis []int, st backend.State) layout.Dimensions {
+func layoutWindowsTab(
+	gtx layout.Context,
+	th *material.Theme,
+	list *widget.List,
+	pinBtns,
+	closeBtns,
+	reopenBtns []widget.Clickable,
+	windows []backend.WindowInfo,
+) layout.Dimensions {
+	if len(windows) == 0 {
+		l := material.Body2(th, "No windows opened yet.")
+		l.Color = currentTheme().muted
+		return l.Layout(gtx)
+	}
+	return material.List(th, list).Layout(gtx, len(windows), func(gtx layout.Context, i int) layout.Dimensions {
+		w := windows[i]
+		return layout.Inset{Bottom: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							l := material.Body1(th, w.Name)
+							if !w.Open {
+								l.Color = currentTheme().muted
+							}
+							return l.Layout(gtx)
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							label := w.Instance
+							if w.Action != "" {
+								label += " · " + w.Action
+							}
+							if !w.Open {
+								label += " · closed"
+							}
+							l := material.Caption(th, label)
+							l.Color = currentTheme().muted
+							return l.Layout(gtx)
+						}),
+					)
+				}),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					pointer.CursorPointer.Add(gtx.Ops)
+					label := "Pin"
+					if w.Pinned {
+						label = "Unpin"
+					}
+					return material.Button(th, &pinBtns[i], label).Layout(gtx)
+				}),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					pointer.CursorPointer.Add(gtx.Ops)
+					if w.Open {
+						return material.Button(th, &closeBtns[i], "Close").Layout(gtx)
+					}
+					return material.Button(th, &reopenBtns[i], "Reopen").Layout(gtx)
+				}),
+			)
+		})
+	})
+}
+
+func layoutNappsTab(
+	gtx layout.Context,
+	th *material.Theme,
+	list *widget.List,
+	filterEd *widget.Editor,
+	cardBtns,
+	uninstBtns []widget.Clickable,
+	checkUpdBtn *widget.Clickable,
+	vis []int,
+	st backend.State,
+) layout.Dimensions {
 	if len(st.Installed) == 0 {
 		l := material.Body2(th, "No napps installed yet. Find some in the Discovery tab.")
 		l.Color = currentTheme().muted
@@ -324,7 +456,22 @@ func layoutNappsTab(gtx layout.Context, th *material.Theme, list *widget.List, f
 	)
 }
 
-func layoutDiscoveryTab(gtx layout.Context, th *material.Theme, list *widget.List, relaysEd, filterEd *widget.Editor, fetchBtn *widget.Clickable, actionBtns, updateBtns []widget.Clickable, vis []int, fetchErr string, fetching bool, discovery []backend.Napp, installedSet, busy map[string]bool) layout.Dimensions {
+func layoutDiscoveryTab(
+	gtx layout.Context,
+	th *material.Theme,
+	list *widget.List,
+	relaysEd,
+	filterEd *widget.Editor,
+	fetchBtn *widget.Clickable,
+	actionBtns,
+	updateBtns []widget.Clickable,
+	vis []int,
+	fetchErr string,
+	fetching bool,
+	discovery []backend.Napp,
+	installedSet,
+	busy map[string]bool,
+) layout.Dimensions {
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		// the filter box comes first, narrowing the entries below by name,
 		// author, author name or description.
@@ -371,7 +518,7 @@ func layoutDiscoveryTab(gtx layout.Context, th *material.Theme, list *widget.Lis
 		layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			if len(vis) == 0 {
-				msg := "No napps yet. Click \"Fetch napps\"."
+				msg := "No napps yet. Pick some good relays and click \"Fetch napps\"."
 				if fetching {
 					msg = "Searching relays\u2026"
 				}
@@ -413,7 +560,20 @@ func layoutDiscoveryTab(gtx layout.Context, th *material.Theme, list *widget.Lis
 // dev-server url (used directly) or a local folder (served from disk by the
 // throwaway server). The cards open on tap, like the
 // installed tab's.
-func layoutDevTab(gtx layout.Context, th *material.Theme, list *widget.List, urlEd, pathEd *widget.Editor, loadURLBtn, browseBtn, loadFolderBtn *widget.Clickable, openBtns, unloadBtns, publishBtns []widget.Clickable, st backend.State) layout.Dimensions {
+func layoutDevTab(
+	gtx layout.Context,
+	th *material.Theme,
+	list *widget.List,
+	urlEd,
+	pathEd *widget.Editor,
+	loadURLBtn,
+	browseBtn,
+	loadFolderBtn *widget.Clickable,
+	openBtns,
+	unloadBtns,
+	publishBtns []widget.Clickable,
+	st backend.State,
+) layout.Dimensions {
 	smallBtn := func(gtx layout.Context, btn *widget.Clickable, label string) layout.Dimensions {
 		pointer.CursorPointer.Add(gtx.Ops)
 		b := material.Button(th, btn, label)
@@ -507,7 +667,12 @@ func layoutDevTab(gtx layout.Context, th *material.Theme, list *widget.List, url
 
 // layoutConfirmLogout is the dialog shown when the user hits "Log out":
 // logging out closes every open napp, so it deserves a second look.
-func layoutConfirmLogout(gtx layout.Context, th *material.Theme, yesBtn, noBtn *widget.Clickable) layout.Dimensions {
+func layoutConfirmLogout(
+	gtx layout.Context,
+	th *material.Theme,
+	yesBtn,
+	noBtn *widget.Clickable,
+) layout.Dimensions {
 	p := currentTheme()
 	return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		macro := op.Record(gtx.Ops)
@@ -559,7 +724,14 @@ func layoutConfirmLogout(gtx layout.Context, th *material.Theme, yesBtn, noBtn *
 	})
 }
 
-func layoutProfile(gtx layout.Context, th *material.Theme, themeBtn, logoutBtn *widget.Clickable, name, pic string) layout.Dimensions {
+func layoutProfile(
+	gtx layout.Context,
+	th *material.Theme,
+	themeBtn,
+	logoutBtn *widget.Clickable,
+	name,
+	pic string,
+) layout.Dimensions {
 	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return avatar(gtx, pic, 48)
@@ -673,7 +845,16 @@ func editorBox(gtx layout.Context, th *material.Theme, ed *widget.Editor, hint s
 // installed tab taps it to open the napp); buttons drawn on top of the card's
 // area keep working, so the frame handler must check which of them fired
 // before acting on the card itself.
-func renderNappCard(gtx layout.Context, th *material.Theme, cardBtn, btn, secondBtn *widget.Clickable, btnLabel, secondLabel string, napp backend.Napp) layout.Dimensions {
+func renderNappCard(
+	gtx layout.Context,
+	th *material.Theme,
+	cardBtn,
+	btn,
+	secondBtn *widget.Clickable,
+	btnLabel,
+	secondLabel string,
+	napp backend.Napp,
+) layout.Dimensions {
 	authorName, authorPic := napp.AuthorProfile(context.Background())
 	return layout.Inset{Bottom: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		sz := gtx.Constraints.Max

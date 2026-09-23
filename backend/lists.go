@@ -143,13 +143,6 @@ func resolvedSet(evt nostr.Event, kind nostr.Kind, d string, items []any) map[st
 	if items == nil {
 		items = []any{}
 	}
-	title := tagValue(evt.Tags, "title")
-	if title == "" {
-		title = tagValue(evt.Tags, "name")
-	}
-	if title == "" {
-		title = d
-	}
 	set := map[string]any{
 		"pointer": map[string]any{
 			"identifier": d,
@@ -159,19 +152,26 @@ func resolvedSet(evt nostr.Event, kind nostr.Kind, d string, items []any) map[st
 		},
 		"event": &evt,
 		"items": items,
-		"title": title,
 	}
-	if image := tagValue(evt.Tags, "image"); image != "" {
-		set["image"] = image
+
+	for _, tag := range evt.Tags {
+		if len(tag) < 2 {
+			continue
+		}
+		switch tag[0] {
+		case "icon", "description", "title":
+			set[tag[0]] = tag[1]
+		case "d":
+			if _, exists := set["title"]; !exists {
+				set["title"] = tag[1]
+			}
+		}
 	}
-	if desc := tagValue(evt.Tags, "description"); desc != "" {
-		set["description"] = desc
-	}
+
 	return set
 }
 
 // ─── item shapes (mirroring @nostr/gadgets/lists) ────────────────
-
 func profileRefItem(ref sdk.ProfileRef) any { return ref.Pubkey.Hex() }
 
 func relayURLValue(url sdk.RelayURL) any { return string(url) }
@@ -519,7 +519,6 @@ func loadNostrUser(ctx context.Context, input string, extraRelays []string) (map
 }
 
 // ─── event fetching ──────────────────────────────────────────────
-
 func loadEvent(ctx context.Context, code string, relays []string, author string) *nostr.Event {
 	code = strings.TrimSpace(code)
 	if code == "" || sys == nil {
@@ -570,13 +569,11 @@ func loadEvent(ctx context.Context, code string, relays []string, author string)
 // can, then one REQ over the union of the missing ids.
 func loadEventsByID(ctx context.Context, ids []string) []nostr.Event {
 	want := make([]nostr.ID, 0, len(ids))
-	seen := make(map[nostr.ID]bool, len(ids))
 	for _, raw := range ids {
 		id, err := nostr.IDFromHex(strings.TrimSpace(raw))
-		if err != nil || seen[id] {
+		if err != nil {
 			continue
 		}
-		seen[id] = true
 		want = append(want, id)
 	}
 	if len(want) == 0 {
@@ -613,11 +610,11 @@ func loadEventsByID(ctx context.Context, ids []string) []nostr.Event {
 		sys.Publisher.Publish(fetchCtx, ie.Event)
 		out = append(out, ie.Event)
 	}
+
 	return out
 }
 
 // ─── relay info ──────────────────────────────────────────────────
-
 type relayInfoEntry struct {
 	doc     map[string]any
 	expires time.Time

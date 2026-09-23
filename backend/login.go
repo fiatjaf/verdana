@@ -119,7 +119,7 @@ func Login(input string) {
 	setProfile(pk.Hex(), name, pm.Picture)
 
 	log.Info().Str("pubkey", pk.Hex()).Str("name", name).Msg("login successful")
-	go Fetch()
+	go Discover()
 }
 
 // Logout forgets the signer and the stored login, and sends the launcher back

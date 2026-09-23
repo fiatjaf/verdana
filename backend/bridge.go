@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"fiatjaf.com/nostr"
+	"fiatjaf.com/nostr/nip19"
 	"fiatjaf.com/nostr/sdk"
 )
 
@@ -138,7 +139,7 @@ func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 				verb = "encrypt a message with your key"
 				payload = preview(p.Plaintext, 120)
 			}
-			if !askApproval(ci, verb, "Counterparty "+shortPubkey(pk)+" ("+strings.SplitN(method, ".", 2)[0]+").", payload) {
+			if !askApproval(ci, verb, "Counterparty "+nip19.EncodeNpub(pk)+" ("+strings.SplitN(method, ".", 2)[0]+").", payload) {
 				return "", errors.New("denied by the user")
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -183,17 +184,14 @@ func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 				return nil, err
 			}
 			out := []nostr.Event{}
-			seen := make(map[nostr.ID]bool)
+
 			for _, f := range filters {
 				maxLimit := f.Limit
 				if maxLimit <= 0 {
 					maxLimit = 500
 				}
 				for evt := range sys.Store.QueryEvents(f, maxLimit) {
-					if !seen[evt.ID] {
-						seen[evt.ID] = true
-						out = append(out, evt)
-					}
+					out = append(out, evt)
 				}
 			}
 			return out, nil
@@ -209,20 +207,17 @@ func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 			if err != nil {
 				return 0, err
 			}
-			seen := make(map[nostr.ID]bool)
+
+			acc := uint32(0)
 			for _, f := range filters {
-				if len(filters) == 1 {
-					c, err := sys.Store.CountEvents(f)
-					if err != nil {
-						return 0, err
-					}
-					return int(c), nil
+				c, err := sys.Store.CountEvents(f)
+				if err != nil {
+					continue
 				}
-				for evt := range sys.Store.QueryEvents(f, 10000) {
-					seen[evt.ID] = true
-				}
+				acc += c
 			}
-			return len(seen), nil
+
+			return acc, nil
 
 		case "nostrdb.event":
 			var p struct {
@@ -353,7 +348,6 @@ func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 
 		case "napp.close":
 			log.Info().Str("instance", ci.instance).Msg("napp asked to close its window")
-			removeSavedWindow(ci.instance)
 			ci.send(WireMsg{T: "close"})
 			return nil, nil
 
@@ -834,9 +828,4 @@ func stripSchemes(urls []string) []string {
 		out = append(out, strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(u, "wss://"), "ws://"), "/"))
 	}
 	return out
-}
-
-func shortPubkey(pk nostr.PubKey) string {
-	hex := pk.Hex()
-	return hex[:8] + "…"
 }
