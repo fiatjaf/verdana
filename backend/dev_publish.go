@@ -72,7 +72,13 @@ func DevPublishInfoFor(id string) (DevPublishInfo, error) {
 
 // PublishDev uploads a folder dev napp, signs its kind-35130 manifest, and
 // publishes it to selected relays. Every file must reach at least one server.
-func PublishDev(ctx context.Context, id string, servers, relays []string, protected bool) (int, int, error) {
+// Progress is reported line-by-line through onStep (may be nil).
+func PublishDev(ctx context.Context, id string, servers, relays []string, protected bool, onStep func(string)) (int, int, error) {
+	step := func(format string, args ...any) {
+		if onStep != nil {
+			onStep(fmt.Sprintf(format, args...))
+		}
+	}
 	if userKeyer == nil {
 		return 0, 0, errors.New("not logged in")
 	}
@@ -95,18 +101,37 @@ func PublishDev(ctx context.Context, id string, servers, relays []string, protec
 	}
 
 	okServers := make(map[string]bool)
+	step("uploading %d file(s) to %d blossom server(s)...", len(napp.Paths), len(servers))
 	for _, file := range napp.Paths {
 		path := filepath.Join(d.dir, filepath.FromSlash(strings.TrimPrefix(file.Path, "/")))
+		st, statErr := os.Stat(path)
+		size := int64(-1)
+		if statErr == nil {
+			size = st.Size()
+		}
 		stored := false
 		for _, server := range servers {
+			if ctx.Err() != nil {
+				return 0, 0, ctx.Err()
+			}
+			step("uploading %s (%d bytes) to %s ...", file.Path, size, server)
 			f, openErr := os.Open(path)
 			if openErr != nil {
+				step("  failed: cannot open file: %v", openErr)
 				continue
 			}
 			client := blossom.NewClient(server, userKeyer)
 			descriptor, uploadErr := client.UploadBlob(ctx, f, mime.TypeByExtension(filepath.Ext(path)))
 			f.Close()
-			if uploadErr == nil && descriptor != nil && strings.EqualFold(descriptor.SHA256, file.Sha256) {
+			switch {
+			case uploadErr != nil:
+				step("  failed on %s: %v", server, uploadErr)
+			case descriptor == nil:
+				step("  failed on %s: empty response", server)
+			case !strings.EqualFold(descriptor.SHA256, file.Sha256):
+				step("  failed on %s: sha256 mismatch (got %s, want %s)", server, descriptor.SHA256, file.Sha256)
+			default:
+				step("  ok: stored on %s", server)
 				stored = true
 				okServers[server] = true
 			}
@@ -156,21 +181,27 @@ func PublishDev(ctx context.Context, id string, servers, relays []string, protec
 		tags = append(tags, nostr.Tag{"-"})
 	}
 	tags = append(tags, nostr.Tag{"d", napp.D})
+	step("signing kind:35130 event (%d tags, %d path tags)...", len(tags), len(napp.Paths))
 	event := nostr.Event{Kind: 35130, CreatedAt: nostr.Now(), Tags: tags}
 	if err := userKeyer.SignEvent(ctx, &event); err != nil {
+		step("signing failed: %v", err)
 		return 0, 0, fmt.Errorf("signing manifest: %w", err)
 	}
+	step("signed event %s, publishing to %d relay(s)...", event.ID, len(relays))
 
 	results := 0
 	failed := 0
 	for result := range sys.Pool.PublishMany(ctx, relays, event) {
 		if result.Error != nil {
 			failed++
+			step("  %s: failed: %v", result.RelayURL, result.Error)
 			log.Warn().Str("relay", result.RelayURL).Err(result.Error).Msg("dev napp publish failed")
 		} else {
 			results++
+			step("  %s: ok", result.RelayURL)
 		}
 	}
+	step("done: published to %d relay(s), %d failed", results, failed)
 	if results > 0 {
 		if _, err := sys.Store.ReplaceEvent(event); err != nil {
 			log.Warn().Err(err).Msg("failed to store published dev napp")
