@@ -2,6 +2,8 @@ package backend
 
 import (
 	"context"
+	"strconv"
+	"strings"
 	"sync/atomic"
 
 	"fiatjaf.com/nostr"
@@ -91,6 +93,16 @@ func nappFromEvent(evt nostr.Event) Napp {
 			n.Paths = append(n.Paths, NappPath{Path: tag[1], Sha256: tag[2]})
 		case "server":
 			n.Servers = append(n.Servers, tag[1])
+		case "initial_size", "initial-size":
+			if len(tag) >= 3 {
+				w, werr := strconv.Atoi(strings.TrimSpace(tag[1]))
+				h, herr := strconv.Atoi(strings.TrimSpace(tag[2]))
+				if werr == nil && herr == nil {
+					if s, ok := sanitizeInitialSize(w, h); ok {
+						n.InitialSize = &s
+					}
+				}
+			}
 		}
 	}
 

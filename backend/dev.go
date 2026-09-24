@@ -43,6 +43,11 @@ type devMetadata struct {
 	Singleton   bool     `json:"singleton"`
 	Requires    []string `json:"requires"`
 	Actions     []string `json:"actions"`
+
+	// Preferred window size, like nostrapps: `initial_size` (snake_case,
+	// camelCase accepted too) {width, height} object.
+	InitialSize   *NappInitialSize `json:"initial_size"`
+	InitialSizeCC *NappInitialSize `json:"initialSize"`
 }
 
 var devIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._~-]*$`)
@@ -117,6 +122,17 @@ func nappFromDevMetadata(meta devMetadata) (Napp, error) {
 	if name == "" {
 		name = meta.ID
 	}
+	initial := meta.InitialSize
+	if initial == nil {
+		initial = meta.InitialSizeCC
+	}
+	if initial != nil {
+		if s, ok := sanitizeInitialSize(initial.Width, initial.Height); ok {
+			initial = &s
+		} else {
+			initial = nil
+		}
+	}
 	return Napp{
 		ID:          "dev~" + meta.ID,
 		D:           meta.ID,
@@ -124,6 +140,7 @@ func nappFromDevMetadata(meta devMetadata) (Napp, error) {
 		Description: meta.Description,
 		Icon:        meta.Icon,
 		Singleton:   meta.Singleton,
+		InitialSize: initial,
 		Requires:    append([]string(nil), meta.Requires...),
 		Actions:     append([]string(nil), meta.Actions...),
 	}, nil

@@ -66,6 +66,11 @@ type WindowSpec struct {
 	Name        string
 	Description string
 
+	// Width and Height are the window's initial size in pixels, from the
+	// napp's initial_size or the roomy default (see Napp.WindowSize).
+	Width  int
+	Height int
+
 	// Dir holds the napp's unpacked files (index.html and friends).
 	Dir string
 

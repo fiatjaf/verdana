@@ -42,6 +42,8 @@ func startChild(spec backend.WindowSpec) (backend.Transport, error) {
 		"VERDANA_NAPP_DESC="+spec.Description,
 		"VERDANA_INSTANCE_ID="+spec.Instance,
 		"VERDANA_WINDOW_NUMBER="+strconv.Itoa(spec.Number),
+		"VERDANA_WINDOW_WIDTH="+strconv.Itoa(spec.Width),
+		"VERDANA_WINDOW_HEIGHT="+strconv.Itoa(spec.Height),
 		"VERDANA_NAPP_REQUIRES="+strings.Join(spec.Requires, ","),
 		"VERDANA_THEME="+spec.Theme,
 		"VERDANA_THEME_VARS="+spec.ThemeVars,

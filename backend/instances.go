@@ -436,6 +436,7 @@ func launchWithInstance(ctx context.Context, napp Napp, requestedInstance string
 	}
 
 	themeName, themeVars := Theme()
+	winW, winH := napp.WindowSize()
 	instance := requestedInstance
 	if instance == "" {
 		instance = nextInstanceID(napp)
@@ -469,6 +470,8 @@ func launchWithInstance(ctx context.Context, napp Napp, requestedInstance string
 		Requires:    napp.Requires,
 		Theme:       themeName,
 		ThemeVars:   themeVars,
+		Width:       winW,
+		Height:      winH,
 	})
 	if err != nil {
 		WindowClosed(ci.instance)

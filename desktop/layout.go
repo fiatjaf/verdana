@@ -388,6 +388,7 @@ func layoutWindowsTab(
 					}
 					return material.Button(th, &pinBtns[i], label).Layout(gtx)
 				}),
+				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					pointer.CursorPointer.Add(gtx.Ops)
 					if w.Open {

@@ -89,7 +89,7 @@ func main() {
 
 	w := webview.New(os.Getenv("WEBVIEW_DEBUG") == "true")
 	w.SetTitle(windowTitle(meta.Name, meta.Number))
-	w.SetSize(600, 450, webview.HintNone)
+	w.SetSize(windowWidth(), windowHeight(), webview.HintNone)
 	_ = w.Bind("__bridge_rpc", rpcBound)
 	_ = w.Bind("__verdana_prompt_answer", promptAnswer)
 
@@ -125,6 +125,33 @@ func jsString(s string) string {
 		return `""`
 	}
 	return string(b)
+}
+
+// windowWidth/Height are the initial window size in pixels: the napp's
+// initial_size via the launcher, falling back to a roomy default. Values are
+// clamped like nostrapps sanitizes them (positive, capped at 2000, with a
+// minimum that keeps the window usable).
+func windowWidth() int { return clampWindowSize(envSize("VERDANA_WINDOW_WIDTH", 1024), 320, 2000) }
+
+func windowHeight() int { return clampWindowSize(envSize("VERDANA_WINDOW_HEIGHT", 700), 240, 2000) }
+
+func envSize(key string, fallback int) int {
+	if raw := strings.TrimSpace(os.Getenv(key)); raw != "" {
+		if v, err := strconv.Atoi(raw); err == nil && v > 0 {
+			return v
+		}
+	}
+	return fallback
+}
+
+func clampWindowSize(v, min, max int) int {
+	if v < min {
+		return min
+	}
+	if v > max {
+		return max
+	}
+	return v
 }
 
 // windowTitle names the OS window after the napp and its instance, so the

@@ -17,21 +17,72 @@ type NappPath struct {
 	Sha256 string `json:"sha256"`
 }
 
+// NappInitialSize is a napp's preferred window size, mirroring nostrapps:
+// ["initial_size", "<width>", "<height>"] manifest tags, or an `initial_size`
+// {width, height} object in metadata.json.
+type NappInitialSize struct {
+	Width  int `json:"width"`
+	Height int `json:"height"`
+}
+
+// Default window size for napps without (or with an invalid) initial_size.
+// Deliberately roomy: most napps are web pages that look cramped in small
+// windows.
+const (
+	DefaultWindowWidth  = 1024
+	DefaultWindowHeight = 700
+)
+
+// sanitizeInitialSize clamps untrusted napp input like nostrapps does: finite,
+// positive, capped at 2000px. False when absent/invalid.
+func sanitizeInitialSize(width, height int) (NappInitialSize, bool) {
+	if width <= 0 || height <= 0 {
+		return NappInitialSize{}, false
+	}
+	if width > 2000 {
+		width = 2000
+	}
+	if height > 2000 {
+		height = 2000
+	}
+	return NappInitialSize{Width: width, Height: height}, true
+}
+
+// WindowSize is the size a napp window should open at: its initial_size when
+// valid, the roomy default otherwise. Minimums keep a degenerate value from
+// making an unusable window.
+func (n Napp) WindowSize() (int, int) {
+	if n.InitialSize != nil {
+		if s, ok := sanitizeInitialSize(n.InitialSize.Width, n.InitialSize.Height); ok {
+			w, h := s.Width, s.Height
+			if w < 320 {
+				w = 320
+			}
+			if h < 240 {
+				h = 240
+			}
+			return w, h
+		}
+	}
+	return DefaultWindowWidth, DefaultWindowHeight
+}
+
 // Napp is a napp as its kind:35130 event describes it.
 type Napp struct {
-	ID          string          `json:"id"`
-	D           string          `json:"d"`
-	Name        string          `json:"name"`
-	Description string          `json:"description"`
-	Icon        string          `json:"icon"`
-	Author      nostr.PubKey    `json:"author"`
-	AuthorName  string          `json:"authorName,omitempty"`
-	Actions     []string        `json:"actions"`
-	Requires    []string        `json:"requires"`
-	Singleton   bool            `json:"singleton"`
-	CreatedAt   nostr.Timestamp `json:"created_at"`
-	Paths       []NappPath      `json:"paths"`
-	Servers     []string        `json:"servers"`
+	ID          string           `json:"id"`
+	D           string           `json:"d"`
+	Name        string           `json:"name"`
+	Description string           `json:"description"`
+	Icon        string           `json:"icon"`
+	Author      nostr.PubKey     `json:"author"`
+	AuthorName  string           `json:"authorName,omitempty"`
+	Actions     []string         `json:"actions"`
+	Requires    []string         `json:"requires"`
+	Singleton   bool             `json:"singleton"`
+	InitialSize *NappInitialSize `json:"initialSize,omitempty"`
+	CreatedAt   nostr.Timestamp  `json:"created_at"`
+	Paths       []NappPath       `json:"paths"`
+	Servers     []string         `json:"servers"`
 
 	// UpdateAvailable is stamped by Snapshot(): a newer version of this napp
 	// was seen on the relays (kind:35130, same author+d-tag, newer
