@@ -11,12 +11,9 @@ import (
 	"github.com/wizenheimer/blaze"
 )
 
-// The launcher keeps a full-text index of every profile it has ever seen,
-// so napps can offer instant user search without touching the network:
-// built from the kind:0s already in the eventstore at startup, and augmented
-// by every loadNostrUser/searchUser afterwards.
-
 const searchResultLimit = 20
+
+// local index of profiles
 
 type indexedUser struct {
 	pm sdk.ProfileMetadata
@@ -156,7 +153,6 @@ func searchUser(ctx context.Context, term string) []map[string]any {
 			continue
 		}
 		sys.Publisher.Publish(fetchCtx, evt)
-		indexUser(pm)
 		out = append(out, nostrUser(pm))
 		if len(out) >= searchResultLimit {
 			break
