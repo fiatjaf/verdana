@@ -130,7 +130,6 @@ func OpenWindows() []WindowInfo {
 			NappID:   ci.napp.ID,
 			Name:     ci.napp.Label(),
 			Open:     true,
-			Pinned:   savedWindowPinned(ci.instance),
 		}
 		if last := ci.lastAction.Load(); last != nil {
 			info.Action = last.name
@@ -146,6 +145,7 @@ func ManagedWindows() []WindowInfo {
 	for _, w := range active {
 		byID[w.Instance] = w
 	}
+	var closed []WindowInfo
 	for _, saved := range savedWindows() {
 		if _, ok := byID[saved.Instance]; ok {
 			continue
@@ -154,13 +154,21 @@ func ManagedWindows() []WindowInfo {
 		if !ok {
 			continue
 		}
-		info := WindowInfo{Instance: saved.Instance, NappID: saved.NappID, Name: napp.Label(), Pinned: saved.Pinned, Open: false}
+		info := WindowInfo{Instance: saved.Instance, NappID: saved.NappID, Name: napp.Label(), Open: false}
 		if len(saved.Actions) > 0 {
 			info.Action = saved.Actions[len(saved.Actions)-1].Name
 		}
-		active = append(active, info)
+		closed = append(closed, info)
 	}
-	return active
+	// savedWindows walks a map: sort the closed ones or they jump around
+	// between frames and the list flickers.
+	sort.Slice(closed, func(i, j int) bool {
+		if closed[i].Name != closed[j].Name {
+			return closed[i].Name < closed[j].Name
+		}
+		return closed[i].Instance < closed[j].Instance
+	})
+	return append(active, closed...)
 }
 
 // nextInstanceID is the napp's own id when it is a singleton (stable across
@@ -253,8 +261,6 @@ func HandleMessage(instance string, m WireMsg) {
 		return
 	}
 	switch m.T {
-	case "pin":
-		SetWindowPinned(instance, m.Method == "true")
 	case "promptAnswer":
 		// the answer of the prompt overlaying this window. Answered
 		// inline, not in a goroutine: it mutates the prompt state and
@@ -478,17 +484,8 @@ func launchWithInstance(ctx context.Context, napp Napp, requestedInstance string
 		return nil, err
 	}
 	ci.attach(transport)
-	rememberWindow(ci, savedWindowPinned(ci.instance))
+	rememberWindow(ci)
 	return ci, nil
-}
-
-func savedWindowPinned(instance string) bool {
-	for _, w := range savedWindows() {
-		if w.Instance == instance {
-			return w.Pinned
-		}
-	}
-	return false
 }
 
 func savedWindow(instance string) *SavedWindow {
@@ -500,26 +497,12 @@ func savedWindow(instance string) *SavedWindow {
 	return nil
 }
 
-func rememberWindow(ci *Instance, pinned bool) {
-	w := SavedWindow{Instance: ci.instance, NappID: ci.napp.ID, Pinned: pinned}
+func rememberWindow(ci *Instance) {
+	w := SavedWindow{Instance: ci.instance, NappID: ci.napp.ID}
 	if old := savedWindow(ci.instance); old != nil {
 		w.Actions = old.Actions
 	}
 	saveWindow(w)
-}
-
-func SetWindowPinned(instance string, pinned bool) {
-	ci := lookupInstance(instance)
-	w := savedWindow(instance)
-	if w == nil && ci == nil {
-		return
-	}
-	if w == nil {
-		rememberWindow(ci, pinned)
-		return
-	}
-	w.Pinned = pinned
-	saveWindow(*w)
 }
 
 func markWindowClosed(instance string) {
@@ -562,35 +545,15 @@ func replaySaved(ci *Instance, saved SavedWindow) {
 }
 
 func recordAction(ci *Instance, req *actionRequest) {
-	if ci.replaying.Load() || (!host.RestoreAllWindows() && !savedWindowPinned(ci.instance)) {
+	if ci.replaying.Load() {
 		return
 	}
 	w := savedWindow(ci.instance)
 	if w == nil {
-		w = &SavedWindow{Instance: ci.instance, NappID: ci.napp.ID, Pinned: host.RestoreAllWindows()}
+		w = &SavedWindow{Instance: ci.instance, NappID: ci.napp.ID}
 	}
 	w.Actions = append(w.Actions, SavedAction{Name: req.name, Payload: append(json.RawMessage(nil), req.payload...)})
 	saveWindow(*w)
-}
-
-func restoreWindows() {
-	for _, saved := range savedWindows() {
-		if saved.Closed || (!host.RestoreAllWindows() && !saved.Pinned) {
-			continue
-		}
-		napp, ok := InstalledNapp(saved.NappID)
-		if !ok {
-			continue
-		}
-		go func(saved SavedWindow, napp Napp) {
-			ci, err := launchWithInstance(context.Background(), napp, saved.Instance)
-			if err != nil {
-				log.Warn().Err(err).Str("napp", saved.NappID).Msg("could not restore napp window")
-				return
-			}
-			replaySaved(ci, saved)
-		}(saved, napp)
-	}
 }
 
 // ─── action dispatch ─────────────────────────────────────────────

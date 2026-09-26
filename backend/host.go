@@ -40,6 +40,14 @@ type Host interface {
 	// OpenLink hands an http(s) url to the platform's browser. Already
 	// approved.
 	OpenLink(url string) error
+
+	// CreateShortcutFile writes a shortcut a desktop environment understands
+	// running `the launcher with token` (a bundle token, see shortcuts.go)
+	// and returns the path it wrote. Only the desktop host does anything.
+	CreateShortcutFile(name, token string) (string, error)
+
+	// DeleteShortcutFile removes a shortcut file this host wrote before.
+	DeleteShortcutFile(path string) error
 }
 
 // Transport is one napp window, seen from the backend: a place to send wire
@@ -101,3 +109,7 @@ func (noopHost) CopyText(string) error                   { return errors.New("no
 func (noopHost) SaveFile(string, []byte) (string, error) { return "", errors.New("no filesystem") }
 func (noopHost) SaveFileTarget() string                  { return "" }
 func (noopHost) OpenLink(string) error                   { return errors.New("no browser") }
+func (noopHost) CreateShortcutFile(string, string) (string, error) {
+	return "", errors.New("no shortcuts here")
+}
+func (noopHost) DeleteShortcutFile(string) error { return nil }

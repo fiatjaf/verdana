@@ -240,7 +240,6 @@ func layoutMain(
 	loadURLBtn,
 	browseBtn,
 	loadFolderBtn *widget.Clickable,
-	pinBtns,
 	closeBtns,
 	reopenBtns,
 	cardBtns,
@@ -251,6 +250,14 @@ func layoutMain(
 	devOpenBtns,
 	devUnloadBtns,
 	devPublishBtns []widget.Clickable,
+
+	bundleNameEd *widget.Editor,
+	createShortcutBtn *widget.Clickable,
+	saveShortcutBtn *widget.Clickable,
+	cancelShortcutBtn *widget.Clickable,
+	shortcutDelBtns,
+	shortcutEditBtns []widget.Clickable,
+
 	vis,
 	instVis []int,
 	st backend.State,
@@ -267,8 +274,13 @@ func layoutMain(
 		}),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			if editing := currentShortcutEdit(); editing != nil {
+				return layoutShortcutEditor(gtx, th, saveShortcutBtn, cancelShortcutBtn, bundleNameEd, editing)
+			}
 			if tab == 0 {
-				return layoutWindowsTab(gtx, th, windowsList, pinBtns, closeBtns, reopenBtns, st.ManagedWindows)
+				return layoutWindowsTab(gtx, th, windowsList,
+					closeBtns, reopenBtns, bundleNameEd, createShortcutBtn,
+					shortcutDelBtns, shortcutEditBtns, st)
 			}
 			if tab == 1 {
 				return layoutNappsTab(gtx, th, installedList, installedFilterEd, cardBtns, uninstBtns, installedUpdateBtns, checkUpdBtn, instVis, st)
@@ -343,62 +355,274 @@ func layoutWindowsTab(
 	gtx layout.Context,
 	th *material.Theme,
 	list *widget.List,
-	pinBtns,
 	closeBtns,
 	reopenBtns []widget.Clickable,
-	windows []backend.WindowInfo,
+	bundleNameEd *widget.Editor,
+	createShortcutBtn *widget.Clickable,
+	shortcutDelBtns,
+	shortcutEditBtns []widget.Clickable,
+	st backend.State,
 ) layout.Dimensions {
-	if len(windows) == 0 {
+	if len(st.ManagedWindows) == 0 {
 		l := material.Body2(th, "No windows opened yet.")
 		l.Color = currentTheme().muted
 		return l.Layout(gtx)
 	}
-	return material.List(th, list).Layout(gtx, len(windows), func(gtx layout.Context, i int) layout.Dimensions {
-		w := windows[i]
-		return layout.Inset{Bottom: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-					return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+	ui.mu.Lock()
+	shortcutErr := ui.shortcutErr
+	ui.mu.Unlock()
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+		// whatever went wrong the last time a shortcut was saved
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if shortcutErr == "" {
+				return layout.Dimensions{}
+			}
+			return layout.Inset{Bottom: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				l := material.Body2(th, shortcutErr)
+				l.Color = currentTheme().danger
+				return l.Layout(gtx)
+			})
+		}),
+		// the bundle shortcut builder: only while something is checked, an
+		// input for the bundle name next to the create button.
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			anyChecked := false
+			for _, cb := range bundleChecks {
+				if cb.Value {
+					anyChecked = true
+				}
+			}
+			if !anyChecked {
+				return layout.Dimensions{}
+			}
+			return layout.Inset{Bottom: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+						return editorBox(gtx, th, bundleNameEd, "name of the bundle shortcut")
+					}),
+					layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						pointer.CursorPointer.Add(gtx.Ops)
+						return material.Button(th, createShortcutBtn, "Create shortcut\u2026").Layout(gtx)
+					}),
+				)
+			})
+		}),
+		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			return material.List(th, list).Layout(gtx, len(st.ManagedWindows), func(gtx layout.Context, i int) layout.Dimensions {
+				w := st.ManagedWindows[i]
+				return layout.Inset{Bottom: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+						// the checkbox that puts this window into a bundle
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							l := material.Body1(th, w.Name)
-							if !w.Open {
-								l.Color = currentTheme().muted
+							cb, ok := bundleChecks[w.Instance]
+							if !ok {
+								return layout.Dimensions{}
 							}
-							return l.Layout(gtx)
+							pointer.CursorPointer.Add(gtx.Ops)
+							return material.CheckBox(th, cb, "").Layout(gtx)
+						}),
+						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+							return layout.Inset{Left: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+								return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+									layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+										l := material.Body1(th, w.Name)
+										if !w.Open {
+											l.Color = currentTheme().muted
+										}
+										return l.Layout(gtx)
+									}),
+									layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+										label := w.Instance
+										if w.Action != "" {
+											label += " · " + w.Action
+										}
+										if !w.Open {
+											label += " · closed"
+										}
+										l := material.Caption(th, label)
+										l.Color = currentTheme().muted
+										return l.Layout(gtx)
+									}),
+								)
+							})
 						}),
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							label := w.Instance
-							if w.Action != "" {
-								label += " · " + w.Action
+							pointer.CursorPointer.Add(gtx.Ops)
+							if w.Open {
+								return material.Button(th, &closeBtns[i], "Close").Layout(gtx)
 							}
-							if !w.Open {
-								label += " · closed"
-							}
-							l := material.Caption(th, label)
-							l.Color = currentTheme().muted
-							return l.Layout(gtx)
+							return material.Button(th, &reopenBtns[i], "Reopen").Layout(gtx)
 						}),
 					)
-				}),
+				})
+			})
+		}),
+		// the created shortcuts, each with edit and delete
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if len(st.Shortcuts) == 0 {
+				return layout.Dimensions{}
+			}
+			return layout.Inset{Top: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						l := emph(material.Body2(th, "Bundle shortcuts"))
+						l.Color = currentTheme().subtle
+						return l.Layout(gtx)
+					}),
+					layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return layout.Flex{Axis: layout.Vertical}.Layout(gtx, shortcutsRows(th, st, shortcutDelBtns, shortcutEditBtns)...)
+					}),
+				)
+			})
+		}),
+	)
+}
+
+// shortcutsRows is one row per stored shortcut: the name (and its napps)
+// with edit and delete buttons at the end.
+func shortcutsRows(th *material.Theme, st backend.State, delBtns, editBtns []widget.Clickable) (out []layout.FlexChild) {
+	for i, sc := range st.Shortcuts {
+		i := i
+		names := make([]string, 0, len(sc.Entries))
+		for _, e := range sc.Entries {
+			if napp, ok := backend.InstalledNapp(e.NappID); ok {
+				names = append(names, napp.Label())
+				continue
+			}
+			names = append(names, e.NappID)
+		}
+		out = append(out, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Bottom: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+						return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								l := material.Body1(th, sc.Name)
+								l.Font.Weight = font.Bold
+								return l.Layout(gtx)
+							}),
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								l := material.Caption(th, truncate(strings.Join(names, " + "), 90))
+								l.Color = currentTheme().muted
+								return l.Layout(gtx)
+							}),
+						)
+					}),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						pointer.CursorPointer.Add(gtx.Ops)
+						b := material.Button(th, &editBtns[i], "Edit")
+						b.TextSize = unit.Sp(13)
+						b.Inset = layout.UniformInset(unit.Dp(8))
+						return b.Layout(gtx)
+					}),
+					layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						pointer.CursorPointer.Add(gtx.Ops)
+						b := material.Button(th, &delBtns[i], "Delete")
+						b.Background = currentTheme().chipBg
+						b.Color = currentTheme().danger
+						b.TextSize = unit.Sp(13)
+						b.Inset = layout.UniformInset(unit.Dp(8))
+						return b.Layout(gtx)
+					}),
+				)
+			})
+		}))
+	}
+	return out
+}
+
+// layoutShortcutEditor is the overlay a "Create shortcut…" (or an "Edit")
+// click opens over the Windows tab: the bundle name, one actions textarea
+// per napp of the bundle (one action per line), save and cancel.
+func layoutShortcutEditor(
+	gtx layout.Context,
+	th *material.Theme,
+	saveBtn,
+	cancelBtn *widget.Clickable,
+	nameEd *widget.Editor,
+	edit *shortcutEditState,
+) layout.Dimensions {
+	title := "New bundle shortcut"
+	if edit.name != "" {
+		title = "Edit shortcut"
+	}
+	p := currentTheme()
+	ui.mu.Lock()
+	shortcutErr := ui.shortcutErr
+	ui.mu.Unlock()
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			t := material.H6(th, title)
+			t.Font.Weight = font.Bold
+			return t.Layout(gtx)
+		}),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return editorBox(gtx, th, nameEd, "name of the bundle")
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if shortcutErr == "" {
+				return layout.Dimensions{}
+			}
+			return layout.Inset{Top: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				l := material.Body2(th, shortcutErr)
+				l.Color = p.danger
+				return l.Layout(gtx)
+			})
+		}),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
+		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			if len(edit.entries) == 0 {
+				return layout.Dimensions{}
+			}
+			fl := &widget.List{}
+			fl.Axis = layout.Vertical
+			return material.List(th, fl).Layout(gtx, len(edit.entries), func(gtx layout.Context, i int) layout.Dimensions {
+				ed := &edit.entries[i].ed
+				label := edit.entries[i].label
+				return layout.Inset{Bottom: unit.Dp(10)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							l := emph(material.Body2(th, "Actions of "+label+" (one JSON object per line)"))
+							l.Color = p.subtle
+							return l.Layout(gtx)
+						}),
+						layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return editorBoxHeight(gtx, th, ed, 120, `{"type": "profile", "payload": "npub1…"}`)
+						}),
+					)
+				})
+			})
+		}),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					pointer.CursorPointer.Add(gtx.Ops)
-					label := "Pin"
-					if w.Pinned {
-						label = "Unpin"
-					}
-					return material.Button(th, &pinBtns[i], label).Layout(gtx)
+					return material.Button(th, saveBtn, "Save shortcut").Layout(gtx)
 				}),
 				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					pointer.CursorPointer.Add(gtx.Ops)
-					if w.Open {
-						return material.Button(th, &closeBtns[i], "Close").Layout(gtx)
-					}
-					return material.Button(th, &reopenBtns[i], "Reopen").Layout(gtx)
+					b := material.Button(th, cancelBtn, "Cancel")
+					b.Background = p.chipBg
+					b.Color = p.chipFg
+					return b.Layout(gtx)
 				}),
 			)
-		})
-	})
+		}),
+	)
+}
+
+// editorBoxHeight is an editorBox with a minimum height, for the multi-line
+// actions textareas.
+func editorBoxHeight(gtx layout.Context, th *material.Theme, ed *widget.Editor, minHeight int, hint string) layout.Dimensions {
+	gtx.Constraints.Min.Y = gtx.Dp(unit.Dp(minHeight))
+	return editorBox(gtx, th, ed, hint)
 }
 
 func layoutNappsTab(

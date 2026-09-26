@@ -27,8 +27,14 @@ type AppState struct {
 
 	// Theme is "light" or "dark": what the launcher draws with and what
 	// every napp window is told to track.
-	Theme   string                 `json:"theme"`
+	Theme string `json:"theme"`
+	// Windows are every window the launcher has ever kept state for (open,
+	// closed, whatever): their instance ids and replayable actions.
 	Windows map[string]SavedWindow `json:"windows"`
+
+	// Shortcuts are the bundle shortcuts the user created, whose OS
+	// shortcut files call the launcher back with a bundle token.
+	Shortcuts []ShortcutInfo `json:"shortcuts"`
 }
 
 type SavedAction struct {
@@ -38,7 +44,6 @@ type SavedAction struct {
 type SavedWindow struct {
 	Instance string        `json:"instance"`
 	NappID   string        `json:"napp_id"`
-	Pinned   bool          `json:"pinned"`
 	Closed   bool          `json:"closed"`
 	Actions  []SavedAction `json:"actions"`
 }

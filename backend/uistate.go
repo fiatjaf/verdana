@@ -69,8 +69,12 @@ type State struct {
 	Windows []WindowInfo `json:"windows"`
 
 	// ManagedWindows includes open and saved desktop windows. Closed entries
-	// stay visible so they can be reopened without losing pin state.
+	// stay visible so they can be reopened without losing their state.
 	ManagedWindows []WindowInfo `json:"managedWindows"`
+
+	// Shortcuts are the bundle shortcuts the user created (see
+	// shortcuts.go), listed on the Windows screen with edit and delete.
+	Shortcuts []ShortcutInfo `json:"shortcuts"`
 }
 
 // WindowInfo is one open napp instance, for a window list or tab switcher.
@@ -83,7 +87,6 @@ type WindowInfo struct {
 	// (a dispatched action, or one it pushed itself).
 	Action string `json:"action"`
 	Open   bool   `json:"open"`
-	Pinned bool   `json:"pinned"`
 }
 
 type launcherState struct {
@@ -154,6 +157,7 @@ func Snapshot() State {
 	s.Relays = Relays()
 	s.Windows = OpenWindows()
 	s.ManagedWindows = ManagedWindows()
+	s.Shortcuts = shortcuts()
 	s.UpdateCheckRunning = updateChecking.Load()
 	updateMu.RLock()
 	for i := range s.Installed {

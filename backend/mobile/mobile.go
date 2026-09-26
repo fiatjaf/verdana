@@ -10,6 +10,7 @@ package mobile
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 	"verdana/backend"
@@ -82,6 +83,13 @@ func (h mobileHost) CopyText(text string) error                  { return h.ui.C
 func (h mobileHost) SaveFileTarget() string                      { return h.ui.SaveFileTarget() }
 func (h mobileHost) OpenLink(url string) error                   { return h.ui.OpenLink(url) }
 func (h mobileHost) SaveFile(n string, d []byte) (string, error) { return h.ui.SaveFile(n, d) }
+
+// shortcut files are a desktop concept: on Android the launcher either isn't
+// running (no shortcut files) or has no OS shortcut system to talk to.
+func (h mobileHost) CreateShortcutFile(string, string) (string, error) {
+	return "", errors.New("shortcut files are a desktop concept")
+}
+func (h mobileHost) DeleteShortcutFile(string) error { return nil }
 
 type mobileTransport struct {
 	ui       UI

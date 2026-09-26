@@ -78,6 +78,30 @@ func (gioHost) SaveFile(name string, data []byte) (string, error) {
 
 func (gioHost) SaveFileTarget() string { return downloadsDir() }
 
+// CreateShortcutFile writes an OS shortcut whose whole job is calling
+// verdana with one quoted argument: the bundle token. The OS-specific file
+// shapes live in the shortcutfile_<goos>.go files.
+func (gioHost) CreateShortcutFile(name, token string) (string, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	return writeShortcutFile(name, exe, token)
+}
+
+func (gioHost) DeleteShortcutFile(path string) error {
+	if err := os.Remove(path); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	// refresh what the desktop environment has indexed, when one exists
+	refreshShortcutParent(filepath.Dir(path))
+	log.Info().Str("path", path).Msg("removed shortcut file")
+	return nil
+}
+
 func (gioHost) OpenLink(url string) error {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
