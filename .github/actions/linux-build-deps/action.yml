@@ -1,0 +1,15 @@
+name: linux build deps
+description: cgo deps for gio (wayland/x11 + egl) and go-webview (gtk3 + webkit2gtk)
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          gcc pkg-config \
+          libgtk-3-dev libwebkit2gtk-4.1-dev \
+          libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev \
+          libx11-dev libx11-xcb-dev \
+          libegl1-mesa-dev libgles2-mesa-dev

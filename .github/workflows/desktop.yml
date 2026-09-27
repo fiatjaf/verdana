@@ -1,0 +1,136 @@
+name: desktop
+
+on:
+  push:
+    branches: [master, main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/linux-build-deps
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: desktop/go.mod
+          cache-dependency-path: |
+            desktop/go.sum
+            backend/go.sum
+
+      - name: test backend
+        working-directory: backend
+        run: go test ./...
+
+      # embed_prod.go embeds child/child, so the child has to exist before the
+      # desktop package can even be compiled on a fresh checkout
+      - name: build child
+        working-directory: desktop
+        env:
+          CGO_ENABLED: "1"
+        run: go build -o child/child ./child
+
+      - name: test desktop
+        working-directory: desktop
+        run: go test -tags novulkan ./...
+
+  build:
+    name: ${{ matrix.id }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            id: linux-amd64
+          - os: ubuntu-24.04-arm
+            id: linux-arm64
+          - os: windows-2022
+            id: windows-amd64
+          - os: macos-15-intel
+            id: darwin-amd64
+          - os: macos-15
+            id: darwin-arm64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # gio (wayland/x11 + egl) and go-webview (gtk3 + webkit2gtk 4.1) are cgo
+      - name: linux deps
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/linux-build-deps
+
+      - name: windows deps
+        if: runner.os == 'Windows'
+        run: |
+          choco install --yes --no-progress mingw
+          echo "C:\ProgramData\mingw64\mingw64\bin" >> $env:GITHUB_PATH
+          echo "CC=gcc" >> $env:GITHUB_ENV
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: desktop/go.mod
+          cache-dependency-path: |
+            desktop/go.sum
+            backend/go.sum
+
+      - name: download modules
+        working-directory: .
+        run: |
+          cd backend && go mod download
+          cd ../desktop && go mod download
+
+      # the child (the webview host) is embedded into the main binary by
+      # embed_prod.go, so it has to be built for the same target first
+      - name: build child
+        working-directory: desktop
+        env:
+          CGO_ENABLED: "1"
+        run: go build -o child/child ./child
+
+      - name: build verdana
+        working-directory: desktop
+        env:
+          CGO_ENABLED: "1"
+        run: go build -o verdana -tags novulkan -ldflags "-s -w" .
+
+      - name: package
+        shell: bash
+        working-directory: desktop
+        run: |
+          mkdir -p dist
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            mv verdana.exe dist/verdana.exe
+            7z a "dist/verdana-${{ matrix.id }}.zip" ./dist/verdana.exe
+          else
+            mv verdana dist/verdana
+            tar czf "dist/verdana-${{ matrix.id }}.tar.gz" -C dist verdana
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verdana-${{ matrix.id }}
+          path: desktop/dist/*
+          if-no-files-found: error
+
+  release:
+    name: release
+    needs: [build]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*

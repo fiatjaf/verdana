@@ -3,7 +3,7 @@ module verdana/backend
 go 1.26.2
 
 require (
-	fiatjaf.com/nostr v0.0.0-20260615112943-0616b30ab35c
+	fiatjaf.com/nostr v0.0.0-20260919022302-cf8167ebdb95
 	github.com/dgraph-io/ristretto/v2 v2.3.0
 	github.com/rs/zerolog v1.35.1
 	github.com/wizenheimer/blaze v0.0.0-20251014083344-98727d655839
@@ -57,7 +57,5 @@ require (
 	golang.org/x/text v0.42.0 // indirect
 	golang.org/x/tools v0.50.0 // indirect
 )
-
-replace fiatjaf.com/nostr => ../../nostrlib
 
 replace github.com/PowerDNS/lmdb-go => github.com/fiatjaf/lmdb-go v0.0.0-20241216175215-ce7e8c333ddb

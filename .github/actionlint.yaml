@@ -1,0 +1,8 @@
+# actionlint 1.7.7 does not know the current GitHub-hosted macOS/ubuntu labels yet
+# (see actions/runner-images#readme), it only silences itself for labels listed here.
+self-hosted-runner:
+  labels:
+    - macos-15-intel
+    - macos-26-intel
+    - ubuntu-26.04
+    - ubuntu-26.04-arm

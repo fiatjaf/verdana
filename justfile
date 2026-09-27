@@ -7,6 +7,7 @@ prod:
 # android targets: the aar is rebuilt only when the backend changed (a gomobile
 # bind of everything takes a while), the apk takes it from app/libs.
 aar:
+    mkdir -p android/app/libs
     cd backend && ANDROID_HOME=/opt/android-sdk gomobile bind -target=android -androidapi 26 -o ../android/app/libs/backend.aar ./mobile
 
 apk: aar

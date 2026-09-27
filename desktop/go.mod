@@ -3,7 +3,7 @@ module fiatjaf.com/verdana/desktop
 go 1.26.2
 
 require (
-	fiatjaf.com/nostr v0.0.0-20260615112943-0616b30ab35c // indirect
+	fiatjaf.com/nostr v0.0.0-20260919022302-cf8167ebdb95 // indirect
 	gioui.org v0.10.0
 )
 
@@ -55,8 +55,6 @@ require (
 	github.com/abemedia/go-webview v0.0.0-20250327021345-7b06ad397f16
 	github.com/ebitengine/purego v0.8.2 // indirect
 )
-
-replace fiatjaf.com/nostr => ../../nostrlib
 
 require verdana/backend v0.0.0
 
