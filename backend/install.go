@@ -97,8 +97,10 @@ const maxParallelAssets = 6
 // parallel; the servers for any one asset are still tried in order, so a napp
 // whose first server has everything is served entirely from there.
 //
-// The first failure cancels the rest: the install is lost either way, and
-// there's no reason to keep pulling bytes for it.
+// A server that is down costs nothing: its attempt is skipped and the next
+// one is tried. A file that no server can produce does fail the whole napp —
+// it would be an install that cannot start — but only after every other
+// asset had its own chance, and the error names what went missing.
 func fetchNappAssets(ctx context.Context, n Napp, base string, servers []string) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -146,7 +148,9 @@ func fetchNappAssets(ctx context.Context, n Napp, base string, servers []string)
 func fetchNappAsset(ctx context.Context, servers []string, base string, p NappPath) error {
 	data, err := downloadBlob(ctx, servers, p.Sha256)
 	if err != nil {
-		return err
+		// the file, not the hash: an install or update that failed has to
+		// say which of the napp's files nobody could serve
+		return fmt.Errorf("%s: %w", p.Path, err)
 	}
 	dest := filepath.Join(base, filepath.FromSlash(strings.TrimPrefix(p.Path, "/")))
 	if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
@@ -158,36 +162,53 @@ func fetchNappAsset(ctx context.Context, servers []string, base string, p NappPa
 	return nil
 }
 
+// blobAttemptTimeout bounds a single server attempt. Without it a server that
+// accepts the connection and then stalls holds the download until the whole
+// context is gone, taking the other servers down with it: one bad server
+// failed the entire napp instead of being skipped for the next one.
+var blobAttemptTimeout = 20 * time.Second
+
 // downloadBlob fetches a blob from the first server that has it and verifies
-// it against its hash before returning it.
+// it against its hash before returning it. Every server gets its own deadline,
+// so an unreachable or stalling one is skipped rather than waited out.
 func downloadBlob(ctx context.Context, servers []string, sha string) ([]byte, error) {
 	log.Debug().Str("sha256", sha).Int("servers", len(servers)).Msg("downloading blob")
 	var lastErr error = errors.New("no servers")
 	for _, srv := range servers {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, srv+"/"+sha, nil)
+		attemptCtx, cancel := context.WithTimeout(ctx, blobAttemptTimeout)
+
+		req, err := http.NewRequestWithContext(attemptCtx, http.MethodGet, srv+"/"+sha, nil)
 		if err != nil {
+			cancel()
 			lastErr = err
 			continue
 		}
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
+			cancel()
 			log.Debug().Str("server", srv).Err(err).Msg("blob download failed")
 			lastErr = err
 			continue
 		}
 		data, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
+		cancel()
 		if err != nil {
+			log.Debug().Str("server", srv).Err(err).Msg("blob download failed")
 			lastErr = err
 			continue
 		}
 		if resp.StatusCode != http.StatusOK {
 			lastErr = errors.New(srv + ": status " + resp.Status)
+			log.Debug().Str("server", srv).Str("last_error", lastErr.Error()).
+				Msg("blob server does not have it, trying the next")
 			continue
 		}
 		sum := sha256.Sum256(data)
 		if hex.EncodeToString(sum[:]) != sha {
 			lastErr = errors.New(srv + ": sha256 mismatch")
+			log.Debug().Str("server", srv).Str("last_error", lastErr.Error()).
+				Msg("blob server sent the wrong bytes, trying the next")
 			continue
 		}
 		log.Debug().Str("server", srv).Msg("blob downloaded and verified")

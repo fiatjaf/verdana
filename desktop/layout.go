@@ -644,9 +644,28 @@ func layoutNappsTab(
 	}
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		// the filter box, narrowing the entries below by name, author,
-		// author name or description.
+		// author name or description, and the manual update check at its
+		// right (the automatic one runs on its own after startup).
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return editorBox(gtx, th, filterEd, "filter by name, author or description")
+			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					return editorBox(gtx, th, filterEd, "filter by name, author or description")
+				}),
+				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					pointer.CursorPointer.Add(gtx.Ops)
+					p := currentTheme()
+					b := material.Button(th, checkUpdBtn, "\u21bb")
+					b.Background = p.chipBg
+					b.Color = p.chipFg
+					if st.UpdateCheckRunning {
+						b.Color = p.muted
+					}
+					b.TextSize = unit.Sp(15)
+					b.Inset = layout.UniformInset(unit.Dp(8))
+					return b.Layout(gtx)
+				}),
+			)
 		}),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
@@ -671,18 +690,6 @@ func layoutNappsTab(
 				}
 				return renderNappCard(gtx, th, cardBtn, uninstBtn, updateBtn, "Uninstall", "Update", st.Installed[row])
 			})
-		}),
-		// the update check button sits at the bottom of the list
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			pointer.CursorPointer.Add(gtx.Ops)
-			label := "Check for updates"
-			if st.UpdateCheckRunning {
-				label = "Checking\u2026"
-			}
-			b := material.Button(th, checkUpdBtn, label)
-			b.Background = currentTheme().chipBg
-			b.Color = currentTheme().chipFg
-			return b.Layout(gtx)
 		}),
 	)
 }

@@ -28,10 +28,18 @@ type imgEntry struct {
 
 var imgCache = mustNewCache[string, *imgEntry](256)
 
+// mustNewCache is a ristretto cache sized in items, not in bytes. Ristretto
+// adds an internal per-item cost (unsafe.Sizeof(storeItem[any]) — 56 as of
+// v2.3.0) on top of whatever cost a Set asks for, so MaxCost has to be
+// budgeted in those units: passing the item count as MaxCost makes the cache
+// hold count*size/(1+size) items — a 256 "image" cache would fit 4, and every
+// image past that was rejected, refetched and retried on every frame.
 func mustNewCache[K ristretto.Key, V any](size int) *ristretto.Cache[K, V] {
+	// ristretto's own per-item overhead, plus 1 for the cost we pass in
+	const perItem = 56 + 1
 	c, err := ristretto.NewCache(&ristretto.Config[K, V]{
 		NumCounters: int64(size * 10),
-		MaxCost:     int64(size),
+		MaxCost:     int64(size) * perItem,
 		BufferItems: 64,
 	})
 	if err != nil {

@@ -496,6 +496,9 @@ func gioMain() {
 								}
 							}
 						}
+						if checkUpdBtn.Clicked(gtx) && !st.UpdateCheckRunning {
+							go backend.CheckForUpdates()
+						}
 					} else if tab == 2 {
 						for _, i := range vis {
 							if actionBtns[i].Clicked(gtx) {
@@ -512,9 +515,6 @@ func gioMain() {
 							if updateBtns[i].Clicked(gtx) {
 								go backend.Install(st.Discovery[i])
 							}
-						}
-						if checkUpdBtn.Clicked(gtx) && !st.UpdateCheckRunning {
-							go backend.CheckForUpdates()
 						}
 					} else {
 						// the dev tab (only reachable in dev builds): load a

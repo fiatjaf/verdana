@@ -14,6 +14,7 @@ package backend
 import (
 	"os"
 	"path/filepath"
+	"time"
 
 	"fiatjaf.com/nostr/sdk"
 	"github.com/rs/zerolog"
@@ -68,6 +69,15 @@ func Start(opts Options) (func(), error) {
 	refreshInstalled()
 	go buildUserIndex()
 
+	// a first update round on its own, a bit after startup: not blocking the
+	// launcher, and late enough not to compete with whatever the user is
+	// doing in the first seconds (the manual reload button in the UI is
+	// there for when they don't want to wait).
+	go func() {
+		time.Sleep(startupUpdateCheckDelay)
+		CheckForUpdates()
+	}()
+
 	// resume the stored login, or ask for one
 	if stored := StoredLogin(); stored != "" {
 		go Login(stored)
@@ -77,6 +87,10 @@ func Start(opts Options) (func(), error) {
 
 	return closeStores, nil
 }
+
+// startupUpdateCheckDelay is how long after startup the automatic check for
+// napp updates waits before going out.
+const startupUpdateCheckDelay = 20 * time.Second
 
 // DataDir is where everything the backend persists lives.
 func DataDir() string { return dataDir }
