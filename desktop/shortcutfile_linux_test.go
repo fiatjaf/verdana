@@ -76,3 +76,67 @@ func TestShortcutSlugStable(t *testing.T) {
 		t.Fatalf("slugs collide: %q", a)
 	}
 }
+
+// what is written has to read back as the same shortcut: the name off the
+// Name= entry, the token off the Exec line.
+func TestListShortcutFilesRoundTrip(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(home, ".local", "share"))
+
+	raw, _ := json.Marshal(backend.ShortcutAction{Type: "view:1", Payload: json.RawMessage(`"nostr1abc"`)})
+	token := "npub1abc +" + base64.RawURLEncoding.EncodeToString(raw)
+
+	if _, err := writeShortcutFile("My Bundle", "/usr/bin/verdana", token); err != nil {
+		t.Fatal(err)
+	}
+	// a stranger's file in the same folder is none of our business
+	foreign := filepath.Join(home, ".local", "share", "applications", "firefox.desktop")
+	if err := os.WriteFile(foreign, []byte("[Desktop Entry]\nExec=firefox\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	files := listShortcutFiles()
+	if len(files) != 1 {
+		t.Fatalf("expected one shortcut, got %#v", files)
+	}
+	if files[0].Name != "My Bundle" {
+		t.Fatalf("name came back as %q", files[0].Name)
+	}
+	if files[0].Token != token {
+		t.Fatalf("token came back as %q, want %q", files[0].Token, token)
+	}
+	if !strings.HasPrefix(filepath.Base(files[0].Path), shortcutPrefix) {
+		t.Fatalf("file is not ours: %q", files[0].Path)
+	}
+
+	// and deleting it takes it off the list
+	if err := deleteShortcutFile(files[0].Path); err != nil {
+		t.Fatal(err)
+	}
+	if len(listShortcutFiles()) != 0 {
+		t.Fatalf("still there: %#v", listShortcutFiles())
+	}
+}
+
+// a token with a quote or a backslash in it must survive the Exec line.
+func TestListShortcutFilesAwkwardToken(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(home, ".local", "share"))
+
+	token := `npub1abc +view:1 "quoted" $HOME \back`
+	if _, err := writeShortcutFile("Odd", "/opt/my apps/verdana", token); err != nil {
+		t.Fatal(err)
+	}
+	files := listShortcutFiles()
+	if len(files) != 1 {
+		t.Fatalf("expected one shortcut, got %#v", files)
+	}
+	if files[0].Token != token {
+		t.Fatalf("token came back as %q, want %q", files[0].Token, token)
+	}
+	if files[0].Name != "Odd" {
+		t.Fatalf("name came back as %q", files[0].Name)
+	}
+}

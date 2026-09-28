@@ -363,7 +363,10 @@ func layoutWindowsTab(
 	shortcutEditBtns []widget.Clickable,
 	st backend.State,
 ) layout.Dimensions {
-	if len(st.ManagedWindows) == 0 {
+	// nothing but a message only when the tab really has nothing in it: a
+	// bundle shortcut outlives the windows it was made from, so a launcher
+	// that has opened no window this run still has shortcuts to show.
+	if len(st.ManagedWindows) == 0 && len(st.Shortcuts) == 0 {
 		l := material.Body2(th, "No windows opened yet.")
 		l.Color = currentTheme().muted
 		return l.Layout(gtx)

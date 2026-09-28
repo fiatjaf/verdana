@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -39,8 +41,9 @@ type ShortcutEntry struct {
 	Actions []ShortcutAction `json:"actions"`
 }
 
-// ShortcutInfo is one created shortcut, as stored and shown. File is the OS
-// shortcut path this platform wrote, so deleting the shortcut deletes it.
+// ShortcutInfo is one created shortcut, as shown. Entries come back from the
+// bundle token in its OS shortcut file and File is that file, so deleting the
+// shortcut deletes it.
 type ShortcutInfo struct {
 	Name    string          `json:"name"`
 	Entries []ShortcutEntry `json:"entries"`
@@ -126,27 +129,55 @@ func validActionName(action string) error {
 	return nil
 }
 
-// ─── stored shortcuts ────────────────────────────────────────────
+// ─── the shortcut list ───────────────────────────────────────────
 
-// shortcuts is the stored shortcut list, for a Snapshot.
+// shortcuts is what the Windows screen lists, read back from the OS shortcut
+// files: the files are the record of what the user created, so a shortcut
+// survives anything that happens to our own state, and disappears from the
+// list exactly when its file does.
+//
+// Cached, since a Snapshot() asks for it every frame, and thrown away whenever
+// a shortcut is created or deleted. A file added or removed behind our back
+// shows up on the next run.
+var shortcutCache atomic.Pointer[[]ShortcutInfo]
+
 func shortcuts() []ShortcutInfo {
-	stateMu.Lock()
-	defer stateMu.Unlock()
-	return append([]ShortcutInfo(nil), state.Shortcuts...)
+	if c := shortcutCache.Load(); c != nil {
+		return *c
+	}
+	files := host.ListShortcutFiles()
+	list := make([]ShortcutInfo, 0, len(files))
+	for _, f := range files {
+		entries, err := parseBundleToken(f.Token)
+		if err != nil {
+			log.Warn().Err(err).Str("path", f.Path).Msg("unreadable shortcut token, skipping")
+			continue
+		}
+		if f.Name == "" {
+			f.Name = f.Path
+		}
+		list = append(list, ShortcutInfo{Name: f.Name, Entries: entries, File: f.Path})
+	}
+	sort.Slice(list, func(i, j int) bool { return list[i].Name < list[j].Name })
+	shortcutCache.Store(&list)
+	return list
 }
 
-func shortcutByName(name string) (*ShortcutInfo, int) {
-	for i, s := range state.Shortcuts {
+func reloadShortcuts() { shortcutCache.Store(nil) }
+
+func shortcutByName(name string) *ShortcutInfo {
+	for _, s := range shortcuts() {
 		if s.Name == name {
-			return &state.Shortcuts[i], i
+			s := s
+			return &s
 		}
 	}
-	return nil, -1
+	return nil
 }
 
-// CreateShortcut stores a shortcut and gives it an OS shortcut file on this
-// platform. An existing shortcut with the same name is replaced. entries is
-// a JSON-encoded []ShortcutEntry.
+// CreateShortcut gives a bundle an OS shortcut file on this platform. An
+// existing shortcut with the same name is replaced. entries is a
+// JSON-encoded []ShortcutEntry.
 func CreateShortcut(name string, entries string) error {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -176,51 +207,33 @@ func CreateShortcut(name string, entries string) error {
 		return err
 	}
 
-	stateMu.Lock()
-	info := ShortcutInfo{Name: name, Entries: parsed, File: file}
-	replaced := false
-	for i := range state.Shortcuts {
-		if state.Shortcuts[i].Name == name {
-			if state.Shortcuts[i].File != "" && state.Shortcuts[i].File != file {
-				stateMu.Unlock()
-				host.DeleteShortcutFile(state.Shortcuts[i].File)
-				stateMu.Lock()
-			}
-			state.Shortcuts[i] = info
-			replaced = true
+	// The file we just wrote is what the list now reads from, and re-using a
+	// name can land on a different file (a rename): the old one goes.
+	if old := shortcutByName(name); old != nil && old.File != "" && old.File != file {
+		if err := host.DeleteShortcutFile(old.File); err != nil {
+			log.Warn().Err(err).Str("path", old.File).Msg("could not remove the replaced shortcut file")
 		}
 	}
-	if !replaced {
-		state.Shortcuts = append(state.Shortcuts, info)
-	}
-	saveState()
-	stateMu.Unlock()
+
+	reloadShortcuts()
 	notifyState()
 	log.Info().Str("name", name).Int("entries", len(parsed)).Str("file", file).Msg("bundle shortcut created")
 	return nil
 }
 
-// DeleteShortcut forgets a shortcut and removes its OS shortcut file.
+// DeleteShortcut removes a shortcut's OS shortcut file, which is all a
+// shortcut is.
 func DeleteShortcut(name string) error {
-	stateMu.Lock()
-	idx := -1
-	for i := range state.Shortcuts {
-		if state.Shortcuts[i].Name == name {
-			idx = i
-		}
-	}
-	if idx == -1 {
-		stateMu.Unlock()
+	sc := shortcutByName(name)
+	if sc == nil {
 		return nil
 	}
-	file := state.Shortcuts[idx].File
-	state.Shortcuts = append(state.Shortcuts[:idx], state.Shortcuts[idx+1:]...)
-	saveState()
-	stateMu.Unlock()
-
-	if file != "" {
-		host.DeleteShortcutFile(file)
+	if sc.File != "" {
+		if err := host.DeleteShortcutFile(sc.File); err != nil {
+			return err
+		}
 	}
+	reloadShortcuts()
 	notifyState()
 	log.Info().Str("name", name).Msg("bundle shortcut deleted")
 	return nil

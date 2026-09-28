@@ -66,6 +66,21 @@ type actionRequest struct {
 	payload json.RawMessage
 }
 
+// windowRecord is what the launcher remembers about a window it has opened
+// this run: its instance, the napp it runs, and the actions dispatched into it
+// so a window closed and reopened lands back where it was. Session state, not
+// persisted: nothing here survives the launcher quitting.
+type windowRecord struct {
+	Instance string
+	NappID   string
+	Actions  []recordedAction
+}
+
+type recordedAction struct {
+	Name    string
+	Payload json.RawMessage
+}
+
 // ID is the instance id the napp knows itself by.
 func (ci *Instance) ID() string { return ci.instance }
 
@@ -77,7 +92,12 @@ var (
 	instances      []*Instance
 	instanceSerial atomic.Int64
 	windowSerial   atomic.Int64
-	shuttingDown   atomic.Bool
+
+	// windows is every window opened this run, keyed by instance: the open
+	// ones plus the closed ones still listed for reopening. A window is
+	// closed when its instance is gone from instances.
+	windowsMu sync.Mutex
+	windows   = make(map[string]windowRecord)
 )
 
 // ─── registry ────────────────────────────────────────────────────
@@ -146,21 +166,21 @@ func ManagedWindows() []WindowInfo {
 		byID[w.Instance] = w
 	}
 	var closed []WindowInfo
-	for _, saved := range savedWindows() {
-		if _, ok := byID[saved.Instance]; ok {
+	for _, rec := range windowRecords() {
+		if _, ok := byID[rec.Instance]; ok {
 			continue
 		}
-		napp, ok := InstalledNapp(saved.NappID)
+		napp, ok := InstalledNapp(rec.NappID)
 		if !ok {
 			continue
 		}
-		info := WindowInfo{Instance: saved.Instance, NappID: saved.NappID, Name: napp.Label(), Open: false}
-		if len(saved.Actions) > 0 {
-			info.Action = saved.Actions[len(saved.Actions)-1].Name
+		info := WindowInfo{Instance: rec.Instance, NappID: rec.NappID, Name: napp.Label(), Open: false}
+		if len(rec.Actions) > 0 {
+			info.Action = rec.Actions[len(rec.Actions)-1].Name
 		}
 		closed = append(closed, info)
 	}
-	// savedWindows walks a map: sort the closed ones or they jump around
+	// windowRecords walks a map: sort the closed ones or they jump around
 	// between frames and the list flickers.
 	sort.Slice(closed, func(i, j int) bool {
 		if closed[i].Name != closed[j].Name {
@@ -224,7 +244,6 @@ func (ci *Instance) Close() {
 
 // CloseWindow closes an instance by id.
 func CloseWindow(instance string) {
-	markWindowClosed(instance)
 	if ci := lookupInstance(instance); ci != nil {
 		ci.Close()
 	}
@@ -232,7 +251,6 @@ func CloseWindow(instance string) {
 
 // CloseAllWindows closes every open napp, for a launcher shutting down.
 func CloseAllWindows() {
-	shuttingDown.Store(true)
 	open := allInstances()
 	for _, ci := range open {
 		ci.Close()
@@ -313,9 +331,6 @@ func WindowClosed(instance string) {
 		}
 	}
 	instancesMu.Unlock()
-	if !shuttingDown.Load() && !host.RestoreAllWindows() {
-		markWindowClosed(instance)
-	}
 	log.Info().Str("instance", ci.instance).Str("napp", ci.napp.ID).Msg("napp window closed")
 	notifyState()
 }
@@ -488,57 +503,76 @@ func launchWithInstance(ctx context.Context, napp Napp, requestedInstance string
 	return ci, nil
 }
 
-func savedWindow(instance string) *SavedWindow {
-	for _, w := range savedWindows() {
-		if w.Instance == instance {
-			return &w
-		}
+// ─── window records ───────────────────────────────────────────────
+
+func windowRecords() []windowRecord {
+	windowsMu.Lock()
+	defer windowsMu.Unlock()
+	out := make([]windowRecord, 0, len(windows))
+	for _, w := range windows {
+		w.Actions = append([]recordedAction(nil), w.Actions...)
+		out = append(out, w)
 	}
-	return nil
+	return out
 }
 
+func lookupWindow(instance string) *windowRecord {
+	windowsMu.Lock()
+	defer windowsMu.Unlock()
+	w, ok := windows[instance]
+	if !ok {
+		return nil
+	}
+	w.Actions = append([]recordedAction(nil), w.Actions...)
+	return &w
+}
+
+func putWindow(w windowRecord) {
+	windowsMu.Lock()
+	windows[w.Instance] = w
+	windowsMu.Unlock()
+}
+
+// rememberWindow starts the record of a window that just came up, keeping the
+// actions a previous window with the same instance id had reached (a singleton
+// reopened under its own id).
 func rememberWindow(ci *Instance) {
-	w := SavedWindow{Instance: ci.instance, NappID: ci.napp.ID}
-	if old := savedWindow(ci.instance); old != nil {
+	w := windowRecord{Instance: ci.instance, NappID: ci.napp.ID}
+	if old := lookupWindow(ci.instance); old != nil {
 		w.Actions = old.Actions
 	}
-	saveWindow(w)
-}
-
-func markWindowClosed(instance string) {
-	if w := savedWindow(instance); w != nil {
-		w.Closed = true
-		saveWindow(*w)
-	}
+	putWindow(w)
 }
 
 func ReopenWindow(instance string) {
-	for _, saved := range savedWindows() {
-		if saved.Instance != instance {
+	for _, rec := range windowRecords() {
+		if rec.Instance != instance {
 			continue
 		}
-		napp, ok := InstalledNapp(saved.NappID)
+		napp, ok := InstalledNapp(rec.NappID)
 		if !ok {
 			return
 		}
-		go func(saved SavedWindow, napp Napp) {
-			ci, err := launchWithInstance(context.Background(), napp, saved.Instance)
+		go func(rec windowRecord, napp Napp) {
+			ci, err := launchWithInstance(context.Background(), napp, rec.Instance)
 			if err != nil {
-				log.Warn().Err(err).Str("instance", saved.Instance).Msg("could not reopen napp window")
+				log.Warn().Err(err).Str("instance", rec.Instance).Msg("could not reopen napp window")
 				return
 			}
-			replaySaved(ci, saved)
-		}(saved, napp)
+			replayActions(ci, rec)
+		}(rec, napp)
 		return
 	}
 }
 
-func replaySaved(ci *Instance, saved SavedWindow) {
+// replayActions puts a reopened window back where the one that closed had
+// navigated to, by re-dispatching the actions it was last sent.
+func replayActions(ci *Instance, rec windowRecord) {
 	ci.replaying.Store(true)
 	defer ci.replaying.Store(false)
-	for _, action := range saved.Actions {
+	for _, action := range rec.Actions {
 		if _, err := dispatchToInstance(context.Background(), ci, &actionRequest{name: action.Name, payload: action.Payload}); err != nil {
-			log.Warn().Err(err).Str("instance", saved.Instance).Msg("could not replay napp action")
+			log.Warn().Err(err).Str("instance", rec.Instance).Msg("could not replay napp action")
 			break
 		}
 	}
@@ -548,12 +582,12 @@ func recordAction(ci *Instance, req *actionRequest) {
 	if ci.replaying.Load() {
 		return
 	}
-	w := savedWindow(ci.instance)
+	w := lookupWindow(ci.instance)
 	if w == nil {
-		w = &SavedWindow{Instance: ci.instance, NappID: ci.napp.ID}
+		w = &windowRecord{Instance: ci.instance, NappID: ci.napp.ID}
 	}
-	w.Actions = append(w.Actions, SavedAction{Name: req.name, Payload: append(json.RawMessage(nil), req.payload...)})
-	saveWindow(*w)
+	w.Actions = append(w.Actions, recordedAction{Name: req.name, Payload: append(json.RawMessage(nil), req.payload...)})
+	putWindow(*w)
 }
 
 // ─── action dispatch ─────────────────────────────────────────────

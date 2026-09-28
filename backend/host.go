@@ -16,7 +16,6 @@ type Host interface {
 	// The platform must call WindowClosed when the window goes away and
 	// HandleWireMessage for everything the napp's bridge sends up.
 	OpenWindow(spec WindowSpec) (Transport, error)
-	RestoreAllWindows() bool
 
 	// StateChanged says the launcher's State() changed and whatever renders
 	// it should render it again.
@@ -48,6 +47,20 @@ type Host interface {
 
 	// DeleteShortcutFile removes a shortcut file this host wrote before.
 	DeleteShortcutFile(path string) error
+
+	// ListShortcutFiles reads back every bundle shortcut this launcher wrote
+	// before: the OS shortcut files are where shortcuts live, so this is
+	// where the launcher rediscovers them. Anything unreadable or unparseable
+	// is left out. Nothing where there are no OS shortcuts.
+	ListShortcutFiles() []ShortcutFile
+}
+
+// ShortcutFile is one bundle shortcut found on disk: the name the user gave
+// it, the file it is (to delete it) and the token it runs.
+type ShortcutFile struct {
+	Name  string
+	Path  string
+	Token string
 }
 
 // Transport is one napp window, seen from the backend: a place to send wire
@@ -102,7 +115,6 @@ type noopHost struct{}
 func (noopHost) OpenWindow(WindowSpec) (Transport, error) {
 	return nil, errors.New("this host cannot open windows")
 }
-func (noopHost) RestoreAllWindows() bool                 { return false }
 func (noopHost) StateChanged()                           {}
 func (noopHost) PromptsChanged()                         {}
 func (noopHost) CopyText(string) error                   { return errors.New("no clipboard") }
@@ -112,4 +124,5 @@ func (noopHost) OpenLink(string) error                   { return errors.New("no
 func (noopHost) CreateShortcutFile(string, string) (string, error) {
 	return "", errors.New("no shortcuts here")
 }
-func (noopHost) DeleteShortcutFile(string) error { return nil }
+func (noopHost) DeleteShortcutFile(string) error   { return nil }
+func (noopHost) ListShortcutFiles() []ShortcutFile { return nil }

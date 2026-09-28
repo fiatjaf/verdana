@@ -7,9 +7,15 @@ import (
 	"strings"
 )
 
-// Shared scratch for the OS shortcut file writers (shortcutfile_<goos>.go):
-// a predictable filename slug — the bundle name may be any string — and
-// whatever purified-air pokes the desktop environments need.
+// Shared scratch for the OS shortcut file writers and readers
+// (shortcutfile_<goos>.go): the prefix every file we write carries, a
+// predictable filename slug — the bundle name may be any string — and whatever
+// purified-air pokes the desktop environments need.
+
+// shortcutPrefix is the first thing every file name we write starts with, so
+// reading them back is "everything in the shortcut folder that starts with
+// this" and a stranger's file is never mistaken for ours.
+const shortcutPrefix = "verdana-"
 
 // shortcutSlug turns a bundle name into a filename-friendly, lowercase slug
 // with a short hash suffix, so a renamed shortcut writes a fresh file while

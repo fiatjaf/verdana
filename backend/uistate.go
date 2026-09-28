@@ -68,12 +68,14 @@ type State struct {
 	// Windows are the napp instances currently open.
 	Windows []WindowInfo `json:"windows"`
 
-	// ManagedWindows includes open and saved desktop windows. Closed entries
-	// stay visible so they can be reopened without losing their state.
+	// ManagedWindows includes the open windows and the ones closed earlier
+	// in this run. Closed entries stay visible so they can be reopened
+	// without losing their state; nothing here outlives the launcher.
 	ManagedWindows []WindowInfo `json:"managedWindows"`
 
-	// Shortcuts are the bundle shortcuts the user created (see
-	// shortcuts.go), listed on the Windows screen with edit and delete.
+	// Shortcuts are the bundle shortcuts that exist, read back from their OS
+	// shortcut files (see shortcuts.go), listed on the Windows screen with
+	// edit and delete.
 	Shortcuts []ShortcutInfo `json:"shortcuts"`
 }
 

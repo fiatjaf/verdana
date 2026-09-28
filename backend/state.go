@@ -28,24 +28,6 @@ type AppState struct {
 	// Theme is "light" or "dark": what the launcher draws with and what
 	// every napp window is told to track.
 	Theme string `json:"theme"`
-	// Windows are every window the launcher has ever kept state for (open,
-	// closed, whatever): their instance ids and replayable actions.
-	Windows map[string]SavedWindow `json:"windows"`
-
-	// Shortcuts are the bundle shortcuts the user created, whose OS
-	// shortcut files call the launcher back with a bundle token.
-	Shortcuts []ShortcutInfo `json:"shortcuts"`
-}
-
-type SavedAction struct {
-	Name    string          `json:"name"`
-	Payload json.RawMessage `json:"payload"`
-}
-type SavedWindow struct {
-	Instance string        `json:"instance"`
-	NappID   string        `json:"napp_id"`
-	Closed   bool          `json:"closed"`
-	Actions  []SavedAction `json:"actions"`
 }
 
 var (
@@ -55,6 +37,8 @@ var (
 )
 
 func loadState() {
+	// the shortcut list is read from the files, not from here
+	reloadShortcuts()
 	statePath = filepath.Join(dataDir, "state.json")
 	data, err := os.ReadFile(statePath)
 	if err == nil {
@@ -81,30 +65,9 @@ func loadState() {
 	if state.Theme != "light" && state.Theme != "dark" {
 		state.Theme = "light"
 	}
-	if state.Windows == nil {
-		state.Windows = make(map[string]SavedWindow)
-	}
 	themeName = state.Theme
 	saveState()
 	log.Info().Int("napps", len(state.InstalledNapps)).Msg("state loaded")
-}
-
-func savedWindows() []SavedWindow {
-	stateMu.Lock()
-	defer stateMu.Unlock()
-	out := make([]SavedWindow, 0, len(state.Windows))
-	for _, w := range state.Windows {
-		w.Actions = append([]SavedAction(nil), w.Actions...)
-		out = append(out, w)
-	}
-	return out
-}
-
-func saveWindow(w SavedWindow) {
-	stateMu.Lock()
-	state.Windows[w.Instance] = w
-	saveState()
-	stateMu.Unlock()
 }
 
 // saveState must be called with stateMu held.

@@ -21,7 +21,6 @@ type gioHost struct{}
 func (gioHost) OpenWindow(spec backend.WindowSpec) (backend.Transport, error) {
 	return startChild(spec)
 }
-func (gioHost) RestoreAllWindows() bool { return false }
 
 func (gioHost) StateChanged() {
 	if gioWin != nil {
@@ -90,16 +89,22 @@ func (gioHost) CreateShortcutFile(name, token string) (string, error) {
 }
 
 func (gioHost) DeleteShortcutFile(path string) error {
-	if err := os.Remove(path); err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
+	if err := deleteShortcutFile(path); err != nil {
 		return err
 	}
 	// refresh what the desktop environment has indexed, when one exists
 	refreshShortcutParent(filepath.Dir(path))
 	log.Info().Str("path", path).Msg("removed shortcut file")
 	return nil
+}
+
+// ListShortcutFiles reads back every verdana shortcut in the OS shortcut
+// folder, the file being the whole record: the bundle's name, and the token it
+// runs.
+func (gioHost) ListShortcutFiles() []backend.ShortcutFile {
+	files := listShortcutFiles()
+	log.Info().Int("count", len(files)).Msg("shortcut files found")
+	return files
 }
 
 func (gioHost) OpenLink(url string) error {

@@ -75,7 +75,6 @@ func (h mobileHost) OpenWindow(spec backend.WindowSpec) (backend.Transport, erro
 	}
 	return mobileTransport{ui: h.ui, instance: spec.Instance}, nil
 }
-func (h mobileHost) RestoreAllWindows() bool { return true }
 
 func (h mobileHost) StateChanged()                               { h.ui.StateChanged() }
 func (h mobileHost) PromptsChanged()                             { h.ui.PromptsChanged() }
@@ -89,7 +88,8 @@ func (h mobileHost) SaveFile(n string, d []byte) (string, error) { return h.ui.S
 func (h mobileHost) CreateShortcutFile(string, string) (string, error) {
 	return "", errors.New("shortcut files are a desktop concept")
 }
-func (h mobileHost) DeleteShortcutFile(string) error { return nil }
+func (h mobileHost) DeleteShortcutFile(string) error           { return nil }
+func (h mobileHost) ListShortcutFiles() []backend.ShortcutFile { return nil }
 
 type mobileTransport struct {
 	ui       UI
