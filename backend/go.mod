@@ -59,3 +59,5 @@ require (
 )
 
 replace github.com/PowerDNS/lmdb-go => github.com/fiatjaf/lmdb-go v0.0.0-20241216175215-ce7e8c333ddb
+
+replace github.com/wizenheimer/blaze => github.com/fiatjaf/blaze v0.0.0-20260928142946-49abb01b1a4b

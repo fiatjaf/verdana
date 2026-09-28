@@ -74,3 +74,5 @@ require (
 )
 
 replace verdana/backend => ../backend
+
+replace github.com/wizenheimer/blaze => github.com/fiatjaf/blaze v0.0.0-20260928142946-49abb01b1a4b
