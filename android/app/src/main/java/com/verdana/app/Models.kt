@@ -17,7 +17,6 @@ data class Napp(
     val authorName: String,
     val actions: List<String>,
     val requires: List<String>,
-    val singleton: Boolean,
     val paths: List<NappPath>,
     val updateAvailable: Boolean = false,
 )
@@ -77,7 +76,6 @@ fun parseState(json: String): LauncherState {
                 requires = (0 until (n.optJSONArray("requires")?.length() ?: 0)).map {
                     n.optJSONArray("requires")!!.getString(it)
                 },
-                singleton = n.optBoolean("singleton"),
                 // backend carries newer event object here; presence is flag.
                 updateAvailable = n.has("updateAvailable") && !n.isNull("updateAvailable"),
                 paths = (0 until pathsArr.length()).map {

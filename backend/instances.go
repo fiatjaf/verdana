@@ -24,7 +24,7 @@ import (
 
 type Instance struct {
 	// instance is what the napp sees as window.napp.instance: a serial,
-	// unique per window — or the napp's own id when it declares `singleton`.
+	// unique per window.
 	instance string
 	number   int
 	napp     Napp
@@ -202,15 +202,6 @@ func ManagedWindows() []WindowInfo {
 		return closed[i].Instance < closed[j].Instance
 	})
 	return append(active, closed...)
-}
-
-// nextInstanceID is the napp's own id when it is a singleton (stable across
-// launches, as behavior.md promises) and a serial otherwise.
-func nextInstanceID(n Napp) string {
-	if n.Singleton {
-		return n.ID
-	}
-	return strconv.FormatInt(instanceSerial.Add(1), 10)
 }
 
 // ─── talking to a window ─────────────────────────────────────────
@@ -432,8 +423,7 @@ func LaunchByID(id string) {
 	SetFetchErr("napp " + id + " is not installed")
 }
 
-// launch opens a napp window and returns its instance. A singleton that is
-// already open is surfaced instead of opened again.
+// launch opens a napp window and returns its instance.
 func launch(ctx context.Context, napp Napp) (*Instance, error) {
 	return launchWithInstance(ctx, napp, "")
 }
@@ -442,13 +432,6 @@ func launchWithInstance(ctx context.Context, napp Napp, requestedInstance string
 	id := napp.ID
 	if id == "" {
 		return nil, errors.New("napp has no id")
-	}
-
-	if napp.Singleton {
-		if ci := lookupInstance(id); ci != nil {
-			log.Info().Str("napp", id).Msg("singleton already open, reusing it")
-			return ci, nil
-		}
 	}
 
 	appDir := nappBaseDir(id)
@@ -473,7 +456,7 @@ func launchWithInstance(ctx context.Context, napp Napp, requestedInstance string
 	winW, winH := napp.WindowSize()
 	instance := requestedInstance
 	if instance == "" {
-		instance = nextInstanceID(napp)
+		instance = strconv.FormatInt(instanceSerial.Add(1), 10)
 	}
 	ci := &Instance{
 		instance:   instance,
@@ -555,8 +538,8 @@ func putWindow(w windowRecord) {
 }
 
 // rememberWindow starts the record of a window that just came up, keeping the
-// actions a previous window with the same instance id had reached (a singleton
-// reopened under its own id).
+// actions a previous window with the same instance id had reached (a reopen
+// landing on the same id).
 func rememberWindow(ci *Instance) {
 	w := windowRecord{Instance: ci.instance, NappID: ci.napp.ID}
 	if old := lookupWindow(ci.instance); old != nil {

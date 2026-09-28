@@ -169,9 +169,6 @@ func PublishDev(ctx context.Context, id string, servers, relays []string, protec
 	for _, requirement := range napp.Requires {
 		tags = append(tags, nostr.Tag{"requires", requirement})
 	}
-	if napp.Singleton {
-		tags = append(tags, nostr.Tag{"singleton"})
-	}
 	if napp.InitialSize != nil {
 		if s, ok := sanitizeInitialSize(napp.InitialSize.Width, napp.InitialSize.Height); ok {
 			tags = append(tags, nostr.Tag{"initial_size", strconv.Itoa(s.Width), strconv.Itoa(s.Height)})

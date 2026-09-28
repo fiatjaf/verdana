@@ -40,7 +40,6 @@ type devMetadata struct {
 	Title       string   `json:"title"`
 	Icon        string   `json:"icon"`
 	Description string   `json:"description"`
-	Singleton   bool     `json:"singleton"`
 	Requires    []string `json:"requires"`
 	Actions     []string `json:"actions"`
 
@@ -139,7 +138,6 @@ func nappFromDevMetadata(meta devMetadata) (Napp, error) {
 		Name:        name,
 		Description: meta.Description,
 		Icon:        meta.Icon,
-		Singleton:   meta.Singleton,
 		InitialSize: initial,
 		Requires:    append([]string(nil), meta.Requires...),
 		Actions:     append([]string(nil), meta.Actions...),

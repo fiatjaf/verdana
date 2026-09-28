@@ -91,11 +91,6 @@ class MainActivity : ComponentActivity(), UI {
 
     override fun openWindow(instance: String, specJSON: String) {
         runOnUiThread {
-            if (tabs.containsKey(instance)) {
-                // singleton re-adopt: jump to the one already open
-                activateTab(instance)
-                return@runOnUiThread
-            }
             val spec = WindowSpec(specJSON)
             val shell = NappWebView(this, instance, spec.name, spec)
             (shell.view.parent as? ViewGroup)?.removeView(shell.view)

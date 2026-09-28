@@ -242,9 +242,6 @@ func layoutPublishForm(gtx layout.Context, th *material.Theme, form, logList *wi
 							return publishMetaRow(gtx, th, "icon", info.Napp.Icon)
 						}),
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return publishMetaRow(gtx, th, "singleton", fmt.Sprint(info.Napp.Singleton))
-						}),
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 							return publishMetaRow(gtx, th, "requires", strings.Join(info.Napp.Requires, ", "))
 						}),
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {

@@ -68,10 +68,6 @@ func nappFromEvent(evt nostr.Event) Napp {
 			continue
 		}
 
-		if tag[0] == "singleton" {
-			n.Singleton = true
-		}
-
 		if len(tag) < 2 {
 			continue
 		}

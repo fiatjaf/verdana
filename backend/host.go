@@ -77,8 +77,7 @@ type Transport interface {
 
 // WindowSpec is what a platform needs to know to show a napp.
 type WindowSpec struct {
-	// Instance is window.napp.instance: a serial, or the napp's id when it
-	// declares `singleton`.
+	// Instance is window.napp.instance: a serial, unique per window.
 	Instance string
 	// Number is the desktop-facing window number, stable for this open window.
 	Number int

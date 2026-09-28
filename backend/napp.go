@@ -78,7 +78,6 @@ type Napp struct {
 	AuthorName  string           `json:"authorName,omitempty"`
 	Actions     []string         `json:"actions"`
 	Requires    []string         `json:"requires"`
-	Singleton   bool             `json:"singleton"`
 	InitialSize *NappInitialSize `json:"initialSize,omitempty"`
 	CreatedAt   nostr.Timestamp  `json:"created_at"`
 	Paths       []NappPath       `json:"paths"`
