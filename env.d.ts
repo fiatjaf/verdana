@@ -323,6 +323,144 @@ type Napp = {
   nip19: NappNip19
   /** Sync misc helpers (hex / coordinates / bolt11). */
   fx: NappFx
+  /**
+   * The ui kit's helpers, for napps that declare `requires: ["ui"]`. Each one
+   * builds a plain element with the kit's classes on it; none of them is
+   * needed to use the kit. See "The ui kit" at the bottom of this file.
+   */
+  ui?: NappUi
+}
+
+/** What a kit helper is given, and what it hands back. */
+type NappButtonOpts = {
+  label?: string
+  /** "accent" | "danger" | "quiet" | "plain" — the default is the neutral one. */
+  variant?: "accent" | "danger" | "quiet" | "plain"
+  /** One of the kit's glyph names, drawn before the label. */
+  icon?: string
+  /** The tooltip, and the name an icon-only button has. */
+  title?: string
+  disabled?: boolean
+  type?: string
+  className?: string
+  onClick?: (e: Event) => void
+}
+
+type NappChipOpts = {
+  label: string
+  active?: boolean
+  icon?: string
+  title?: string
+  className?: string
+  onClick?: (e: Event) => void
+}
+
+type NappTabsOpts = {
+  items: (string | { value: string; label: string })[]
+  active?: string
+  onChange?: (value: string) => void
+  className?: string
+}
+
+type NappUi = {
+  /** el(tag, className, ...children): children are elements or text. */
+  el: (tag: string, className?: string, ...children: (Node | string | null)[]) => HTMLElement
+  /** stack: a column. bar: a row of controls. card: a plate. */
+  stack: (...children: (Node | string)[]) => HTMLElement
+  bar: (...children: (Node | string)[]) => HTMLElement
+  card: (...children: (Node | string)[]) => HTMLElement
+  rule: () => HTMLElement
+  /** The voices: a title, a name, the grey under it, an italic label. */
+  title: (value: string) => HTMLElement
+  heading: (value: string) => HTMLElement
+  caption: (value: string) => HTMLElement
+  hint: (value: string) => HTMLElement
+  mono: (value: string) => HTMLElement
+  code: (value: string) => HTMLElement
+  codeBlock: (value: string) => HTMLElement
+  empty: (value: string) => HTMLElement
+  button: (opts?: NappButtonOpts) => HTMLButtonElement
+  chip: (opts: NappChipOpts) => HTMLButtonElement
+  /** The row, plus select(value) and the value itself. */
+  tabs: (opts: NappTabsOpts) => HTMLElement & {
+    value: string
+    select: (value: string) => void
+  }
+  input: (opts?: {
+    type?: string
+    placeholder?: string
+    value?: string
+    className?: string
+  }) => HTMLInputElement
+  textarea: (opts?: {
+    placeholder?: string
+    value?: string
+    rows?: number
+    className?: string
+  }) => HTMLTextAreaElement
+  /** field wraps its control in a label, so the words focus it. */
+  field: (opts: {
+    label?: string
+    control?: HTMLElement
+    note?: string
+    className?: string
+  }) => HTMLElement
+  check: (opts?: {
+    label?: string
+    note?: string
+    checked?: boolean
+    title?: string
+    onChange?: (checked: boolean) => void
+  }) => HTMLElement & { input: HTMLInputElement }
+  radios: (opts: {
+    name?: string
+    options: (string | { value: string; label?: string; note?: string })[]
+    value?: string
+    onChange?: (value: string) => void
+  }) => HTMLElement
+  details: (
+    opts: { summary: string | Node | (string | Node)[]; open?: boolean; className?: string },
+    ...children: (Node | string)[]
+  ) => HTMLDetailsElement
+  /** rowList() and row() make rows that open, one at a time. */
+  rowList: (className?: string) => HTMLElement & {
+    row: (...summary: (string | Node)[]) => HTMLDetailsElement
+  }
+  /**
+   * list() draws the rows and the add line; label(item) is the text and
+   * controls(item) what sits at the row's end. It has add(item), delete(item)
+   * and the items it holds.
+   */
+  list: (opts: {
+    items?: unknown[]
+    label?: (item: any) => string
+    mono?: boolean
+    controls?: (item: any, list: any) => Node | Node[]
+    add?: { label: string; placeholder?: string; onAdd: (value: string) => string | void }
+    empty?: string
+    className?: string
+  }) => HTMLElement & {
+    items: unknown[]
+    add: (item: unknown) => void
+    delete: (item: unknown) => void
+  }
+  /** tone: "warn" (the default) | "danger" | "info". */
+  notice: (
+    message: string,
+    opts?: { tone?: "warn" | "danger" | "info"; icon?: string | null }
+  ) => HTMLElement
+  /** tone: "accent" | "danger" | "dev". */
+  badge: (label: string, opts?: { tone?: "accent" | "danger" | "dev" }) => HTMLElement
+  icon: (name: string) => HTMLElement
+  /** size: "s" | "m" | "l" | "xl". fade eases the image in. */
+  appIcon: (opts?: { src?: string; size?: string; fade?: boolean; alt?: string }) => HTMLElement & {
+    img: HTMLImageElement
+  }
+  links: (...children: (Node | string)[]) => HTMLElement
+  /** busy(node) breathes it; busy(node, false) stops. */
+  busy: <T extends HTMLElement>(node: T, on?: boolean) => T
+  /** A ring 1em across: make it bigger through a font-size. */
+  spinner: () => HTMLElement
 }
 
 // ── Augment global Window ────────────────────────────────────────────────
@@ -331,3 +469,42 @@ interface Window {
   nostrdb: NostrDB
   napp: Napp
 }
+
+// ── The ui kit ───────────────────────────────────────────────────────────
+//
+// "requires": ["ui"] in metadata.json makes the launcher put its kit
+// (napp-ui.css) in the page, ahead of the napp's own styles. It is classes
+// only — no script, nothing to call — so plain markup looks like the
+// launcher, and a napp that disagrees with the kit wins. The colors are the
+// launcher's own tokens, set on <html> as --surface, --surface-alt, --text,
+// --text-muted, --text-faint, --border, --chip, --chip-text, --accent,
+// --accent-text, --danger, --dev and --dev-text, and they follow the theme
+// the user picked.
+//
+// A class says how a thing looks, never where it goes: width, margins and
+// placement are the parent's business.
+//
+//   layout   v-col (a column) · v-bar (a row) · v-card (a plate) · v-rule
+//   type     v-title · v-heading · v-caption · v-hint (italic) · v-mono
+//   buttons  v-btn, and v-btn--accent | --danger | --quiet | --plain
+//   chips    v-chip, v-chip--on (the picked one)
+//   tabs     v-tabs, v-tab, v-tab--on
+//   fields   v-input · v-field (with v-field-note)
+//   checks   v-check · v-radio · v-check-label (with v-check-text,
+//            v-check-note) · v-radios
+//   lists    v-items · v-item · v-item-label (--mono) · v-add (with
+//            v-add-error) · v-rows · v-row
+//   folding  v-disclosure (a <details>) · v-empty
+//   code     v-code (inline) · v-codeblock (a <pre>)
+//   badges   v-badge, v-badge--accent | --danger | --dev
+//   icons    v-icon with v-icon-<name>: check, x, plus, minus, chevron,
+//            arrow, trash, reload, search, external, warning, info, star,
+//            copy, folder, user, home, settings, sun, moon, bolt, link,
+//            save, window
+//   images   v-appicon with v-appicon--s | --m | --l | --xl, --fade
+//   notices  v-notice with v-notice--warn | --danger | --info
+//   more     v-links · v-busy · v-spinner
+
+// The kit's own measurements, for a napp that wants them: --v-gap,
+// --v-gap-tight, --v-gap-loose, --v-pad, --v-pad-loose, --v-radius,
+// --v-radius-field, --v-radius-card, --v-radius-dialog, --v-fast, --v-ease.

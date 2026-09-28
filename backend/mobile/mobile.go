@@ -128,6 +128,17 @@ func Stop() {
 // navigation: it installs window.nostr, window.nostrdb and window.napp.
 func BridgeJS() string { return webview.JS() }
 
+// UIKit is the script that puts the napp-ui kit in the page, for the napps
+// whose metadata.json asks for it with `requires: ["ui"]`, and "" for the
+// others. requiresJSON is that list as a JSON array, as OpenWindow carries it.
+func UIKit(requiresJSON string) string {
+	var requires []string
+	if err := json.Unmarshal([]byte(requiresJSON), &requires); err != nil {
+		return ""
+	}
+	return webview.UIKitScript(requires)
+}
+
 // ─── what the UI renders ─────────────────────────────────────────
 
 // State is the launcher as JSON: phase, login error, profile, relays, the

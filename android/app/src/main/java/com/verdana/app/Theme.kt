@@ -26,6 +26,8 @@ data class Theme(
     val danger: Color,
     val imageBg: Color,
     val inputHint: Color,
+    val devBg: Color,
+    val devFg: Color,
 )
 
 fun cssHex(c: Color): String = String.format(
@@ -52,6 +54,8 @@ val lightTheme = Theme(
     danger = Color(0xFFCC2222),
     imageBg = Color(0xFFDDDDDD),
     inputHint = Color(0xFF999999),
+    devBg = Color(0xFFFFE5B4),
+    devFg = Color(0xFF704000),
 )
 
 val darkTheme = Theme(
@@ -71,6 +75,8 @@ val darkTheme = Theme(
     danger = Color(0xFFFF6B6B),
     imageBg = Color(0xFF33363D),
     inputHint = Color(0xFF6D717A),
+    devBg = Color(0xFF5A3B1A),
+    devFg = Color(0xFFFFD79A),
 )
 
 fun themeByName(name: String): Theme = if (name == "dark") darkTheme else lightTheme
@@ -86,9 +92,13 @@ fun themeVarsJSON(t: Theme): String {
         q("text-muted", cssHex(t.subtle)),
         q("text-faint", cssHex(t.muted)),
         q("border", cssHex(t.border)),
+        q("chip", cssHex(t.chipBg)),
+        q("chip-text", cssHex(t.chipFg)),
         q("accent", cssHex(t.accent)),
         q("accent-text", cssHex(t.accentText)),
         q("danger", cssHex(t.danger)),
+        q("dev", cssHex(t.devBg)),
+        q("dev-text", cssHex(t.devFg)),
     ).joinToString(",") + "}"
 }
 

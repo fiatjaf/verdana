@@ -107,14 +107,15 @@ class NappWebView(
         }
 
         // everything the page needs before any of its scripts run, on every
-        // navigation: identity (window.name), domains, theme, and the bridge
+        // navigation: identity (window.name), domains, theme, the ui kit for
+        // the napps that ask for it, and the bridge
         val origin = NappOrigins.originFor(instance)
         val init = "window.name = ${jsString(instance)};" +
             "window.__nappDomains = ${jsStringList(spec.requires)};" +
             themeInitScript(spec.theme, spec.themeVars)
         WebViewCompat.addDocumentStartJavaScript(
             view,
-            "$init\n${Mobile.bridgeJS()}",
+            "$init\n${Mobile.uiKit(jsStringList(spec.requires))}\n${Mobile.bridgeJS()}",
             setOf(origin),
         )
 

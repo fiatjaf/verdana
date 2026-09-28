@@ -1,0 +1,1032 @@
+/* napp-ui.css: Verdana's kit, for napps that declare `requires: ["ui"]`.
+ *
+ * The launcher injects this file into such a napp's page, ahead of the napp's
+ * own styles, so whatever the napp writes still wins. It is classes only: no
+ * script, no helpers, nothing to call. Plain markup with these classes looks
+ * like the launcher.
+ *
+ *   <button class="v-btn v-btn--accent">publish</button>
+ *   <div class="v-col"><div class="v-hint">relays</div>…</div>
+ *
+ * The look is the launcher's: flat plates, small corners, one filled accent
+ * for the action that matters, and a lot of grey. Colors are the launcher's
+ * own tokens (--surface, --chip, --accent, …), which bridge.js keeps current
+ * on <html> — so a kit follows the launcher's theme for free, and the values
+ * below only matter when nothing has spoken yet.
+ *
+ * As in the launcher's own layout, a class says how a thing looks and never
+ * where it goes: width, margins and placement belong to the parent. */
+
+/* ─── tokens ─────────────────────────────────────────────────────
+   The colors the launcher sends, and the kit's own measurements. A
+   custom property set inline on <html> (what bridge.js does) beats a
+   rule here, so these are the values a page falls back on. */
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-synthesis-weight: none;
+  --surface: #ffffff;
+  --surface-alt: #f2f2f2;
+  --text: #000000;
+  --text-muted: #666666;
+  --text-faint: #999999;
+  --border: #cccccc;
+  --chip: #e8e8e8;
+  --chip-text: #333333;
+  --accent: #3f51b5;
+  --accent-text: #ffffff;
+  --danger: #cc2222;
+  --dev: #ffe5b4;
+  --dev-text: #704000;
+  /* Corners: 4px is a control, 6px a field, 8px a card, 10px a dialog. */
+  --v-radius: 4px;
+  --v-radius-field: 6px;
+  --v-radius-card: 8px;
+  --v-radius-dialog: 10px;
+  /* Space: 4, 8, 12, 16, 20 — the launcher's own steps. */
+  --v-gap: 8px;
+  --v-gap-tight: 4px;
+  --v-gap-loose: 12px;
+  --v-pad: 8px;
+  --v-pad-loose: 12px;
+  /* Motion: the launcher is still, so only what a hover does. */
+  --v-fast: 120ms;
+  --v-ease: ease;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --surface: #17181b;
+    --surface-alt: #23252b;
+    --text: #e8e8ea;
+    --text-muted: #a0a4ad;
+    --text-faint: #7d818a;
+    --border: #3a3d45;
+    --chip: #2b2e35;
+    --chip-text: #d8d8dc;
+    --accent: #5c6bc0;
+    --accent-text: #ffffff;
+    --danger: #ff6b6b;
+    --dev: #5a3b1a;
+    --dev-text: #ffd79a;
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="dark"] {
+  --surface: #17181b;
+  --surface-alt: #23252b;
+  --text: #e8e8ea;
+  --text-muted: #a0a4ad;
+  --text-faint: #7d818a;
+  --border: #3a3d45;
+  --chip: #2b2e35;
+  --chip-text: #d8d8dc;
+  --accent: #5c6bc0;
+  --accent-text: #ffffff;
+  --danger: #ff6b6b;
+  --dev: #5a3b1a;
+  --dev-text: #ffd79a;
+  color-scheme: dark;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --v-fast: 0.01ms;
+  }
+}
+
+/* A page with no styles of its own still lands on the launcher's colors. */
+body {
+  background: var(--surface);
+  color: var(--text);
+}
+
+/* ─── layout ────────────────────────────────────────────────────
+   The two shapes everything is built from: a column and a row of
+   controls. Both only space their children. */
+.v-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--v-gap);
+  min-width: 0;
+}
+
+.v-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--v-gap);
+}
+
+/* A plate with something on it: a napp on a card, a group of settings. */
+.v-card {
+  padding: var(--v-pad-loose);
+  border-radius: var(--v-radius-card);
+  background: var(--surface-alt);
+  min-width: 0;
+}
+
+/* ─── type ──────────────────────────────────────────────────────
+   The launcher's voices: a bold title, a bold name, the small grey
+   under a name, the italic label over a field. */
+.v-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.v-heading {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.v-caption {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-faint);
+}
+
+.v-hint {
+  font-size: 13px;
+  font-style: italic;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
+/* Machine text: keys, addresses, ids. */
+.v-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+}
+
+/* ─── buttons ───────────────────────────────────────────────────
+   Filled plates, as everywhere in the launcher. The default is the
+   neutral one; --accent is the one action a screen is about. */
+.v-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  box-sizing: border-box;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: var(--v-radius);
+  background: var(--chip);
+  color: var(--chip-text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+  white-space: nowrap;
+  vertical-align: middle;
+  text-decoration: none;
+  cursor: pointer;
+  user-select: none;
+  flex-shrink: 0;
+  transition: filter var(--v-fast) var(--v-ease);
+}
+
+.v-btn:hover {
+  filter: brightness(0.94);
+}
+
+.v-btn:active {
+  filter: brightness(0.88);
+}
+
+.v-btn:disabled,
+.v-btn[aria-disabled="true"] {
+  opacity: 0.45;
+  cursor: default;
+  filter: none;
+}
+
+/* The main action: publish, save, install. */
+.v-btn--accent {
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 700;
+}
+
+/* Destructive, the launcher's way: the danger is in the words, not a
+   red plate. */
+.v-btn--danger {
+  background: var(--chip);
+  color: var(--danger);
+  font-weight: 700;
+}
+
+/* Nothing to click into, just an action: it shows on hover. */
+.v-btn--quiet {
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.v-btn--quiet:hover {
+  background: var(--chip);
+  color: var(--chip-text);
+}
+
+/* For actions inside a sentence: text, in the accent. */
+.v-btn--plain {
+  padding: 0;
+  background: transparent;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.v-btn--plain:hover {
+  filter: none;
+  text-decoration: underline;
+}
+
+/* ─── chips ─────────────────────────────────────────────────────
+   A small pick: a napp's actions, a filter, a view that's on. */
+.v-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  box-sizing: border-box;
+  max-width: 14rem;
+  padding: 3px 8px;
+  border: 0;
+  border-radius: var(--v-radius-field);
+  background: var(--chip);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  transition: filter var(--v-fast) var(--v-ease);
+}
+
+.v-chip:hover {
+  filter: brightness(0.94);
+}
+
+.v-chip--on {
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 700;
+}
+
+/* A long name crops with an ellipsis instead of widening its row; put
+   the whole thing in a title attribute to keep it reachable. */
+.v-chip > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ─── tabs ──────────────────────────────────────────────────────
+   A window's sections, the way the launcher's own bar does it: a row
+   of plates, the picked one filled. Toggle v-tab--on. */
+.v-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--v-gap);
+}
+
+.v-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-sizing: border-box;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: var(--v-radius);
+  background: var(--chip);
+  color: var(--chip-text);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.4;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  transition: filter var(--v-fast) var(--v-ease);
+}
+
+.v-tab:hover {
+  filter: brightness(0.94);
+}
+
+.v-tab--on {
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 700;
+}
+
+/* A count next to a tab, the launcher's grey on the filled plate. */
+.v-tab .v-caption {
+  color: inherit;
+  opacity: 0.7;
+}
+
+/* ─── fields ────────────────────────────────────────────────────
+   A bordered box, like the launcher's editors: radius 6, a 1px
+   border, 8px inside. */
+.v-input {
+  box-sizing: border-box;
+  min-width: 0;
+  padding: 7px var(--v-pad);
+  border: 1px solid var(--border);
+  border-radius: var(--v-radius-field);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+  transition: border-color var(--v-fast) var(--v-ease);
+}
+
+.v-input::placeholder {
+  color: var(--text-faint);
+}
+
+.v-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+textarea.v-input {
+  display: block;
+  width: 100%;
+  resize: vertical;
+}
+
+/* A labelled line: the italic label over the control, a note under. */
+.v-field {
+  display: grid;
+  gap: var(--v-gap-tight);
+  min-width: 0;
+}
+
+.v-field > .v-input {
+  width: 100%;
+}
+
+.v-field-note {
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+/* ─── checks and radios ─────────────────────────────────────────
+   16px, a 1px border, and the accent once it is on — the checkbox
+   the launcher's lists are full of. */
+.v-check {
+  appearance: none;
+  -webkit-appearance: none;
+  display: inline-grid;
+  place-content: center;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--v-radius);
+  background: var(--surface);
+  cursor: pointer;
+  transition:
+    background-color var(--v-fast) var(--v-ease),
+    border-color var(--v-fast) var(--v-ease);
+}
+
+.v-radio {
+  border-radius: 50%;
+}
+
+/* A radio takes a dot, not the checkbox's tick. */
+.v-radio::after {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--accent-text);
+  -webkit-mask: none;
+  mask: none;
+}
+
+.v-check::after {
+  content: "";
+  width: 12px;
+  height: 12px;
+  background-color: var(--accent-text);
+  -webkit-mask: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMy41IDguNWwzIDMgNi02LjUiLz48L3N2Zz4=")
+    center / contain no-repeat;
+  mask: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMy41IDguNWwzIDMgNi02LjUiLz48L3N2Zz4=")
+    center / contain no-repeat;
+  scale: 0;
+  transition: scale var(--v-fast) var(--v-ease);
+}
+
+.v-check:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.v-check:checked::after {
+  scale: 1;
+}
+
+/* The box and its words as one <label>, so the words toggle it too. */
+.v-check-label {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: var(--v-gap);
+  font-size: 14px;
+  line-height: 1.4;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.v-check-label > .v-check {
+  margin-top: 2px;
+}
+
+.v-check-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.v-check-note {
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.v-radios {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--v-gap) var(--v-gap-loose);
+}
+
+/* ─── lists ─────────────────────────────────────────────────────
+   A column of rows with a hairline between them, each row's label
+   taking what is left and its controls always fitting. */
+/* The rows, with whatever sits under them: the add line, the empty line. */
+.v-list {
+  display: grid;
+  min-width: 0;
+}
+
+.v-items {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.v-item {
+  display: flex;
+  align-items: center;
+  gap: var(--v-gap);
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+  min-width: 0;
+}
+
+.v-item:last-child {
+  border-bottom: 0;
+}
+
+.v-item-label {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A machine label: a relay address, an id. */
+.v-item-label--mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+}
+
+/* The add line under a list: a field, a button, an error. */
+.v-add {
+  display: flex;
+  align-items: center;
+  gap: var(--v-gap);
+  margin-top: var(--v-gap);
+  min-width: 0;
+}
+
+.v-add > .v-input {
+  flex: 1;
+}
+
+.v-add-error {
+  color: var(--danger);
+  font-size: 13px;
+}
+
+.v-add-error:empty {
+  display: none;
+}
+
+/* ─── disclosure ────────────────────────────────────────────────
+   A <details> that opens: a bold grey summary, a chevron at its end,
+   the content indented under it. */
+.v-disclosure {
+  min-width: 0;
+  border-top: 1px solid var(--border);
+}
+
+.v-disclosure > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--v-gap);
+  padding: 8px 0;
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.v-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+
+.v-disclosure > summary::after {
+  content: "";
+  width: 1em;
+  height: 1em;
+  margin-left: auto;
+  flex-shrink: 0;
+  background-color: currentColor;
+  -webkit-mask: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNNiAzLjVMMTAuNSA4IDYgMTIuNSIvPjwvc3ZnPg==")
+    center / contain no-repeat;
+  mask: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNNiAzLjVMMTAuNSA4IDYgMTIuNSIvPjwvc3ZnPg==")
+    center / contain no-repeat;
+  rotate: 0deg;
+  transition: rotate var(--v-fast) var(--v-ease);
+}
+
+.v-disclosure[open] > summary::after {
+  rotate: 90deg;
+}
+
+.v-disclosure > summary:hover {
+  color: var(--text);
+}
+
+.v-disclosure[open] > summary {
+  color: var(--text);
+}
+
+/* ─── rows that open ────────────────────────────────────────────
+   A list of <details> sharing a name attribute: one is open at a
+   time, and the others step out of the way while it is. */
+.v-rows {
+  display: grid;
+  min-width: 0;
+}
+
+.v-rows:has(> .v-row[open]) > .v-row:not([open]) {
+  display: none;
+}
+
+.v-row {
+  border-bottom: 1px solid var(--border);
+  min-width: 0;
+}
+
+.v-row:last-of-type {
+  border-bottom: 0;
+}
+
+.v-row > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--v-gap);
+  padding: 6px 0;
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+  font-size: 14px;
+}
+
+.v-row > summary::-webkit-details-marker {
+  display: none;
+}
+
+.v-row > summary::after {
+  content: "";
+  width: 1em;
+  height: 1em;
+  margin-left: auto;
+  flex-shrink: 0;
+  background-color: currentColor;
+  color: var(--text-faint);
+  -webkit-mask: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNNiAzLjVMMTAuNSA4IDYgMTIuNSIvPjwvc3ZnPg==")
+    center / contain no-repeat;
+  mask: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNNiAzLjVMMTAuNSA4IDYgMTIuNSIvPjwvc3ZnPg==")
+    center / contain no-repeat;
+  rotate: 0deg;
+  transition: rotate var(--v-fast) var(--v-ease);
+}
+
+.v-row[open] > summary::after {
+  rotate: 90deg;
+}
+
+/* ─── code ──────────────────────────────────────────────────────
+   Machine text on a plate, the launcher's code color on the
+   launcher's plate. */
+.v-code {
+  padding: 1px 4px;
+  border-radius: var(--v-radius);
+  background: var(--surface-alt);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9em;
+}
+
+.v-codeblock {
+  margin: 0;
+  padding: var(--v-pad);
+  border-radius: var(--v-radius-field);
+  background: var(--surface-alt);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* ─── badges ────────────────────────────────────────────────────
+   A short grey label — a type, a state, a count. A variant colors
+   it. */
+.v-badge {
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  padding: 1px 6px;
+  border-radius: var(--v-radius);
+  background: var(--chip);
+  color: var(--chip-text);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: nowrap;
+  vertical-align: middle;
+  user-select: none;
+}
+
+.v-badge--accent {
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 700;
+}
+
+.v-badge--danger {
+  background: var(--chip);
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.v-badge--dev {
+  background: var(--dev);
+  color: var(--dev-text);
+  font-weight: 700;
+}
+
+/* ─── icons ─────────────────────────────────────────────────────
+   Line glyphs, 1em, in the text's own color, so an icon beside
+   words takes their voice. Give an icon-only button a title. */
+.v-icon {
+  display: inline-block;
+  flex-shrink: 0;
+  width: 1em;
+  height: 1em;
+  vertical-align: -0.125em;
+  background-color: currentColor;
+  -webkit-mask: center / contain no-repeat;
+  mask: center / contain no-repeat;
+}
+
+.v-icon--check {
+  -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMy41IDguNWwzIDMgNi02LjUiLz48L3N2Zz4=");
+  mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMy41IDguNWwzIDMgNi02LjUiLz48L3N2Zz4=");
+}
+
+.v-icon--x {
+  -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNNCA0bDggOE0xMiA0bC04IDgiLz48L3N2Zz4=");
+  mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNNCA0bDggOE0xMiA0bC04IDgiLz48L3N2Zz4=");
+}
+
+.v-icon--plus {
+  -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNOCAzLjV2OU0zLjUgOGg5Ii8+PC9zdmc+");
+  mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNOCAzLjV2OU0zLjUgOGg5Ii8+PC9zdmc+");
+}
+
+.v-icon--minus {
+  -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMy41IDhoOSIvPjwvc3ZnPg==");
+  mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMy41IDhoOSIvPjwvc3ZnPg==");
+}
+
+.v-icon--chevron {
+  -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNNiAzLjVMMTAuNSA4IDYgMTIuNSIvPjwvc3ZnPg==");
+  mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNNiAzLjVMMTAuNSA4IDYgMTIuNSIvPjwvc3ZnPg==");
+}
+
+.v-icon--arrow {
+  -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMyA4aDkuNU05IDQuNUwxMi41IDggOSAxMS41Ii8+PC9zdmc+");
+  mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMyA4aDkuNU05IDQuNUwxMi41IDggOSAxMS41Ii8+PC9zdmc+");
+}
+
+.v-icon--trash {
+  -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMyA0LjVoMTBNNi41IDQuNVYzaDN2MS41TTQuNSA0LjVsLjUgOWg2bC41LTlNNi44IDd2NE05LjIgN3Y0Ii8+PC9zdmc+");
+  mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMyA0LjVoMTBNNi41IDQuNVYzaDN2MS41TTQuNSA0LjVsLjUgOWg2bC41LTlNNi44IDd2NE05LjIgN3Y0Ii8+PC9zdmc+");
+}
+
+.v-icon--reload {
+  -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMTIuOCA4YTQuOCA0LjggMCAxIDEtMS43LTMuN00xMy4yIDIuOFY2SDEwIi8+PC9zdmc+");
+  mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMTIuOCA4YTQuOCA0LjggMCAxIDEtMS43LTMuN00xMy4yIDIuOFY2SDEwIi8+PC9zdmc+");
+}
+
+.v-icon--search {
+  -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48Y2lyY2xlIGN4PSI3IiBjeT0iNyIgcj0iMy41Ii8+PHBhdGggZD0iTTkuNiA5LjZMMTMuNSAxMy41Ii8+PC9zdmc+");
+  mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48Y2lyY2xlIGN4PSI3IiBjeT0iNyIgcj0iMy41Ii8+PHBhdGggZD0iTTkuNiA5LjZMMTMuNSAxMy41Ii8+PC9zdmc+");
+}
+
+.v-icon--external {
+  -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNOS41IDMuNUgxMi41djNNMTIuNSAzLjVMNy41IDguNU0xMSA5LjV2M0gzLjVWNUg2LjUiLz48L3N2Zz4=");
+  mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNOS41IDMuNUgxMi41djNNMTIuNSAzLjVMNy41IDguNU0xMSA5LjV2M0gzLjVWNUg2LjUiLz48L3N2Zz4=");
+}
+
+.v-icon--warning {
+  -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNOCAyLjUgMTQuNSAxMy41IDEuNSAxMy41WiIvPjxwYXRoIGQ9Ik04IDYuNXYzLjIiLz48cGF0aCBkPSJNOCAxMS42di42Ii8+PC9zdmc+");
+  mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNOCAyLjUgMTQuNSAxMy41IDEuNSAxMy41WiIvPjxwYXRoIGQ9Ik04IDYuNXYzLjIiLz48cGF0aCBkPSJNOCAxMS42di42Ii8+PC9zdmc+");
+}
+
+.v-icon--info {
+  -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48Y2lyY2xlIGN4PSI4IiBjeT0iOCIgcj0iNS41Ii8+PHBhdGggZD0iTTggNy40djQiLz48cGF0aCBkPSJNOCA1di42Ii8+PC9zdmc+");
+  mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48Y2lyY2xlIGN4PSI4IiBjeT0iOCIgcj0iNS41Ii8+PHBhdGggZD0iTTggNy40djQiLz48cGF0aCBkPSJNOCA1di42Ii8+PC9zdmc+");
+}
+
+.v-icon--star {
+  -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNOCAyLjVsMS43IDMuNiAzLjkuNS0yLjggMi43LjcgMy45TDggMTEuM2wtMy41IDEuOS43LTMuOUwyLjQgNi42bDMuOS0uNXoiLz48L3N2Zz4=");
+  mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNOCAyLjVsMS43IDMuNiAzLjkuNS0yLjggMi43LjcgMy45TDggMTEuM2wtMy41IDEuOS43LTMuOUwyLjQgNi42bDMuOS0uNXoiLz48L3N2Zz4=");
+}
+
+.v-icon--copy {
+  -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNNS41IDUuNWg3djdoLTd6TTMuNSAxMC41di03aDciLz48L3N2Zz4=");
+  mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNNS41IDUuNWg3djdoLTd6TTMuNSAxMC41di03aDciLz48L3N2Zz4=");
+}
+
+.v-icon--folder {
+  -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMi41IDQuNWg0TDggNi41aDUuNXY2aC0xMXoiLz48L3N2Zz4=");
+  mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMi41IDQuNWg0TDggNi41aDUuNXY2aC0xMXoiLz48L3N2Zz4=");
+}
+
+.v-icon--user {
+  -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48Y2lyY2xlIGN4PSI4IiBjeT0iNS41IiByPSIyLjUiLz48cGF0aCBkPSJNMy41IDEzLjVhNC41IDQuNSAwIDAgMSA5IDAiLz48L3N2Zz4=");
+  mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48Y2lyY2xlIGN4PSI4IiBjeT0iNS41IiByPSIyLjUiLz48cGF0aCBkPSJNMy41IDEzLjVhNC41IDQuNSAwIDAgMSA5IDAiLz48L3N2Zz4=");
+}
+
+.v-icon--home {
+  -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMyA3LjVMOCAzbDUgNC41VjEzSDN6TTYuNSAxM1Y5LjVoM1YxMyIvPjwvc3ZnPg==");
+  mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMyA3LjVMOCAzbDUgNC41VjEzSDN6TTYuNSAxM1Y5LjVoM1YxMyIvPjwvc3ZnPg==");
+}
+
+.v-icon--settings {
+  -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMyA0LjVoMTBNMyA4aDEwTTMgMTEuNWgxMCIvPjxjaXJjbGUgY3g9IjYiIGN5PSI0LjUiIHI9IjEuNCIvPjxjaXJjbGUgY3g9IjEwIiBjeT0iOCIgcj0iMS40Ii8+PGNpcmNsZSBjeD0iNSIgY3k9IjExLjUiIHI9IjEuNCIvPjwvc3ZnPg==");
+  mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMyA0LjVoMTBNMyA4aDEwTTMgMTEuNWgxMCIvPjxjaXJjbGUgY3g9IjYiIGN5PSI0LjUiIHI9IjEuNCIvPjxjaXJjbGUgY3g9IjEwIiBjeT0iOCIgcj0iMS40Ii8+PGNpcmNsZSBjeD0iNSIgY3k9IjExLjUiIHI9IjEuNCIvPjwvc3ZnPg==");
+}
+
+.v-icon--sun {
+  -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48Y2lyY2xlIGN4PSI4IiBjeT0iOCIgcj0iMyIvPjxwYXRoIGQ9Ik04IDEuNXYxLjRNOCAxMy4xdjEuNE0xLjUgOGgxLjRNMTMuMSA4aDEuNE0zLjQgMy40bDEgMU0xMS42IDExLjZsMSAxTTEyLjYgMy40bC0xIDFNNC40IDExLjZsLTEgMSIvPjwvc3ZnPg==");
+  mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48Y2lyY2xlIGN4PSI4IiBjeT0iOCIgcj0iMyIvPjxwYXRoIGQ9Ik04IDEuNXYxLjRNOCAxMy4xdjEuNE0xLjUgOGgxLjRNMTMuMSA4aDEuNE0zLjQgMy40bDEgMU0xMS42IDExLjZsMSAxTTEyLjYgMy40bC0xIDFNNC40IDExLjZsLTEgMSIvPjwvc3ZnPg==");
+}
+
+.v-icon--moon {
+  -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMTMgOS41QTUuNSA1LjUgMCAwIDEgNi4yIDIuNmE1LjUgNS41IDAgMSAwIDYuOCA2Ljl6Ii8+PC9zdmc+");
+  mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMTMgOS41QTUuNSA1LjUgMCAwIDEgNi4yIDIuNmE1LjUgNS41IDAgMSAwIDYuOCA2Ljl6Ii8+PC9zdmc+");
+}
+
+.v-icon--bolt {
+  -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNOSAyTDQuNSA5aDNMNyAxNGw0LjUtN2gtM3oiLz48L3N2Zz4=");
+  mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNOSAyTDQuNSA5aDNMNyAxNGw0LjUtN2gtM3oiLz48L3N2Zz4=");
+}
+
+.v-icon--link {
+  -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNNi41IDkuNWEyLjUgMi41IDAgMCAwIDMuNSAwbDItMmEyLjUgMi41IDAgMCAwLTMuNS0zLjVsLTEgMU05LjUgNi41YTIuNSAyLjUgMCAwIDAtMy41IDBsLTIgMmEyLjUgMi41IDAgMCAwIDMuNSAzLjVsMS0xIi8+PC9zdmc+");
+  mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNNi41IDkuNWEyLjUgMi41IDAgMCAwIDMuNSAwbDItMmEyLjUgMi41IDAgMCAwLTMuNS0zLjVsLTEgMU05LjUgNi41YTIuNSAyLjUgMCAwIDAtMy41IDBsLTIgMmEyLjUgMi41IDAgMCAwIDMuNSAzLjVsMS0xIi8+PC9zdmc+");
+}
+
+.v-icon--save {
+  -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMy41IDMuNWg3TDEyLjUgNS41djdoLTl6TTUuNSAzLjV2M2g0di0zTTUuNSAxMi41VjloNXYzLjUiLz48L3N2Zz4=");
+  mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMy41IDMuNWg3TDEyLjUgNS41djdoLTl6TTUuNSAzLjV2M2g0di0zTTUuNSAxMi41VjloNXYzLjUiLz48L3N2Zz4=");
+}
+
+.v-icon--window {
+  -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMi41IDRoMTF2OGgtMTF6TTIuNSA2LjVoMTEiLz48L3N2Zz4=");
+  mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMi41IDRoMTF2OGgtMTF6TTIuNSA2LjVoMTEiLz48L3N2Zz4=");
+}
+
+/* ─── app icons ─────────────────────────────────────────────────
+   A napp's picture: a rounded square on a plate, so the space is
+   held until the image lands. */
+.v-appicon {
+  display: inline-grid;
+  box-sizing: border-box;
+  overflow: hidden;
+  flex-shrink: 0;
+  border-radius: var(--v-radius-field);
+  background: var(--chip);
+  vertical-align: middle;
+}
+
+.v-appicon > img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.v-appicon--s {
+  width: 20px;
+  height: 20px;
+}
+
+.v-appicon--m {
+  width: 40px;
+  height: 40px;
+}
+
+.v-appicon--l {
+  width: 48px;
+  height: 48px;
+  padding: 3px;
+}
+
+.v-appicon--xl {
+  width: 96px;
+  height: 96px;
+  padding: 4px;
+}
+
+.v-appicon--l > img,
+.v-appicon--xl > img {
+  border-radius: var(--v-radius);
+}
+
+/* The image eases in once it has loaded. */
+.v-appicon--fade > img {
+  opacity: 0;
+  transition: opacity var(--v-fast) var(--v-ease);
+}
+
+.v-appicon--fade > img.loaded {
+  opacity: 1;
+}
+
+/* ─── notices ───────────────────────────────────────────────────
+   A line to heed, on a plate in its tone. Warn by default — the
+   launcher's amber is the one it already has. */
+.v-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--v-gap);
+  box-sizing: border-box;
+  padding: 10px var(--v-pad-loose);
+  border-radius: var(--v-radius-field);
+  background: var(--chip);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.v-notice > .v-icon {
+  margin-top: 0.15em;
+}
+
+.v-notice--warn {
+  background: var(--dev);
+  color: var(--dev-text);
+}
+
+.v-notice--danger {
+  background: color-mix(in srgb, var(--danger) 12%, var(--surface));
+  color: var(--danger);
+}
+
+.v-notice--info {
+  background: var(--chip);
+  color: var(--text-muted);
+}
+
+/* ─── empty line ────────────────────────────────────────────────
+   What a list says when it has nothing yet. */
+.v-empty {
+  padding: 6px 0;
+  font-size: 14px;
+  color: var(--text-faint);
+}
+
+/* ─── links ─────────────────────────────────────────────────────
+   A row of them, wrapping. In the text's color, dimmed, lit on
+   hover. */
+.v-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--v-gap-tight) var(--v-pad-loose);
+}
+
+.v-links a {
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: 14px;
+}
+
+.v-links a:hover {
+  color: var(--text);
+  text-decoration: underline;
+}
+
+/* ─── busy ──────────────────────────────────────────────────────
+   Something working on it: it breathes until done. */
+.v-busy {
+  animation: v-breathe 1.6s ease-in-out infinite;
+  cursor: progress;
+}
+
+@keyframes v-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+/* A ring turning, 1em in the text's color. */
+.v-spinner {
+  display: inline-block;
+  box-sizing: border-box;
+  width: 1em;
+  height: 1em;
+  flex-shrink: 0;
+  vertical-align: -0.125em;
+  border: 2px solid color-mix(in srgb, currentColor 20%, transparent);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: v-spin 0.7s linear infinite;
+}
+
+@keyframes v-spin {
+  to {
+    rotate: 360deg;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .v-busy,
+  .v-spinner {
+    animation: none;
+  }
+
+  .v-busy {
+    opacity: 0.5;
+  }
+}
+
+/* ─── a hairline ────────────────────────────────────────────────
+   Under a section, above a footer. */
+.v-rule {
+  height: 0;
+  margin: var(--v-gap) 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+
+/* ─── hidden ────────────────────────────────────────────────────
+   The kit sets display on its boxes, which would beat [hidden]. */
+:is(
+    .v-col,
+    .v-bar,
+    .v-card,
+    .v-btn,
+    .v-chip,
+    .v-tabs,
+    .v-list,
+    .v-items,
+    .v-item,
+    .v-add,
+    .v-radios,
+    .v-check-label,
+    .v-field,
+    .v-disclosure,
+    .v-rows,
+    .v-notice,
+    .v-links,
+    .v-spinner
+  )[hidden] {
+  display: none;
+}

@@ -100,6 +100,10 @@ func main() {
 	w.Init("window.name = " + jsString(meta.Instance) + ";" +
 		"window.__nappDomains = " + jsStringSlice(meta.Requires) + ";" +
 		themeInitScript(meta.Theme, meta.ThemeVars))
+	// the napp-ui kit, for the napps that ask for it with requires: ["ui"]
+	if kit := nappbridge.UIKitScript(meta.Requires); kit != "" {
+		w.Init(kit)
+	}
 	// the very same bridge.js the Android app injects
 	w.Init(nappbridge.JS())
 

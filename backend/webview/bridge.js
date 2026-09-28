@@ -440,7 +440,9 @@
 
   if (window.__nappTheme) applyTheme(window.__nappTheme.name, window.__nappTheme.vars)
 
-  window.napp = {
+  // Merged, not assigned: a napp that asked for the ui kit got
+  // window.napp.ui from the script before this one, and it has to survive.
+  window.napp = Object.assign(window.napp || {}, {
     instance: window.name,
 
     // ── inter-app calling ───────────────────────────────────────
@@ -547,5 +549,5 @@
       // ── publishing ───────────────────────────────
       publish: (event, relays) => rpc("napp.publish", { event, relays })
     }
-  }
+  })
 })()

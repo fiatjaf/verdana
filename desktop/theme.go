@@ -141,6 +141,8 @@ func (p themePalette) vars() map[string]string {
 		"text-muted":  cssHex(p.subtle),
 		"text-faint":  cssHex(p.muted),
 		"border":      cssHex(p.border),
+		"chip":        cssHex(p.chipBg),
+		"chip-text":   cssHex(p.chipFg),
 		"accent":      cssHex(p.contrastBg),
 		"accent-text": cssHex(p.contrastFg),
 		"dev":         cssHex(p.devBg),
