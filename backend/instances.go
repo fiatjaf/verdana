@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -67,19 +68,21 @@ type actionRequest struct {
 }
 
 // windowRecord is what the launcher remembers about a window it has opened
-// this run: its instance, the napp it runs, and the actions dispatched into it
-// so a window closed and reopened lands back where it was. Session state, not
-// persisted: nothing here survives the launcher quitting.
+// this run: its instance, the napp it runs, and every action that window was
+// asked to show. The log is what a window closed and reopened lands back on,
+// what the Windows tab lists and what the bundle editor suggests as the
+// actions of that napp. Session state, not persisted: nothing here survives
+// the launcher quitting.
 type windowRecord struct {
 	Instance string
 	NappID   string
-	Actions  []recordedAction
+	Actions  []ShortcutAction
 }
 
-type recordedAction struct {
-	Name    string
-	Payload json.RawMessage
-}
+// maxWindowActions bounds a window's log: the tail is what puts a reopened
+// window back where it was, and a window that was navigated a thousand times
+// this run should not hold a thousand entries (nor replay them).
+const maxWindowActions = 32
 
 // ID is the instance id the napp knows itself by.
 func (ci *Instance) ID() string { return ci.instance }
@@ -162,7 +165,11 @@ func OpenWindows() []WindowInfo {
 func ManagedWindows() []WindowInfo {
 	active := OpenWindows()
 	byID := make(map[string]WindowInfo, len(active))
-	for _, w := range active {
+	for i, w := range active {
+		// the Windows tab wants where the window has been, the window
+		// switcher doesn't: only this listing carries the log
+		w.History = windowHistory(w.Instance)
+		active[i] = w
 		byID[w.Instance] = w
 	}
 	var closed []WindowInfo
@@ -174,9 +181,15 @@ func ManagedWindows() []WindowInfo {
 		if !ok {
 			continue
 		}
-		info := WindowInfo{Instance: rec.Instance, NappID: rec.NappID, Name: napp.Label(), Open: false}
+		info := WindowInfo{
+			Instance: rec.Instance,
+			NappID:   rec.NappID,
+			Name:     napp.Label(),
+			Open:     false,
+			History:  rec.Actions,
+		}
 		if len(rec.Actions) > 0 {
-			info.Action = rec.Actions[len(rec.Actions)-1].Name
+			info.Action = rec.Actions[len(rec.Actions)-1].Type
 		}
 		closed = append(closed, info)
 	}
@@ -510,7 +523,7 @@ func windowRecords() []windowRecord {
 	defer windowsMu.Unlock()
 	out := make([]windowRecord, 0, len(windows))
 	for _, w := range windows {
-		w.Actions = append([]recordedAction(nil), w.Actions...)
+		w.Actions = append([]ShortcutAction(nil), w.Actions...)
 		out = append(out, w)
 	}
 	return out
@@ -523,8 +536,16 @@ func lookupWindow(instance string) *windowRecord {
 	if !ok {
 		return nil
 	}
-	w.Actions = append([]recordedAction(nil), w.Actions...)
+	w.Actions = append([]ShortcutAction(nil), w.Actions...)
 	return &w
+}
+
+// windowHistory is every action a window was sent this run, oldest first.
+func windowHistory(instance string) []ShortcutAction {
+	if w := lookupWindow(instance); w != nil {
+		return w.Actions
+	}
+	return nil
 }
 
 func putWindow(w windowRecord) {
@@ -566,28 +587,71 @@ func ReopenWindow(instance string) {
 }
 
 // replayActions puts a reopened window back where the one that closed had
-// navigated to, by re-dispatching the actions it was last sent.
+// navigated to, by re-dispatching the actions it was sent.
 func replayActions(ci *Instance, rec windowRecord) {
 	ci.replaying.Store(true)
 	defer ci.replaying.Store(false)
-	for _, action := range rec.Actions {
-		if _, err := dispatchToInstance(context.Background(), ci, &actionRequest{name: action.Name, payload: action.Payload}); err != nil {
+	for i, action := range rec.Actions {
+		// The first action waits for the napp to boot, the next ones do not:
+		// a napp that has no handler for the action it was opened with will
+		// not register one while we sit and wait, and every wait is 20
+		// seconds of a window showing nothing.
+		if i > 0 {
+			if _, ok := ci.handlerFor(action.Type); !ok {
+				break
+			}
+		}
+		if _, err := dispatchToInstance(context.Background(), ci, &actionRequest{name: action.Type, payload: action.Payload}); err != nil {
 			log.Warn().Err(err).Str("instance", rec.Instance).Msg("could not replay napp action")
 			break
 		}
 	}
 }
 
-func recordAction(ci *Instance, req *actionRequest) {
+// recordAction adds an action to its window's log. It is skipped while a
+// reopen is being replayed (the log already has those actions) and replace is
+// for a napp that overwrote the history entry it was on rather than pushing a
+// new one.
+func recordAction(ci *Instance, req *actionRequest, replace bool) {
 	if ci.replaying.Load() {
 		return
 	}
-	w := lookupWindow(ci.instance)
-	if w == nil {
-		w = &windowRecord{Instance: ci.instance, NappID: ci.napp.ID}
+	windowsMu.Lock()
+	w := windows[ci.instance]
+	w.Instance = ci.instance
+	if w.NappID == "" {
+		w.NappID = ci.napp.ID
 	}
-	w.Actions = append(w.Actions, recordedAction{Name: req.name, Payload: append(json.RawMessage(nil), req.payload...)})
-	putWindow(*w)
+	if replace && len(w.Actions) > 0 {
+		w.Actions[len(w.Actions)-1] = asShortcutAction(req)
+	} else {
+		w.Actions = append(w.Actions, asShortcutAction(req))
+		if len(w.Actions) > maxWindowActions {
+			w.Actions = append([]ShortcutAction(nil), w.Actions[len(w.Actions)-maxWindowActions:]...)
+		}
+	}
+	windows[ci.instance] = w
+	windowsMu.Unlock()
+}
+
+// asShortcutAction is an action as the log and the bundle editor keep it: a
+// null payload is the same as no payload, so it doesn't clutter the lines the
+// editor suggests.
+func asShortcutAction(req *actionRequest) ShortcutAction {
+	payload := bytes.TrimSpace(req.payload)
+	if string(payload) == "null" {
+		payload = nil
+	}
+	return ShortcutAction{Type: req.name, Payload: append(json.RawMessage(nil), payload...)}
+}
+
+// setActionState is a napp saying where it navigated to on its own: the window
+// is now on that action, whether we dispatched it or the napp pushed it, and
+// it joins the window's log all the same.
+func (ci *Instance) setActionState(req *actionRequest, replace bool) {
+	ci.lastAction.Store(req)
+	recordAction(ci, req, replace)
+	notifyState()
 }
 
 // ─── action dispatch ─────────────────────────────────────────────
@@ -719,7 +783,7 @@ func dispatchToInstance(ctx context.Context, ci *Instance, req *actionRequest) (
 			return nil, fmt.Errorf("stopped routing of %s: couldn't find the event", req.name)
 		}
 	}
-	recordAction(ci, &actionRequest{name: req.name, payload: payload})
+	recordAction(ci, &actionRequest{name: req.name, payload: payload}, false)
 
 	waitCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	idx, ok := ci.waitForHandler(waitCtx, req.name)

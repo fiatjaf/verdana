@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"context"
 	"sync"
 	"sync/atomic"
 )
@@ -89,6 +90,12 @@ type WindowInfo struct {
 	// (a dispatched action, or one it pushed itself).
 	Action string `json:"action"`
 	Open   bool   `json:"open"`
+
+	// History is every action this window was sent this run, oldest first:
+	// what a reopen puts it back on and what the bundle editor offers as the
+	// actions of its napp. Only the Windows tab listing carries it, the
+	// switcher just wants where each window is.
+	History []ShortcutAction `json:"history,omitempty"`
 }
 
 type launcherState struct {
@@ -107,6 +114,10 @@ type launcherState struct {
 	devErr     string
 	devLoading bool
 	busy       map[string]bool
+
+	// changed is closed and replaced on every phase change, so a waiter can
+	// block until the launcher is out of PhaseLoading.
+	changed chan struct{}
 }
 
 var ls = launcherState{phase: PhaseLoading, busy: make(map[string]bool)}
@@ -196,9 +207,19 @@ func notifyState() {
 	}
 }
 
+// setPhase moves the launcher to a phase and wakes whoever is waiting for it
+// to change. ls.mu must be held.
+func setPhaseLocked(phase string) {
+	ls.phase = phase
+	if ls.changed != nil {
+		close(ls.changed)
+	}
+	ls.changed = make(chan struct{})
+}
+
 func setPhase(phase string) {
 	ls.mu.Lock()
-	ls.phase = phase
+	setPhaseLocked(phase)
 	ls.mu.Unlock()
 	notifyState()
 }
@@ -210,10 +231,37 @@ func Phase() string {
 	return ls.phase
 }
 
+// waitStartupLogin blocks until the launcher's startup phase is over: the
+// login Start resumed has answered, or there was none to resume. Work that
+// opens napps right after a cold start waits for it, so those windows find a
+// signer already in place (or an answer saying there is none) instead of
+// racing the login. A launcher that is already up is never in the startup
+// phase, so this returns at once.
+func waitStartupLogin(ctx context.Context) {
+	for {
+		ls.mu.Lock()
+		if ls.phase != PhaseLoading {
+			ls.mu.Unlock()
+			return
+		}
+		if ls.changed == nil {
+			ls.changed = make(chan struct{})
+		}
+		changed := ls.changed
+		ls.mu.Unlock()
+
+		select {
+		case <-changed:
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
 func setLoginErr(msg string) {
 	ls.mu.Lock()
 	ls.loginErr = msg
-	ls.phase = PhaseLogin
+	setPhaseLocked(PhaseLogin)
 	ls.mu.Unlock()
 	notifyState()
 }
@@ -224,7 +272,7 @@ func setProfile(pubkey, name, picture string) {
 	ls.pubkey = pubkey
 	ls.profName = name
 	ls.profPic = picture
-	ls.phase = PhaseMain
+	setPhaseLocked(PhaseMain)
 	ls.mu.Unlock()
 	notifyState()
 }

@@ -14,7 +14,9 @@ import (
 // backend.CreateShortcut behind it).
 
 // pickedBundleWindows is the selected windows, in listed order, merged into
-// one entry per napp (the same napp may have two windows checked).
+// one entry per napp (the same napp may have two windows checked), each entry
+// carrying the actions those windows were actually sent: that is what the
+// editor suggests.
 func pickedBundleWindows(st backend.State) []backend.ShortcutEntry {
 	var entries []backend.ShortcutEntry
 	byID := make(map[string]int)
@@ -23,11 +25,14 @@ func pickedBundleWindows(st backend.State) []backend.ShortcutEntry {
 		if !ok || !cb.Value {
 			continue
 		}
-		if _, ok := byID[w.NappID]; ok {
-			continue // the napp is already in the bundle; actions are per napp
+		if i, ok := byID[w.NappID]; ok {
+			// actions are per napp: a second window of the same napp only
+			// adds what its own window was sent
+			entries[i].Actions = append(entries[i].Actions, w.History...)
+			continue
 		}
 		byID[w.NappID] = len(entries)
-		entries = append(entries, backend.ShortcutEntry{NappID: w.NappID})
+		entries = append(entries, backend.ShortcutEntry{NappID: w.NappID, Actions: w.History})
 	}
 	return entries
 }
@@ -42,9 +47,9 @@ func newShortcutEditState(entries []backend.ShortcutEntry) *shortcutEditState {
 			continue
 		}
 		ed := widget.Editor{}
-		// default content: the actions the napp itself declares handling,
-		// one per line, as the JSON the editor speaks
-		ed.SetText(actionLines(napp.Actions))
+		// default content: the actions those windows were sent, payloads
+		// included, then whatever else the napp declares handling
+		ed.SetText(suggestionLines(e.Actions, napp.Actions))
 		out.entries = append(out.entries, shortcutEditEntry{nappID: e.NappID, label: napp.Label(), ed: ed})
 	}
 	return out
@@ -66,18 +71,85 @@ func editShortcutEditState(sc backend.ShortcutInfo) *shortcutEditState {
 	return out
 }
 
-// actionLines is what a fresh bundle's textareas start with: one line per
-// action the napp declares, as {"type": …} with no payload yet.
+// actionLines is what a fresh bundle's textareas start with when no window of
+// the napp has handled anything yet: one line per action the napp declares,
+// as {"type": …} with no payload yet.
 func actionLines(names []string) string {
-	lines := make([]string, 0, len(names))
+	actions := make([]backend.ShortcutAction, 0, len(names))
 	for _, name := range names {
-		raw, err := json.Marshal(backend.ShortcutAction{Type: name})
+		actions = append(actions, backend.ShortcutAction{Type: name})
+	}
+	return actionsToLines(actions)
+}
+
+// maxSuggestedActions is how much of what a window was sent the editor
+// suggests before falling back on the napp's own list: enough to rebuild a
+// bundle of what the windows were just doing, short enough to read and edit.
+const maxSuggestedActions = 8
+
+// suggestionLines is what a fresh bundle's textarea starts with: the actions
+// the picked windows were actually sent, with the payloads they carried,
+// most recent first and without repeats, then whatever else the napp declares
+// handling and none of that already covers.
+func suggestionLines(seen []backend.ShortcutAction, declared []string) string {
+	line := func(a backend.ShortcutAction) string {
+		raw, err := json.Marshal(a)
 		if err != nil {
+			return ""
+		}
+		return string(raw)
+	}
+
+	taken := make(map[string]bool, len(seen))
+	var lines []string
+	for i := len(seen) - 1; i >= 0 && len(lines) < maxSuggestedActions; i-- {
+		key := seen[i].Type + "\n" + string(seen[i].Payload)
+		if taken[key] {
 			continue
 		}
-		lines = append(lines, string(raw))
+		taken[key] = true
+		if l := line(seen[i]); l != "" {
+			lines = append(lines, l)
+		}
 	}
+
+	for _, name := range declared {
+		if len(lines) >= maxSuggestedActions {
+			break
+		}
+		// a declared name the window was already sent shows up above, with
+		// the payload it was sent
+		already := false
+		for _, a := range seen {
+			if a.Type == name {
+				already = true
+				break
+			}
+		}
+		if already {
+			continue
+		}
+		if l := line(backend.ShortcutAction{Type: name}); l != "" {
+			lines = append(lines, l)
+		}
+	}
+
 	return strings.Join(lines, "\n")
+}
+
+// historyLabel is a window's action log on one line for the Windows tab: the
+// actions it was sent, oldest first, so a row says where the window has been
+// and not only where it is.
+func historyLabel(actions []backend.ShortcutAction) string {
+	var names []string
+	for _, a := range actions {
+		// the same name twice in a row says nothing a single one doesn't
+		if len(names) > 0 && names[len(names)-1] == a.Type {
+			continue
+		}
+		names = append(names, a.Type)
+	}
+	return strings.Join(names, " → ")
 }
 
 // actionsToLines is the stored actions back as editable lines.

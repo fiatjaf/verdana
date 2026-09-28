@@ -144,24 +144,28 @@
   window.__bridge_theme_change = applyTheme
 
   // A napp that navigates on its own pushes { action: { name, payload } }, and
-  // the launcher takes it as the window's current action.
-  const reportActionState = state => {
+  // the launcher takes it as the window's current action, adding it to the
+  // window's log of actions. replace says the napp overwrote the entry it was
+  // on (replaceState, or going back/forward) instead of pushing a new one.
+  const reportActionState = (state, replace) => {
     if (fromHost) return
     const a = state && state.action
     if (!a || typeof a.name !== "string" || !a.name) return
-    rpc("napp.actionState", { name: a.name, payload: a.payload === undefined ? null : a.payload }).catch(
-      () => {}
-    )
+    rpc("napp.actionState", {
+      name: a.name,
+      payload: a.payload === undefined ? null : a.payload,
+      replace: !!replace
+    }).catch(() => {})
   }
   for (const method of ["pushState", "replaceState"]) {
     const original = history[method].bind(history)
     history[method] = function (state, ...rest) {
       const result = original(state, ...rest)
-      reportActionState(state)
+      reportActionState(state, method === "replaceState")
       return result
     }
   }
-  window.addEventListener("popstate", e => reportActionState(e.state))
+  window.addEventListener("popstate", e => reportActionState(e.state, true))
 
   window.nostr = {
     getPublicKey: () => rpc("getPublicKey"),

@@ -447,6 +447,18 @@ func layoutWindowsTab(
 										l.Color = currentTheme().muted
 										return l.Layout(gtx)
 									}),
+									layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+										// every action this window was sent, so a
+										// row says where it has been and not
+										// only where it is
+										hist := historyLabel(w.History)
+										if hist == "" {
+											return layout.Dimensions{}
+										}
+										l := material.Caption(th, truncate(hist, 90))
+										l.Color = currentTheme().muted
+										return l.Layout(gtx)
+									}),
 								)
 							})
 						}),

@@ -259,6 +259,11 @@ func RunShortcutEntries(entries []ShortcutEntry) error {
 	ctx, cancel := context.WithTimeout(context.Background(), shortcutActionTimeout*time.Duration(len(entries)+1))
 	defer cancel()
 
+	// A bundle run in a launcher that is still starting up waits for its
+	// login to answer, so the windows it opens can already sign. One served
+	// by a launcher that is already up never waits.
+	waitStartupLogin(ctx)
+
 	for _, entry := range entries {
 		napp, ok := InstalledNapp(entry.NappID)
 		if !ok {

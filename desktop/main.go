@@ -106,20 +106,22 @@ func main() {
 	}
 	startupToken := strings.Join(tokenArgs, " ")
 
-	if startupToken != "" && forwardToInstance(dataDir+"/Verdana", startupToken) {
+	verdanaDir := filepath.Join(dataDir, "Verdana")
+
+	if startupToken != "" && forwardToInstance(verdanaDir, startupToken) {
 		log.Info().Str("token", previewToken(startupToken)).
 			Msg("forwarded a bundle invocation to the running launcher")
 		return
 	}
 
-	if startupToken != "" {
-		log.Info().Str("token", previewToken(startupToken)).Msg("bundle invocation at startup")
-		go backend.RunShortcutToken(startupToken)
-	}
-	startInstanceListener(filepath.Join(dataDir, "Verdana"))
+	// the listener goes up before the backend, so a shortcut clicked while
+	// this launcher is still starting finds someone to forward to instead of
+	// starting a second one; the tokens it accepts meanwhile wait for the
+	// backend to be up (see runBundleToken).
+	startInstanceListener(verdanaDir)
 
 	closeStores, err := backend.Start(backend.Options{
-		DataDir: filepath.Join(dataDir, "Verdana"),
+		DataDir: verdanaDir,
 		Host:    gioHost{},
 		Log:     &log,
 	})
@@ -127,6 +129,14 @@ func main() {
 		log.Fatal().Err(err).Msg("could not start the backend")
 	}
 	defer closeStores()
+
+	// the backend is up: the token this launcher was started with opens its
+	// napps, and the ones forwarded in while it was starting stop waiting.
+	close(launcherReady)
+	if startupToken != "" {
+		log.Info().Str("token", previewToken(startupToken)).Msg("bundle invocation at startup")
+		go runBundleToken(startupToken)
+	}
 
 	// the palette the user last chose, and its CSS tokens for napps
 	applyStoredTheme()

@@ -336,13 +336,13 @@ func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 			var p struct {
 				Name    string          `json:"name"`
 				Payload json.RawMessage `json:"payload"`
+				Replace bool            `json:"replace"`
 			}
 			if err := json.Unmarshal([]byte(params), &p); err != nil {
 				return nil, err
 			}
 			if p.Name != "" {
-				ci.lastAction.Store(&actionRequest{name: p.Name, payload: p.Payload})
-				notifyState()
+				ci.setActionState(&actionRequest{name: p.Name, payload: p.Payload}, p.Replace)
 			}
 			return nil, nil
 
