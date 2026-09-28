@@ -416,7 +416,7 @@ const promptLibScript = "(function(){" +
 	"}" +
 	"function btn(label, detail, instance, isDev, ok, index) {" +
 	"var b = document.createElement('button');" +
-	"b.style.cssText = 'display:block;width:100%;padding:10px 14px;margin-bottom:8px" +
+	"b.style.cssText = 'display:block;width:100%;max-width:360px;margin:0 auto 8px;padding:10px 14px" +
 	";border:0;border-radius:8px;background:' + (instance ? accent : card)" +
 	"+ ';color:' + (isDev ? devText : (instance ? accentText : fg)) + ';font-size:14px;text-align:left;cursor:pointer;';" +
 	"if (isDev) b.style.background = dev;" +
