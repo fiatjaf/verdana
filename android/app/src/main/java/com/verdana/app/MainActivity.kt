@@ -223,11 +223,13 @@ class MainActivity : ComponentActivity(), UI {
 
     // answerPrompt answers and leaves the prompt window. If the chosen option
     // routes to a window (existing or about to open), we force-jump there.
-    fun answerPrompt(p: Prompt, ok: Boolean, index: Int) {
+    // scope is how long the answer holds: "once", "session" or "always", and
+    // the launcher files the wider ones away (see backend.Scope).
+    fun answerPrompt(p: Prompt, ok: Boolean, index: Int, scope: String) {
         promptShown = false
         showHome = false
         showProfile = false
-        answer(p.id, ok, index)
+        answer(p.id, ok, index, scope)
         if (ok && index >= 0 && index < p.options.size) {
             val opt = p.options[index]
             when {
@@ -257,7 +259,9 @@ class MainActivity : ComponentActivity(), UI {
     fun uninstall(id: String) = Mobile.uninstall(id)
     fun launch(id: String) = Mobile.launch(id)
     fun checkForUpdates() = Mobile.checkForUpdates()
-    fun answer(id: Long, ok: Boolean, index: Int) = Mobile.answerPrompt(id, ok, index.toLong())
+    // scope is how long the answer holds: "once", "session" or "always"
+    fun answer(id: Long, ok: Boolean, index: Int, scope: String) =
+        Mobile.answerPrompt(id, ok, index.toLong(), scope)
     fun toggleTheme() {
         val next = if (state.theme == "dark") "light" else "dark"
         Mobile.setTheme(next, themeVarsJSON(themeByName(next)))
@@ -348,7 +352,7 @@ class MainActivity : ComponentActivity(), UI {
                             if (showingPrompt) {
                                 PromptWindow(
                                     prompt!!,
-                                    onAnswer = { ok, index -> answerPrompt(prompt!!, ok, index) },
+                                    onAnswer = { ok, index, scope -> answerPrompt(prompt!!, ok, index, scope) },
                                 )
                             }
                         }

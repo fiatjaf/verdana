@@ -39,13 +39,21 @@ func parseRelays(text string) []string {
 	return out
 }
 
+// promptButtons are the six answers an approval prompt can get: allow and
+// deny, each of them for this prompt only, for this session or always.
+type promptButtons struct {
+	allow, deny               widget.Clickable
+	sessionAllow, sessionDeny widget.Clickable
+	alwaysAllow, alwaysDeny   widget.Clickable
+}
+
 // layoutPrompt draws the dialog a blocked rpc is waiting on: either an
 // approve/deny question or a list of napps that can handle an action.
 func layoutPrompt(
 	gtx layout.Context,
 	th *material.Theme,
 	p *backend.Prompt,
-	approveBtn, denyBtn *widget.Clickable,
+	btns *promptButtons,
 	optBtns []widget.Clickable,
 ) layout.Dimensions {
 	children := []layout.FlexChild{
@@ -147,29 +155,82 @@ func layoutPrompt(
 			layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				pointer.CursorPointer.Add(gtx.Ops)
-				b := material.Button(th, denyBtn, "Cancel")
+				b := material.Button(th, &btns.deny, "Cancel")
 				b.Background = currentTheme().chipBg
 				b.Color = currentTheme().chipFg
 				return b.Layout(gtx)
 			}),
 		)
-	} else {
+	} else if !p.Remember {
+		// nothing to widen the answer into: a plain yes and a plain no
 		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					pointer.CursorPointer.Add(gtx.Ops)
-					return material.Button(th, approveBtn, "Allow").Layout(gtx)
+					return material.Button(th, &btns.allow, "Allow").Layout(gtx)
 				}),
 				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					pointer.CursorPointer.Add(gtx.Ops)
-					b := material.Button(th, denyBtn, "Deny")
+					b := material.Button(th, &btns.deny, "Deny")
 					b.Background = currentTheme().chipBg
 					b.Color = currentTheme().chipFg
 					return b.Layout(gtx)
 				}),
 			)
 		}))
+	} else {
+		// the scopes: a row for this prompt, a row for this session, a row
+		// for as long as the user leaves the answer there. Only the plain
+		// allow and deny are full size; the wider answers are quieter.
+		chipBtn := func(gtx layout.Context, btn *widget.Clickable, label string, textSize unit.Sp) layout.Dimensions {
+			pointer.CursorPointer.Add(gtx.Ops)
+			t := currentTheme()
+			b := material.Button(th, btn, label)
+			b.Background = t.chipBg
+			b.Color = t.chipFg
+			b.TextSize = textSize
+			b.Inset = layout.UniformInset(unit.Dp(8))
+			return b.Layout(gtx)
+		}
+		row := func(left, right func(gtx layout.Context) layout.Dimensions) layout.FlexChild {
+			return layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return layout.Inset{Bottom: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+						layout.Flexed(1, left),
+						layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+						layout.Flexed(1, right),
+					)
+				})
+			})
+		}
+		children = append(children,
+			row(
+				func(gtx layout.Context) layout.Dimensions {
+					pointer.CursorPointer.Add(gtx.Ops)
+					return material.Button(th, &btns.allow, "Allow").Layout(gtx)
+				},
+				func(gtx layout.Context) layout.Dimensions {
+					return chipBtn(gtx, &btns.deny, "Deny", 0)
+				},
+			),
+			row(
+				func(gtx layout.Context) layout.Dimensions {
+					return chipBtn(gtx, &btns.sessionAllow, "Allow this session", unit.Sp(13))
+				},
+				func(gtx layout.Context) layout.Dimensions {
+					return chipBtn(gtx, &btns.sessionDeny, "Deny this session", unit.Sp(13))
+				},
+			),
+			row(
+				func(gtx layout.Context) layout.Dimensions {
+					return chipBtn(gtx, &btns.alwaysAllow, "Always allow", unit.Sp(13))
+				},
+				func(gtx layout.Context) layout.Dimensions {
+					return chipBtn(gtx, &btns.alwaysDeny, "Always deny", unit.Sp(13))
+				},
+			),
+		)
 	}
 
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)

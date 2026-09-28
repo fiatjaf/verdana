@@ -25,6 +25,12 @@ type AppState struct {
 	// count: the user didn't choose that window.
 	LastLaunched map[string]time.Time `json:"last_launched"`
 
+	// Rules are the answers the user gave to permission prompts that were
+	// meant to stick ("always allow", "always deny"), keyed by RuleKey
+	// (see permissions.go). The "this session" ones are not here: they live
+	// in memory and go when the launcher quits.
+	Rules map[string]Rule `json:"rules"`
+
 	// Theme is "light" or "dark": what the launcher draws with and what
 	// every napp window is told to track.
 	Theme string `json:"theme"`
@@ -61,6 +67,9 @@ func loadState() {
 	}
 	if state.LastLaunched == nil {
 		state.LastLaunched = make(map[string]time.Time)
+	}
+	if state.Rules == nil {
+		state.Rules = make(map[string]Rule)
 	}
 	if state.Theme != "light" && state.Theme != "dark" {
 		state.Theme = "light"

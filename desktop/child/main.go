@@ -331,11 +331,12 @@ func writeMsg(m wireMsg) {
 // promptView and promptOptionView mirror backend.Prompt as the overlay needs
 // to see it.
 type promptView struct {
-	ID      int                `json:"id"`
-	Title   string             `json:"title"`
-	Detail  string             `json:"detail"`
-	Code    string             `json:"code"`
-	Options []promptOptionView `json:"options"`
+	ID       int                `json:"id"`
+	Title    string             `json:"title"`
+	Detail   string             `json:"detail"`
+	Code     string             `json:"code"`
+	Options  []promptOptionView `json:"options"`
+	Remember bool               `json:"remember"`
 }
 
 type promptOptionView struct {
@@ -343,13 +344,16 @@ type promptOptionView struct {
 	Detail   string `json:"detail"`
 	NappID   string `json:"nappId"`
 	Instance string `json:"instance"`
+	Dev      bool   `json:"dev"`
 }
 
 // promptAnswer is the bound call the overlay's buttons make. It sends the
 // answer up to the launcher and takes the overlay down; if the launcher has
-// another prompt queued for this window it will send it right back.
-func promptAnswer(id int, ok bool, index int) {
-	b, _ := json.Marshal(map[string]any{"ok": ok, "index": index})
+// another prompt queued for this window it will send it right back. scope is
+// how long the answer holds: "once", "session" or "always" (see
+// backend.Scope) — the launcher files the wider ones away and stops asking.
+func promptAnswer(id int, ok bool, index int, scope string) {
+	b, _ := json.Marshal(map[string]any{"ok": ok, "index": index, "scope": scope})
 	writeMsg(wireMsg{T: "promptAnswer", ID: id, Params: string(b)})
 }
 
@@ -414,27 +418,48 @@ const promptLibScript = "(function(){" +
 	"c.textContent = p.code;" +
 	"box.appendChild(c);" +
 	"}" +
-	"function btn(label, detail, instance, isDev, ok, index) {" +
+	"function btn(label, tone, ok, index, scope) {" +
+	"var bgc = card, fgc = fg;" +
+	"if (tone === 'accent') { bgc = accent; fgc = accentText }" +
+	"if (tone === 'dev') { bgc = dev; fgc = devText }" +
 	"var b = document.createElement('button');" +
 	"b.style.cssText = 'display:block;width:100%;max-width:360px;margin:0 auto 8px;padding:10px 14px" +
-	";border:0;border-radius:8px;background:' + (instance ? accent : card)" +
-	"+ ';color:' + (isDev ? devText : (instance ? accentText : fg)) + ';font-size:14px;text-align:left;cursor:pointer;';" +
-	"if (isDev) b.style.background = dev;" +
-	"var title = document.createElement('div'); title.textContent = label; b.appendChild(title);" +
-	"if (detail) { var sub = document.createElement('div'); sub.textContent = detail;" +
-	"sub.style.cssText = 'margin-top:3px;color:' + (isDev ? devText : (instance ? accentText : muted)) + ';font-size:11px;opacity:.75;'; b.appendChild(sub); }" +
-	"b.onclick = function() { window.__verdana_prompt_answer(p.id, ok, index) };" +
+	";border:0;border-radius:8px;background:' + bgc + ';color:' + fgc + ';font-size:14px;text-align:left" +
+	";cursor:pointer;';" +
+	"b.textContent = label;" +
+	"b.onclick = function() { window.__verdana_prompt_answer(p.id, ok, index, scope) };" +
 	"return b;" +
+	"};" +
+	// row puts buttons side by side, for the scopes of an approval prompt.
+	"function row() {" +
+	"var r = document.createElement('div');" +
+	"r.style.cssText = 'display:flex;gap:8px;margin:0 0 8px;';" +
+	"for (var i = 0; i < arguments.length; i++) {" +
+	"var b = arguments[i];" +
+	"b.style.maxWidth = 'none'; b.style.margin = '0'; b.style.flex = '1'; b.style.textAlign = 'center';" +
+	"r.appendChild(b);" +
+	"}" +
+	"return r;" +
 	"};" +
 	"var isPicker = p.options && p.options.length;" +
 	"if (isPicker) {" +
-	"p.options.forEach(function(opt, i) { box.appendChild(btn(opt.label, opt.detail, opt.instance, opt.dev, true, i)) });" +
+	"p.options.forEach(function(opt, i) {" +
+	"var b = btn(opt.label, opt.dev ? 'dev' : (opt.instance ? 'accent' : 'chip'), true, i, 'once');" +
+	"if (opt.detail) { var sub = document.createElement('div'); sub.textContent = opt.detail;" +
+	"sub.style.cssText = 'margin-top:3px;color:' + (opt.dev ? devText : (opt.instance ? accentText : muted))" +
+	"+ ';font-size:11px;opacity:.75;'; b.appendChild(sub); }" +
+	"box.appendChild(b);" +
+	"});" +
+	"box.appendChild(btn('Cancel', 'chip', false, 0, 'once'));" +
+	"} else if (p.remember) {" +
+	"box.appendChild(row(btn('Allow', 'accent', true, 0, 'once'), btn('Deny', 'chip', false, 0, 'once')));" +
+	"box.appendChild(row(btn('Allow this session', 'chip', true, 0, 'session')," +
+	"btn('Deny this session', 'chip', false, 0, 'session')));" +
+	"box.appendChild(row(btn('Always allow', 'chip', true, 0, 'always'), btn('Always deny', 'chip', false, 0, 'always')));" +
 	"} else {" +
-	"box.appendChild(btn('Allow', '', '', false, true, 0));" +
+	"box.appendChild(btn('Allow', 'accent', true, 0, 'once'));" +
+	"box.appendChild(btn('Deny', 'chip', false, 0, 'once'));" +
 	"}" +
-	"var cancel = btn(isPicker ? 'Cancel' : 'Deny', '', '', false, false, 0);" +
-	"cancel.style.background = card; cancel.style.color = fg;" +
-	"box.appendChild(cancel);" +
 	"o.appendChild(box);" +
 	"document.documentElement.appendChild(o);" +
 	"}," +

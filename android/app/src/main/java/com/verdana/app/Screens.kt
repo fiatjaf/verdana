@@ -712,7 +712,7 @@ private fun SwitcherRow(
 // screen under the same header, force-switched to whenever an action is
 // invoked, and reachable again from the window switcher.
 @Composable
-fun PromptWindow(p: Prompt, onAnswer: (Boolean, Int) -> Unit) {
+fun PromptWindow(p: Prompt, onAnswer: (Boolean, Int, String) -> Unit) {
     val theme = themeByName(currentThemeName)
     Column(
         Modifier
@@ -745,7 +745,7 @@ fun PromptWindow(p: Prompt, onAnswer: (Boolean, Int) -> Unit) {
         if (p.options.isNotEmpty()) {
             p.options.forEachIndexed { i, opt ->
                 Button(
-                    onClick = { onAnswer(true, i) },
+                    onClick = { onAnswer(true, i, "once") },
                     modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
                 ) {
                     if (opt.detail.isNotBlank()) {
@@ -758,17 +758,63 @@ fun PromptWindow(p: Prompt, onAnswer: (Boolean, Int) -> Unit) {
                     }
                 }
             }
-            TextButton(onClick = { onAnswer(false, 0) }) {
+            TextButton(onClick = { onAnswer(false, 0, "once") }) {
                 Text("Cancel", color = theme.chipFg)
             }
+        } else if (p.remember) {
+            PromptScopes(theme) { ok, scope -> onAnswer(ok, 0, scope) }
         } else {
             Row {
-                Button(onClick = { onAnswer(true, 0) }) { Text("Allow") }
+                Button(onClick = { onAnswer(true, 0, "once") }) { Text("Allow") }
                 Spacer(Modifier.width(8.dp))
                 Button(
-                    onClick = { onAnswer(false, 0) },
+                    onClick = { onAnswer(false, 0, "once") },
                     colors = ButtonDefaults.buttonColors(containerColor = theme.chipBg, contentColor = theme.chipFg),
                 ) { Text("Deny") }
+            }
+        }
+    }
+}
+
+// one of the six answers a permission prompt gets
+private data class PromptChoice(val label: String, val ok: Boolean, val scope: String, val loud: Boolean = false)
+
+// PromptScopes is the grid those six answers are drawn in: allow and deny,
+// each of them for this prompt only, for this session or always. Verdana
+// files the wider answers away, so the next time the napp asks there is no
+// prompt to answer.
+@Composable
+private fun PromptScopes(theme: Theme, onAnswer: (Boolean, String) -> Unit) {
+    val rows = listOf(
+        listOf(
+            PromptChoice("Allow", true, "once", loud = true),
+            PromptChoice("Deny", false, "once"),
+        ),
+        listOf(
+            PromptChoice("Allow this session", true, "session"),
+            PromptChoice("Deny this session", false, "session"),
+        ),
+        listOf(
+            PromptChoice("Always allow", true, "always"),
+            PromptChoice("Always deny", false, "always"),
+        ),
+    )
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        for (row in rows) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                for (choice in row) {
+                    Button(
+                        onClick = { onAnswer(choice.ok, choice.scope) },
+                        modifier = Modifier.weight(1f),
+                        colors = if (choice.loud) ButtonDefaults.buttonColors()
+                        else ButtonDefaults.buttonColors(
+                            containerColor = theme.chipBg,
+                            contentColor = theme.chipFg,
+                        ),
+                    ) {
+                        Text(choice.label, fontSize = 13.sp, maxLines = 1)
+                    }
+                }
             }
         }
     }

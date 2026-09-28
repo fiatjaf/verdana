@@ -155,8 +155,13 @@ func CurrentPrompt() string {
 }
 
 // AnswerPrompt answers the prompt with that id. index picks an option for a
-// picker prompt and is ignored otherwise.
-func AnswerPrompt(id int, ok bool, index int) { backend.AnswerPrompt(id, ok, index) }
+// picker prompt and is ignored otherwise. scope is how long the answer holds:
+// "once" (this prompt only), "session" (until the launcher quits) or "always"
+// (written to state, until the user takes it back). Anything else is taken as
+// "once", and the scopes are ignored for prompts that can't be remembered.
+func AnswerPrompt(id int, ok bool, index int, scope string) {
+	backend.AnswerPrompt(id, backend.Answer{OK: ok, Index: index, Scope: backend.Scope(scope)})
+}
 
 // ─── launcher actions ────────────────────────────────────────────
 

@@ -16,8 +16,36 @@ import (
 //
 // Only one prompt shows at a time; the rest queue behind it. Nothing blocks
 // forever: an unanswered prompt is denied after promptTimeout.
+//
+// A sensitive question is only asked when no rule has an answer for it (see
+// permissions.go), and the answer can come back with a scope: for this prompt
+// only, for this session, or always. Anything wider than that gets filed away
+// by permissions.go and settles the next question of the same kind without a
+// prompt.
 
 const promptTimeout = 2 * time.Minute
+
+// Scope is how long the user's answer to a prompt holds.
+type Scope string
+
+const (
+	// ScopeOnce is this prompt only: nothing is remembered.
+	ScopeOnce Scope = "once"
+
+	// ScopeSession holds until the launcher quits, and is never written down.
+	ScopeSession Scope = "session"
+
+	// ScopeAlways holds across restarts, until the user takes it back.
+	ScopeAlways Scope = "always"
+)
+
+// Answer is what the user chose on a prompt: yes or no, which option of a
+// picker (ignored otherwise), and how long that answer holds.
+type Answer struct {
+	OK    bool  `json:"ok"`
+	Index int   `json:"index"`
+	Scope Scope `json:"scope"`
+}
 
 // PromptOption is one choice in a picker prompt.
 type PromptOption struct {
@@ -46,6 +74,11 @@ type Prompt struct {
 	// Options is empty for a plain approve/deny prompt.
 	Options []PromptOption `json:"options"`
 
+	// Remember says the answer can stick, so a GUI offers the scopes
+	// alongside the yes and the no. False for a picker, whose answer is
+	// only ever about this one dispatch.
+	Remember bool `json:"remember"`
+
 	// Napp is the napp that asked, for a GUI that wants to show it.
 	Napp string `json:"napp"`
 
@@ -55,13 +88,11 @@ type Prompt struct {
 	// wherever it likes).
 	Instance string `json:"instance"`
 
-	resp chan promptAnswer
+	// key is what an answer wider than this prompt is remembered under.
+	// Zero for a picker.
+	key  RuleKey
+	resp chan Answer
 	done bool
-}
-
-type promptAnswer struct {
-	ok    bool
-	index int
 }
 
 var (
@@ -100,10 +131,10 @@ func enqueuePrompt(p *Prompt) {
 	syncPromptOverlays()
 }
 
-// AnswerPrompt is what a GUI calls when the user clicks: it hands the answer
-// to the waiting rpc and promotes the next queued prompt. index is the chosen
-// option for a picker prompt and ignored otherwise.
-func AnswerPrompt(id int, ok bool, index int) {
+// AnswerPrompt is what a GUI calls when the user clicks: it remembers the
+// answer when the user asked for it to stick, hands it to the waiting rpc and
+// promotes the next queued prompt.
+func AnswerPrompt(id int, ans Answer) {
 	promptMu.Lock()
 	var p *Prompt
 	if promptActive != nil && promptActive.ID == id {
@@ -139,8 +170,14 @@ func AnswerPrompt(id int, ok bool, index int) {
 	}
 	promptMu.Unlock()
 
+	// before the rpc goes on, so the rule is already in place by the time
+	// the next question of the same kind comes round
+	if p.key.valid() {
+		remember(p.key, Rule{Decision: decisionOf(ans.OK)}, ans.Scope)
+	}
+
 	select {
-	case p.resp <- promptAnswer{ok: ok, index: index}:
+	case p.resp <- ans:
 	default:
 	}
 	if host != nil {
@@ -149,13 +186,14 @@ func AnswerPrompt(id int, ok bool, index int) {
 	syncPromptOverlays()
 }
 
-func (p *Prompt) wait() promptAnswer {
+func (p *Prompt) wait() Answer {
 	select {
 	case a := <-p.resp:
 		return a
 	case <-time.After(promptTimeout):
-		AnswerPrompt(p.ID, false, 0)
-		return promptAnswer{ok: false}
+		// unanswered is a plain no: nothing is remembered for it
+		AnswerPrompt(p.ID, Answer{})
+		return Answer{}
 	}
 }
 
@@ -167,27 +205,46 @@ func newPrompt(napp, title, detail, code string, options []PromptOption) *Prompt
 		Detail:  detail,
 		Code:    code,
 		Options: options,
-		resp:    make(chan promptAnswer, 1),
+		resp:    make(chan Answer, 1),
 	}
 }
 
-// askApproval blocks until the user approves or denies. It is what makes
-// signEvent, nip04/nip44, saveFile, copyText and publish "sensitive".
-func askApproval(ci *Instance, title, detail, code string) bool {
+// askApproval answers whether a napp may do something, for perm: a rule that
+// already covers it decides right away, and only a question nothing has an
+// answer to becomes a prompt. It is what makes signEvent, nip04/nip44,
+// saveFile, copyText, napp.link and publish "sensitive".
+func askApproval(ci *Instance, perm Permission, title, detail, code string) bool {
 	name := "A napp"
-	if ci != nil && ci.napp.Label() != "" {
-		name = ci.napp.Label()
+	nappID := ""
+	if ci != nil {
+		nappID = ci.napp.ID
+		if ci.napp.Label() != "" {
+			name = ci.napp.Label()
+		}
 	}
+
+	// a napp with no id asked the launcher itself, and the rules file those
+	// under the empty napp, same as an installed configuration that is about
+	// the launcher rather than about one napp.
+	key := RuleKey{Napp: nappID, Permission: perm}
+	if rule, ok := lookupRule(key); ok {
+		log.Info().Str("napp", name).Str("ask", title).
+			Str("rule", string(rule.Decision)).Msg("approval answered by the rules")
+		return rule.Decision.granted()
+	}
+
 	p := newPrompt(name, name+" wants to "+title, detail, code, nil)
+	p.key = key
+	p.Remember = true
 	if ci != nil {
 		p.Instance = ci.instance
 	}
 	log.Info().Str("napp", name).Str("ask", title).Msg("asking the user for approval")
 	enqueuePrompt(p)
 	answer := p.wait()
-	log.Info().Str("napp", name).Str("ask", title).Bool("granted", answer.ok).
-		Msg("approval answered")
-	return answer.ok
+	log.Info().Str("napp", name).Str("ask", title).Bool("granted", answer.OK).
+		Str("scope", string(answer.Scope)).Msg("approval answered")
+	return answer.OK
 }
 
 // askActionHandler asks which napp should handle an action when more than one
@@ -236,10 +293,10 @@ func askActionHandler(caller *Instance, action string, payload json.RawMessage, 
 	log.Info().Str("action", action).Int("options", len(options)).Msg("asking the user to pick a handler")
 	enqueuePrompt(p)
 	answer := p.wait()
-	if !answer.ok || answer.index < 0 || answer.index >= len(options) {
+	if !answer.OK || answer.Index < 0 || answer.Index >= len(options) {
 		return PromptOption{}, false
 	}
-	return options[answer.index], true
+	return options[answer.Index], true
 }
 
 // ─── showing prompts over the window that asked ──────────────────
@@ -315,12 +372,9 @@ func syncPromptOverlays() {
 
 // handlePromptAnswer is what a shell sends up when its overlay was clicked.
 func (ci *Instance) handlePromptAnswer(m WireMsg) {
-	var a struct {
-		OK    bool `json:"ok"`
-		Index int  `json:"index"`
-	}
+	var a Answer
 	_ = json.Unmarshal([]byte(m.Params), &a)
-	AnswerPrompt(m.ID, a.OK, a.Index)
+	AnswerPrompt(m.ID, a)
 }
 
 // preview trims an arbitrary payload into something a dialog can show.

@@ -104,7 +104,7 @@ func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 			if err := json.Unmarshal([]byte(params), &evt); err != nil {
 				return nil, err
 			}
-			if !askApproval(ci, "sign an event with your key",
+			if !askApproval(ci, PermSign, "sign an event with your key",
 				fmt.Sprintf("Kind %d, %d tags.", evt.Kind, len(evt.Tags)),
 				preview(evt.Content, 200)) {
 				return nil, errors.New("denied by the user")
@@ -134,12 +134,14 @@ func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 			}
 			encrypting := strings.HasSuffix(method, ".encrypt")
 			verb := "decrypt a message with your key"
+			perm := PermDecrypt
 			payload := preview(p.Ciphertext, 120)
 			if encrypting {
 				verb = "encrypt a message with your key"
+				perm = PermEncrypt
 				payload = preview(p.Plaintext, 120)
 			}
-			if !askApproval(ci, verb, "Counterparty "+nip19.EncodeNpub(pk)+" ("+strings.SplitN(method, ".", 2)[0]+").", payload) {
+			if !askApproval(ci, perm, verb, "Counterparty "+nip19.EncodeNpub(pk)+" ("+strings.SplitN(method, ".", 2)[0]+").", payload) {
 				return "", errors.New("denied by the user")
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -362,7 +364,7 @@ func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 				}
 				url = p.URL
 			}
-			if !askApproval(ci, "open a link in your browser", "", preview(url, 200)) {
+			if !askApproval(ci, PermOpenLink, "open a link in your browser", "", preview(url, 200)) {
 				return nil, errors.New("denied by the user")
 			}
 			return nil, openExternalLink(url)
@@ -647,7 +649,7 @@ func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 				return nil, err
 			}
 			name := SanitizeFilename(p.Name)
-			if !askApproval(ci, "save a file to your disk",
+			if !askApproval(ci, PermSaveFile, "save a file to your disk",
 				"“"+name+"” goes to "+host.SaveFileTarget()+".", "") {
 				return nil, errors.New("denied by the user")
 			}
@@ -663,7 +665,7 @@ func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 			if len(p.Text) > maxCopyChars {
 				return nil, errors.New("text is too long to copy")
 			}
-			if !askApproval(ci, "copy text to your clipboard",
+			if !askApproval(ci, PermCopyText, "copy text to your clipboard",
 				strconv.Itoa(len(p.Text))+" characters.", preview(p.Text, 120)) {
 				return nil, errors.New("denied by the user")
 			}
@@ -783,7 +785,7 @@ func publishEvent(ci *Instance, evt nostr.Event, requested []string) (any, error
 
 	log.Println("gathered targets: ", targets)
 
-	if !askApproval(ci, "publish an event",
+	if !askApproval(ci, PermPublish, "publish an event",
 		fmt.Sprintf("Kind %d to %d relay(s): %s", evt.Kind, len(targets),
 			preview(strings.Join(stripSchemes(targets), ", "), 160)),
 		preview(evt.Content, 200)) {

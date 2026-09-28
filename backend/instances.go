@@ -707,10 +707,40 @@ func runNappAction(
 		return dispatchToInstance(ctx, ci, req)
 	}
 
-	choice, ok := askActionHandler(caller, name, payload, candidates, open)
-	if !ok {
-		return nil, errors.New("action handler selection cancelled")
+	// who asked matters to the rules: the same action from another napp is
+	// another question
+	callerID := ""
+	if caller != nil {
+		callerID = caller.napp.ID
 	}
+	key := RuleKey{Napp: callerID, Permission: PermDispatch, Subject: name}
+
+	var choice PromptOption
+	if rule, ok := lookupRule(key); ok {
+		// a rule that names a handler settles it without anyone choosing:
+		// an installed configuration saying which napp it expects to get
+		// its actions, or a user who said to stop asking. A rule that only
+		// says no stops the dispatch here.
+		if !rule.Decision.granted() {
+			log.Info().Str("from", callerName).Str("action", name).
+				Msg("the rules deny this dispatch")
+			return nil, fmt.Errorf("dispatching %q is denied by the rules", name)
+		}
+		picked, ok := handlerOption(rule.Target, candidates, open)
+		if !ok {
+			return nil, fmt.Errorf("the rules send %q to %q, which is gone", name, rule.Target)
+		}
+		log.Info().Str("from", callerName).Str("action", name).
+			Str("napp", picked.NappID).Msg("the rules picked the handler")
+		choice = picked
+	} else {
+		picked, ok := askActionHandler(caller, name, payload, candidates, open)
+		if !ok {
+			return nil, errors.New("action handler selection cancelled")
+		}
+		choice = picked
+	}
+
 	if choice.Instance != "" {
 		ci := lookupInstance(choice.Instance)
 		if ci == nil {
@@ -728,6 +758,35 @@ func runNappAction(
 		}
 	}
 	return nil, fmt.Errorf("napp %q is gone", choice.NappID)
+}
+
+// handlerOption is the handler a rule named: an open window of that napp
+// first — routing into one keeps the user's state — and the napp itself
+// otherwise, to be launched.
+func handlerOption(target string, candidates []Napp, open []*Instance) (PromptOption, bool) {
+	for _, ci := range open {
+		if ci.napp.ID != target {
+			continue
+		}
+		return PromptOption{
+			Label:    ci.napp.Label() + " - window #" + strconv.Itoa(ci.number),
+			NappID:   ci.napp.ID,
+			Instance: ci.instance,
+			Number:   ci.number,
+			Dev:      strings.HasPrefix(ci.napp.ID, "dev~"),
+		}, true
+	}
+	for _, n := range candidates {
+		if n.ID == target {
+			return PromptOption{
+				Label:  n.Label(),
+				Detail: n.ID,
+				NappID: n.ID,
+				Dev:    strings.HasPrefix(n.ID, "dev~"),
+			}, true
+		}
+	}
+	return PromptOption{}, false
 }
 
 // findHandlersForAction lists the installed and dev napps declaring this action

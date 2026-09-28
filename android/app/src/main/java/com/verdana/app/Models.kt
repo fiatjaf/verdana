@@ -37,6 +37,9 @@ data class Prompt(
     val code: String,
     val napp: String,
     val options: List<PromptOption>,
+    // remember says the answer can stick: the launcher then offers this
+    // prompt only, this session, and always, and files the wider answers away.
+    val remember: Boolean = false,
 )
 
 data class LauncherState(
@@ -125,6 +128,7 @@ fun parsePrompt(json: String): Prompt? {
         detail = o.optString("detail"),
         code = o.optString("code"),
         napp = o.optString("napp"),
+        remember = o.optBoolean("remember"),
         options = (0 until optsArr.length()).map { i ->
             val p = optsArr.getJSONObject(i)
             PromptOption(

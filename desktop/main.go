@@ -262,8 +262,7 @@ func gioMain() {
 		actionBtns          []widget.Clickable
 		updateBtns          []widget.Clickable
 		checkUpdBtn         widget.Clickable
-		approveBtn          widget.Clickable
-		denyBtn             widget.Clickable
+		promptBtns          promptButtons
 		optBtns             []widget.Clickable
 
 		bundleNameEd      widget.Editor
@@ -331,18 +330,30 @@ func gioMain() {
 					for len(optBtns) < len(activePrompt.Options) {
 						optBtns = append(optBtns, widget.Clickable{})
 					}
-					if approveBtn.Clicked(gtx) {
-						backend.AnswerPrompt(activePrompt.ID, true, 0)
-					}
-					if denyBtn.Clicked(gtx) {
-						backend.AnswerPrompt(activePrompt.ID, false, 0)
+					// allow and deny, each of them for this prompt only, for
+					// this session or always
+					for _, c := range []struct {
+						ok    bool
+						scope backend.Scope
+						btn   *widget.Clickable
+					}{
+						{true, backend.ScopeOnce, &promptBtns.allow},
+						{true, backend.ScopeSession, &promptBtns.sessionAllow},
+						{true, backend.ScopeAlways, &promptBtns.alwaysAllow},
+						{false, backend.ScopeOnce, &promptBtns.deny},
+						{false, backend.ScopeSession, &promptBtns.sessionDeny},
+						{false, backend.ScopeAlways, &promptBtns.alwaysDeny},
+					} {
+						if c.btn.Clicked(gtx) {
+							backend.AnswerPrompt(activePrompt.ID, backend.Answer{OK: c.ok, Scope: c.scope})
+						}
 					}
 					for i := range activePrompt.Options {
 						if optBtns[i].Clicked(gtx) {
-							backend.AnswerPrompt(activePrompt.ID, true, i)
+							backend.AnswerPrompt(activePrompt.ID, backend.Answer{OK: true, Index: i, Scope: backend.ScopeOnce})
 						}
 					}
-					return layoutPrompt(gtx, th, activePrompt, &approveBtn, &denyBtn, optBtns)
+					return layoutPrompt(gtx, th, activePrompt, &promptBtns, optBtns)
 				}
 
 				if ui.confirmLogout {
