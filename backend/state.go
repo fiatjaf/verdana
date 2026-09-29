@@ -183,3 +183,15 @@ func IsInstalled(id string) bool {
 	_, ok := state.InstalledNapps[id]
 	return ok
 }
+
+// installedIDs snapshots the installed ids into a set, for callers that test
+// membership once per napp.
+func installedIDs() map[string]struct{} {
+	stateMu.Lock()
+	defer stateMu.Unlock()
+	ids := make(map[string]struct{}, len(state.InstalledNapps))
+	for id := range state.InstalledNapps {
+		ids[id] = struct{}{}
+	}
+	return ids
+}

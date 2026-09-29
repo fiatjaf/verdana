@@ -2,6 +2,7 @@ package backend
 
 import (
 	"context"
+	"sort"
 	"sync"
 	"sync/atomic"
 )
@@ -45,7 +46,9 @@ type State struct {
 	// Relays are the discovery relays.
 	Relays []string `json:"relays"`
 
-	// Installed napps, and the ones discovery found, both sorted by name.
+	// Installed napps, most recently launched first. Discovery holds the ones
+	// the relays found, with the ones not installed yet first — see
+	// sortDiscovery.
 	Installed []Napp `json:"installed"`
 	Discovery []Napp `json:"discovery"`
 
@@ -298,8 +301,28 @@ func setFetching(fetching bool) {
 }
 
 func setDiscovery(list []Napp) {
+	ls.mu.Lock()
 	ls.discovery = list
+	ls.sortDiscovery()
+	ls.mu.Unlock()
 	notifyState()
+}
+
+// sortDiscovery floats the napps the user hasn't installed to the top of the
+// discovery list: that tab exists to show what's missing, and the ones already
+// on disk are the ones they came here without. The ones on disk sink to the
+// bottom, where their buttons offer uninstall and update instead of install.
+// Within each group the order the relays delivered is kept.
+//
+// The installed set is read here rather than remembered, so a napp installed
+// or uninstalled after discovery ran moves between the groups immediately.
+func (l *launcherState) sortDiscovery() {
+	installed := installedIDs()
+	sort.SliceStable(l.discovery, func(i, j int) bool {
+		_, iIn := installed[l.discovery[i].ID]
+		_, jIn := installed[l.discovery[j].ID]
+		return jIn && !iIn
+	})
 }
 
 func setBusy(id string, busy bool) {

@@ -16,10 +16,13 @@ import (
 )
 
 // refreshInstalled republishes the installed list into the launcher state.
-// Ordering is installedNapps' business (most recently launched first).
+// Ordering is installedNapps' business (most recently launched first), and the
+// discovery list gets resorted around the new set: an install or uninstall
+// moves its napp between the top and bottom halves of that list.
 func refreshInstalled() {
 	ls.mu.Lock()
 	ls.installed = installedNapps()
+	ls.sortDiscovery()
 	ls.mu.Unlock()
 	notifyState()
 }
