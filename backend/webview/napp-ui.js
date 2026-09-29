@@ -7,7 +7,7 @@
 // save typing, write the markup when they do not — the two look the same.
 //
 //   const ui = window.napp.ui
-//   ui.bar(ui.button({ label: "publish", variant: "accent", onClick: save }),
+//   ui.bar(ui.button({ label: "publish", variant: "brand", onClick: save }),
 //          ui.button({ label: "cancel" }))
 
 ;(() => {
@@ -67,11 +67,14 @@
     return on(node, onClick)
   }
 
-  // chip is a small pick. Long names crop inside it, so pass the whole one as
+  // chip is a small pick, and a pill of small caps. active fills it with the
+  // brand; a tone says what it is (bad, warn) and static makes it a fact
+  // rather than a pick. Long names crop inside it, so pass the whole one as
   // title to keep it readable on hover.
-  const chip = ({ label, active, icon: glyph, title, className, onClick } = {}) => {
+  const chip = ({ label, active, tone, icon: glyph, title, className, onClick } = {}) => {
     const node = el("button", "v-chip", el("span", "", glyph ? [icon(glyph), " ", label] : label))
     if (active) node.classList.add("v-chip--on")
+    if (tone) node.classList.add("v-chip--" + tone)
     classes(node, className)
     if (title) node.title = title
     return on(node, onClick)
@@ -128,7 +131,7 @@
   // field is the form line: the italic label over the control, a note under.
   // The label wraps the control, so clicking the words focuses it.
   const field = ({ label, control, note, className } = {}) => {
-    const node = el("label", "v-field", label ? text("span", "v-hint", label) : null, control || null)
+    const node = el("label", "v-field", label ? text("span", "v-label", label) : null, control || null)
     if (note) node.append(text("span", "v-field-note", note))
     classes(node, className)
     return node
@@ -267,7 +270,7 @@
 
   const notice = (message, { tone, icon: glyph, className } = {}) => {
     const which = tone || "warn"
-    const mark = glyph === null ? null : icon(glyph || (which === "danger" ? "x" : which === "info" ? "info" : "warning"))
+    const mark = glyph === null ? null : icon(glyph || (which === "bad" ? "x" : which === "info" ? "info" : "warning"))
     const node = el("div", "v-notice v-notice--" + which, mark, el("span", "", message))
     classes(node, className)
     return node
@@ -312,6 +315,42 @@
     return node
   }
 
+  // section is a named group of rows: the name shouted, a hairline under it.
+  const section = (label, ...children) => el("div", "v-section", text("div", "v-label", label), children)
+
+  // header is the first line of a screen: a name, and what acts on it.
+  const header = (...children) => el("div", "v-header", children)
+
+  // switch is a setting that is on or off, and where it stands.
+  const toggle = ({ label, note, checked, onChange, className } = {}) => {
+    const box = el("input")
+    box.type = "checkbox"
+    box.checked = !!checked
+    box.addEventListener("change", () => {
+      if (typeof onChange === "function") onChange(box.checked, box)
+    })
+    const words = el("span", "v-switch-text", label || null)
+    if (note) words.append(el("span", "v-switch-note", note))
+    const node = el("label", "v-switch", box, el("span", "v-switch-track"), words)
+    classes(node, className)
+    node.input = box
+    return node
+  }
+
+  // meter says how far along something is: value 0…1, a tone for the rest.
+  const meter = ({ value = 0, tone, className } = {}) => {
+    const node = el("div", "v-meter")
+    if (tone) node.classList.add("v-meter--" + tone)
+    classes(node, className)
+    node.value = value
+    const set = v => node.style.setProperty("--v-value", Math.max(0, Math.min(1, v)) * 100 + "%")
+    set(value)
+    node.set = set
+    return node
+  }
+
+  const kbd = value => text("kbd", "v-kbd", value)
+
   const code = value => text("code", "v-code", value)
   const codeBlock = value => text("pre", "v-codeblock", value)
 
@@ -323,16 +362,26 @@
     stack: (...children) => el("div", "v-col", children),
     bar: (...children) => el("div", "v-bar", children),
     card: (...children) => el("div", "v-card", children),
-    rule: () => el("hr", "v-rule"),
+    plate: (...children) => el("div", "v-plate", children),
+    header,
+    section,
+    /** grow is a row's filler: whatever follows it is pushed to the far end. */
+    grow: () => el("span", "v-grow"),
+    divider: () => el("hr", "v-divider"),
     // type
     title: value => text("h2", "v-title", value),
+    display: value => text("h1", "v-display", value),
     heading: value => text("h3", "v-heading", value),
+    /** The voice that names a group: small caps, tracked, grey. */
+    label: value => text("div", "v-label", value),
     caption: value => text("span", "v-caption", value),
     hint: value => text("span", "v-hint", value),
     mono: value => text("span", "v-mono", value),
+    kbd,
     code,
     codeBlock,
     empty: value => text("div", "v-empty", value),
+    meter,
     // controls
     button,
     chip,
@@ -342,6 +391,7 @@
     field,
     check,
     radios,
+    switch: toggle,
     // content
     details,
     rowList,

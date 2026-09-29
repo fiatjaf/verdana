@@ -5,25 +5,28 @@
  * script, no helpers, nothing to call. Plain markup with these classes looks
  * like the launcher.
  *
- *   <button class="v-btn v-btn--accent">publish</button>
- *   <div class="v-col"><div class="v-hint">relays</div>…</div>
+ *   <button class="v-btn v-btn--brand">publish</button>
+ *   <div class="v-col"><div class="v-label">relays</div>…</div>
  *
- * The look is the launcher's: flat plates, small corners, one filled accent
- * for the action that matters, and a lot of grey. Colors are the launcher's
- * own tokens (--surface, --chip, --accent, …), which bridge.js keeps current
- * on <html> — so a kit follows the launcher's theme for free, and the values
- * below only matter when nothing has spoken yet.
+ * The look is the launcher's, said loudly: Verdana (the very face the launcher
+ * embeds, in three faces, inlined by embed.go), a heavy uppercase voice for
+ * anything that names a thing, filled plates with a pressed edge, hairlines
+ * everywhere, and the launcher's grey with its indigo doing the pointing.
+ * Colors are the launcher's own tokens (--surface, --chip, --accent, …), which
+ * bridge.js keeps current on <html> — so a kit follows the launcher's theme
+ * for free, and the values below only matter when nothing has spoken yet.
  *
  * As in the launcher's own layout, a class says how a thing looks and never
  * where it goes: width, margins and placement belong to the parent. */
 
 /* ─── tokens ─────────────────────────────────────────────────────
-   The colors the launcher sends, and the kit's own measurements. A
-   custom property set inline on <html> (what bridge.js does) beats a
-   rule here, so these are the values a page falls back on. */
+   The colors the launcher sends, the two washes derived from them, and
+   the measurements. A custom property set inline on <html> (what
+   bridge.js does) beats a rule here, so these are the values a page
+   falls back on. Verdana is wide, so the sizes read small. */
 :root {
   color-scheme: light dark;
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family: Verdana, "DejaVu Sans", "Bitstream Vera Sans", system-ui, sans-serif;
   font-synthesis-weight: none;
   --surface: #ffffff;
   --surface-alt: #f2f2f2;
@@ -38,20 +41,52 @@
   --danger: #cc2222;
   --dev: #ffe5b4;
   --dev-text: #704000;
-  /* Corners: 4px is a control, 6px a field, 8px a card, 10px a dialog. */
-  --v-radius: 4px;
+  /* The kit's own names for the launcher's colors, so a rule reads as
+     "ink on a fill" rather than as a hex value picked once. */
+  --v-ink: var(--text);
+  --v-ink-2: var(--text-muted);
+  --v-ink-3: var(--text-faint);
+  --v-fill: var(--chip);
+  --v-fill-2: var(--surface-alt);
+  --v-line: var(--border);
+  --v-brand: var(--accent);
+  --v-brand-ink: var(--accent-text);
+  --v-bad: var(--danger);
+  --v-warn: var(--dev);
+  --v-warn-ink: var(--dev-text);
+  /* The two washes: a tone laid thinly over the surface, for anything
+     that is about a tone without being one. */
+  --v-brand-wash: color-mix(in srgb, var(--v-brand) 12%, var(--surface));
+  --v-brand-wash-2: color-mix(in srgb, var(--v-brand) 22%, var(--surface));
+  --v-bad-wash: color-mix(in srgb, var(--v-bad) 12%, var(--surface));
+  --v-hover: color-mix(in srgb, var(--v-ink) 7%, transparent);
+  --v-press: color-mix(in srgb, var(--v-ink) 14%, transparent);
+  /* Corners: 4 is a control, 6 a field, 8 a plate, 10 a card, and a pill
+     for anything that is a pick. */
+  --v-radius: 5px;
   --v-radius-field: 6px;
-  --v-radius-card: 8px;
-  --v-radius-dialog: 10px;
+  --v-radius-plate: 8px;
+  --v-radius-card: 10px;
+  --v-radius-pill: 999px;
   /* Space: 4, 8, 12, 16, 20 — the launcher's own steps. */
   --v-gap: 8px;
   --v-gap-tight: 4px;
   --v-gap-loose: 12px;
   --v-pad: 8px;
   --v-pad-loose: 12px;
-  /* Motion: the launcher is still, so only what a hover does. */
-  --v-fast: 120ms;
-  --v-ease: ease;
+  --v-pad-roomy: 16px;
+  /* Type: Verdana runs large, so the ladder stops early. */
+  --v-micro: 10.5px;
+  --v-small: 11.5px;
+  --v-body-s: 12.5px;
+  --v-body: 13.5px;
+  --v-lead: 15px;
+  --v-title: 19px;
+  --v-display: 26px;
+  /* Motion: quick for color, move for place. One easing. */
+  --v-fast: 110ms;
+  --v-move: 180ms;
+  --v-ease: cubic-bezier(0.2, 0, 0.1, 1);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -93,18 +128,92 @@
 @media (prefers-reduced-motion: reduce) {
   :root {
     --v-fast: 0.01ms;
+    --v-move: 0.01ms;
   }
 }
 
-/* A page with no styles of its own still lands on the launcher's colors. */
+/* A page with no styles of its own still lands on the launcher's colors,
+   and a selection is always the brand. */
 body {
   background: var(--surface);
-  color: var(--text);
+  color: var(--v-ink);
+  font-size: var(--v-body);
+  line-height: 1.5;
+}
+
+::selection {
+  background: var(--v-brand);
+  color: var(--v-brand-ink);
+}
+
+/* Everything the kit makes is focusable, and says where it is. */
+:is(a, button, input, textarea, select, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--v-brand);
+  outline-offset: 2px;
+  border-radius: var(--v-radius);
+}
+
+/* ─── type ──────────────────────────────────────────────────────
+   The launcher's voices, at two weights and one size for the quiet
+   ones. Anything that names a thing is heavy and tracked; anything
+   that explains one is grey. */
+.v-title {
+  margin: 0;
+  font-size: var(--v-title);
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: 0.01em;
+}
+
+.v-display {
+  margin: 0;
+  font-size: var(--v-display);
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+}
+
+.v-heading {
+  margin: 0;
+  font-size: var(--v-lead);
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+/* The voice that names a group: a section, a field, a column. Small,
+   bold, tracked, grey — and the loudest thing on a quiet screen. */
+.v-label {
+  font-size: var(--v-micro);
+  font-weight: 700;
+  line-height: 1.4;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--v-ink-3);
+}
+
+.v-caption {
+  font-size: var(--v-small);
+  line-height: 1.45;
+  color: var(--v-ink-3);
+}
+
+.v-hint {
+  font-size: var(--v-body-s);
+  font-style: italic;
+  line-height: 1.45;
+  color: var(--v-ink-2);
+}
+
+/* Machine text: keys, addresses, ids. */
+.v-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: var(--v-body-s);
+  font-variant-numeric: tabular-nums;
 }
 
 /* ─── layout ────────────────────────────────────────────────────
-   The two shapes everything is built from: a column and a row of
-   controls. Both only space their children. */
+   The three shapes everything is built from: a column, a row of
+   controls, and a plate with something on it. */
 .v-col {
   display: flex;
   flex-direction: column;
@@ -119,238 +228,328 @@ body {
   gap: var(--v-gap);
 }
 
-/* A plate with something on it: a napp on a card, a group of settings. */
+/* The filler of a row: everything after it is pushed to the far end. */
+.v-grow {
+  margin-left: auto;
+}
+
 .v-card {
-  padding: var(--v-pad-loose);
+  padding: var(--v-pad-roomy);
+  border: 1px solid var(--v-line);
   border-radius: var(--v-radius-card);
-  background: var(--surface-alt);
+  background: var(--v-fill-2);
   min-width: 0;
 }
 
-/* ─── type ──────────────────────────────────────────────────────
-   The launcher's voices: a bold title, a bold name, the small grey
-   under a name, the italic label over a field. */
-.v-title {
-  margin: 0;
-  font-size: 20px;
-  font-weight: 700;
-  line-height: 1.25;
+/* A plate with no fill: for the row that has to sit on a card. */
+.v-plate {
+  padding: var(--v-pad-loose);
+  border: 1px solid var(--v-line);
+  border-radius: var(--v-radius-plate);
+  min-width: 0;
 }
 
-.v-heading {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 700;
-  line-height: 1.3;
+/* A page's first line: a name, and whatever acts on it. */
+.v-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--v-gap) var(--v-gap-loose);
+  padding-bottom: var(--v-pad);
+  border-bottom: 2px solid var(--v-ink);
+  min-width: 0;
 }
 
-.v-caption {
-  font-size: 12px;
-  line-height: 1.4;
-  color: var(--text-faint);
+.v-header > .v-title,
+.v-header > .v-display {
+  margin-right: auto;
 }
 
-.v-hint {
-  font-size: 13px;
-  font-style: italic;
-  line-height: 1.4;
-  color: var(--text-muted);
+/* A named group of rows, with the name shouted over a hairline. */
+.v-section {
+  display: grid;
+  gap: var(--v-gap);
+  min-width: 0;
 }
 
-/* Machine text: keys, addresses, ids. */
-.v-mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 13px;
+.v-section > .v-label {
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--v-line);
+}
+
+.v-divider {
+  height: 0;
+  margin: var(--v-gap) 0;
+  border: 0;
+  border-top: 1px solid var(--v-line);
 }
 
 /* ─── buttons ───────────────────────────────────────────────────
-   Filled plates, as everywhere in the launcher. The default is the
-   neutral one; --accent is the one action a screen is about. */
+   Filled plates with a pressed edge, the way the launcher's own
+   buttons read. The default is the neutral one; --brand is the one
+   action a screen is about, and there is one of those. */
 .v-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
   box-sizing: border-box;
-  padding: 6px 12px;
+  padding: 6px 13px;
   border: 0;
   border-radius: var(--v-radius);
-  background: var(--chip);
-  color: var(--chip-text);
+  background: var(--v-fill);
+  color: var(--v-ink);
   font: inherit;
-  font-size: 13px;
-  font-weight: 500;
-  line-height: 1.4;
+  font-size: var(--v-body-s);
+  font-weight: 700;
+  line-height: 1.35;
   white-space: nowrap;
   vertical-align: middle;
   text-decoration: none;
   cursor: pointer;
   user-select: none;
   flex-shrink: 0;
-  transition: filter var(--v-fast) var(--v-ease);
+  box-shadow: inset 0 -1px 0 rgb(0 0 0 / 0.16);
+  transition:
+    filter var(--v-fast) var(--v-ease),
+    translate var(--v-move) var(--v-ease);
 }
 
-.v-btn:hover {
-  filter: brightness(0.94);
+.v-btn:hover:not(:disabled) {
+  filter: brightness(0.92);
 }
 
-.v-btn:active {
-  filter: brightness(0.88);
+.v-btn:active:not(:disabled) {
+  translate: 0 1px;
+  box-shadow: none;
 }
 
 .v-btn:disabled,
 .v-btn[aria-disabled="true"] {
-  opacity: 0.45;
+  opacity: 0.4;
   cursor: default;
-  filter: none;
+  box-shadow: none;
 }
 
 /* The main action: publish, save, install. */
-.v-btn--accent {
-  background: var(--accent);
-  color: var(--accent-text);
-  font-weight: 700;
+.v-btn--brand {
+  background: var(--v-brand);
+  color: var(--v-brand-ink);
 }
 
-/* Destructive, the launcher's way: the danger is in the words, not a
-   red plate. */
-.v-btn--danger {
-  background: var(--chip);
-  color: var(--danger);
-  font-weight: 700;
+/* Destructive, and it says so in the plate, not only in the words. */
+.v-btn--bad {
+  background: var(--v-bad);
+  color: #ffffff;
 }
 
-/* Nothing to click into, just an action: it shows on hover. */
+/* Nothing to click into, just an action: it appears on hover. */
 .v-btn--quiet {
   background: transparent;
-  color: var(--text-muted);
+  color: var(--v-ink-2);
+  box-shadow: none;
 }
 
-.v-btn--quiet:hover {
-  background: var(--chip);
-  color: var(--chip-text);
+.v-btn--quiet:hover:not(:disabled) {
+  background: var(--v-hover);
+  color: var(--v-ink);
+  filter: none;
 }
 
-/* For actions inside a sentence: text, in the accent. */
+/* Outlined: the action that is there, but not the point. */
+.v-btn--line {
+  background: transparent;
+  color: var(--v-ink);
+  box-shadow: inset 0 0 0 1px var(--v-line);
+}
+
+.v-btn--line:hover:not(:disabled) {
+  background: var(--v-hover);
+  filter: none;
+}
+
+/* For actions inside a sentence: text, in the brand, underlined on
+   hover so it is still a link to a screen reader. */
 .v-btn--plain {
   padding: 0;
   background: transparent;
-  color: var(--accent);
-  font-weight: 700;
+  color: var(--v-brand);
+  box-shadow: none;
+  font-size: inherit;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-underline-offset: 3px;
 }
 
-.v-btn--plain:hover {
+.v-btn--plain:hover:not(:disabled) {
   filter: none;
-  text-decoration: underline;
+  text-decoration-color: currentColor;
+}
+
+/* Square, for one glyph: give it a title. */
+.v-btn--icon {
+  padding: 6px;
+  width: 30px;
+  height: 30px;
 }
 
 /* ─── chips ─────────────────────────────────────────────────────
-   A small pick: a napp's actions, a filter, a view that's on. */
+   A small pick, and a pill of small caps: a napp's actions, a filter,
+   a view that is on. They are the loudest small thing in the kit, on
+   purpose — they are what a row is made of. */
 .v-chip {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   box-sizing: border-box;
-  max-width: 14rem;
-  padding: 3px 8px;
+  max-width: 16rem;
+  padding: 3px 10px;
   border: 0;
-  border-radius: var(--v-radius-field);
-  background: var(--chip);
-  color: var(--text-muted);
+  border-radius: var(--v-radius-pill);
+  background: var(--v-fill);
+  color: var(--v-ink-2);
   font: inherit;
-  font-size: 12px;
-  line-height: 1.5;
+  font-size: var(--v-micro);
+  font-weight: 700;
+  line-height: 1.6;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
   white-space: nowrap;
   cursor: pointer;
   user-select: none;
-  transition: filter var(--v-fast) var(--v-ease);
+  transition:
+    background-color var(--v-fast) var(--v-ease),
+    color var(--v-fast) var(--v-ease);
 }
 
 .v-chip:hover {
-  filter: brightness(0.94);
+  background: var(--v-press);
+  color: var(--v-ink);
 }
 
-.v-chip--on {
-  background: var(--accent);
-  color: var(--accent-text);
-  font-weight: 700;
+.v-chip--on,
+.v-chip--on:hover {
+  background: var(--v-brand);
+  color: var(--v-brand-ink);
+}
+
+.v-chip--bad,
+.v-chip--bad:hover {
+  background: var(--v-bad-wash);
+  color: var(--v-bad);
+}
+
+.v-chip--warn,
+.v-chip--warn:hover {
+  background: var(--v-warn);
+  color: var(--v-warn-ink);
+}
+
+/* A chip that is a fact, not a pick. */
+.v-chip--static {
+  cursor: default;
+}
+
+.v-chip--static:hover {
+  background: var(--v-fill);
+  color: var(--v-ink-2);
 }
 
 /* A long name crops with an ellipsis instead of widening its row; put
-   the whole thing in a title attribute to keep it reachable. */
+   the whole thing in a title to keep it reachable. */
 .v-chip > span {
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 /* ─── tabs ──────────────────────────────────────────────────────
-   A window's sections, the way the launcher's own bar does it: a row
-   of plates, the picked one filled. Toggle v-tab--on. */
+   One plate, one choice: the blocks share a single well and the
+   picked one sits in it, filled. For the sections of a screen. */
 .v-tabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--v-gap);
+  display: inline-flex;
+  align-self: start;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--v-line);
+  border-radius: var(--v-radius-plate);
+  background: var(--v-fill-2);
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
 }
 
 .v-tab {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
   box-sizing: border-box;
-  padding: 6px 12px;
+  padding: 5px 13px;
   border: 0;
-  border-radius: var(--v-radius);
-  background: var(--chip);
-  color: var(--chip-text);
+  border-radius: var(--v-radius-field);
+  background: transparent;
+  color: var(--v-ink-2);
   font: inherit;
-  font-size: 14px;
+  font-size: var(--v-body-s);
+  font-weight: 700;
   line-height: 1.4;
   white-space: nowrap;
   cursor: pointer;
   user-select: none;
-  transition: filter var(--v-fast) var(--v-ease);
+  transition:
+    background-color var(--v-fast) var(--v-ease),
+    color var(--v-fast) var(--v-ease);
 }
 
 .v-tab:hover {
-  filter: brightness(0.94);
+  background: var(--v-hover);
+  color: var(--v-ink);
 }
 
-.v-tab--on {
-  background: var(--accent);
-  color: var(--accent-text);
-  font-weight: 700;
+.v-tab--on,
+.v-tab--on:hover {
+  background: var(--v-brand);
+  color: var(--v-brand-ink);
 }
 
-/* A count next to a tab, the launcher's grey on the filled plate. */
+/* A count in a tab, in the fill's own voice. */
 .v-tab .v-caption {
   color: inherit;
-  opacity: 0.7;
+  opacity: 0.65;
 }
 
 /* ─── fields ────────────────────────────────────────────────────
-   A bordered box, like the launcher's editors: radius 6, a 1px
-   border, 8px inside. */
+   A bordered box, like the launcher's editors: a 1px line, 6px
+   corners, and a focus that is impossible to miss. */
 .v-input {
   box-sizing: border-box;
   min-width: 0;
-  padding: 7px var(--v-pad);
-  border: 1px solid var(--border);
+  padding: 7px 10px;
+  border: 1px solid var(--v-line);
   border-radius: var(--v-radius-field);
   background: var(--surface);
-  color: var(--text);
+  color: var(--v-ink);
   font: inherit;
-  font-size: 14px;
+  font-size: var(--v-body-s);
   line-height: 1.5;
-  transition: border-color var(--v-fast) var(--v-ease);
+  transition:
+    border-color var(--v-fast) var(--v-ease),
+    box-shadow var(--v-fast) var(--v-ease);
 }
 
 .v-input::placeholder {
-  color: var(--text-faint);
+  color: var(--v-ink-3);
 }
 
 .v-input:focus {
   outline: none;
-  border-color: var(--accent);
+  border-color: var(--v-brand);
+  box-shadow: 0 0 0 3px var(--v-brand-wash);
+}
+
+.v-input--mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: var(--v-small);
 }
 
 textarea.v-input {
@@ -359,10 +558,10 @@ textarea.v-input {
   resize: vertical;
 }
 
-/* A labelled line: the italic label over the control, a note under. */
+/* A labelled line: the label shouted over the control, a note under. */
 .v-field {
   display: grid;
-  gap: var(--v-gap-tight);
+  gap: 5px;
   min-width: 0;
 }
 
@@ -371,13 +570,13 @@ textarea.v-input {
 }
 
 .v-field-note {
-  font-size: 12px;
-  color: var(--text-faint);
+  font-size: var(--v-small);
+  color: var(--v-ink-3);
 }
 
-/* ─── checks and radios ─────────────────────────────────────────
-   16px, a 1px border, and the accent once it is on — the checkbox
-   the launcher's lists are full of. */
+/* ─── checks, radios, switches ──────────────────────────────────
+   16px, a line, and the brand once it is on — the checkbox the
+   launcher's own lists are full of. */
 .v-check {
   appearance: none;
   -webkit-appearance: none;
@@ -388,8 +587,8 @@ textarea.v-input {
   width: 16px;
   height: 16px;
   margin: 0;
-  border: 1px solid var(--border);
-  border-radius: var(--v-radius);
+  border: 1px solid var(--v-line);
+  border-radius: 4px;
   background: var(--surface);
   cursor: pointer;
   transition:
@@ -401,21 +600,11 @@ textarea.v-input {
   border-radius: 50%;
 }
 
-/* A radio takes a dot, not the checkbox's tick. */
-.v-radio::after {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background-color: var(--accent-text);
-  -webkit-mask: none;
-  mask: none;
-}
-
 .v-check::after {
   content: "";
   width: 12px;
   height: 12px;
-  background-color: var(--accent-text);
+  background-color: var(--v-brand-ink);
   -webkit-mask: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMy41IDguNWwzIDMgNi02LjUiLz48L3N2Zz4=")
     center / contain no-repeat;
   mask: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMy41IDguNWwzIDMgNi02LjUiLz48L3N2Zz4=")
@@ -424,13 +613,24 @@ textarea.v-input {
   transition: scale var(--v-fast) var(--v-ease);
 }
 
-.v-check:checked {
-  background: var(--accent);
-  border-color: var(--accent);
+.v-check:checked,
+.v-check:indeterminate {
+  background: var(--v-brand);
+  border-color: var(--v-brand);
 }
 
 .v-check:checked::after {
   scale: 1;
+}
+
+/* A radio takes a dot, not the checkbox's tick. */
+.v-radio::after {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--v-brand-ink);
+  -webkit-mask: none;
+  mask: none;
 }
 
 /* The box and its words as one <label>, so the words toggle it too. */
@@ -438,7 +638,7 @@ textarea.v-input {
   display: inline-flex;
   align-items: flex-start;
   gap: var(--v-gap);
-  font-size: 14px;
+  font-size: var(--v-body);
   line-height: 1.4;
   cursor: pointer;
   min-width: 0;
@@ -455,20 +655,92 @@ textarea.v-input {
 }
 
 .v-check-note {
-  font-size: 12px;
-  color: var(--text-faint);
+  font-size: var(--v-small);
+  color: var(--v-ink-3);
 }
 
 .v-radios {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--v-gap) var(--v-gap-loose);
+  gap: var(--v-gap) var(--v-pad-roomy);
+}
+
+/* A switch for a setting that is on or off, and where it stands: the
+   brand filling the well, the knob travelling across it. */
+.v-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--v-gap);
+  font-size: var(--v-body);
+  line-height: 1.4;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.v-switch-track {
+  position: relative;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  width: 38px;
+  height: 21px;
+  border: 1px solid var(--v-line);
+  border-radius: var(--v-radius-pill);
+  background: var(--v-fill);
+  transition:
+    background-color var(--v-fast) var(--v-ease),
+    border-color var(--v-fast) var(--v-ease);
+}
+
+.v-switch-track::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: var(--v-ink-3);
+  transition:
+    translate var(--v-move) var(--v-ease),
+    background-color var(--v-fast) var(--v-ease);
+}
+
+.v-switch input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.v-switch:has(input:checked) .v-switch-track {
+  background: var(--v-brand);
+  border-color: var(--v-brand);
+}
+
+.v-switch:has(input:checked) .v-switch-track::after {
+  translate: 17px 0;
+  background: var(--v-brand-ink);
+}
+
+.v-switch:has(input:focus-visible) .v-switch-track {
+  outline: 2px solid var(--v-brand);
+  outline-offset: 2px;
+}
+
+.v-switch-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.v-switch-note {
+  font-size: var(--v-small);
+  color: var(--v-ink-3);
 }
 
 /* ─── lists ─────────────────────────────────────────────────────
-   A column of rows with a hairline between them, each row's label
-   taking what is left and its controls always fitting. */
-/* The rows, with whatever sits under them: the add line, the empty line. */
+   Rows with a hairline between them, the row's label taking what is
+   left, its controls always fitting. A row says it is a row by
+   lighting up when it is under the cursor. */
 .v-list {
   display: grid;
   min-width: 0;
@@ -484,19 +756,26 @@ textarea.v-input {
   display: flex;
   align-items: center;
   gap: var(--v-gap);
-  padding: 6px 0;
-  border-bottom: 1px solid var(--border);
+  padding: 7px 6px;
+  margin: 0 -6px;
+  border-bottom: 1px solid var(--v-line);
+  border-radius: var(--v-radius-field);
   min-width: 0;
+  transition: background-color var(--v-fast) var(--v-ease);
 }
 
 .v-item:last-child {
   border-bottom: 0;
 }
 
+.v-item:hover {
+  background: var(--v-hover);
+}
+
 .v-item-label {
   flex: 1;
   min-width: 0;
-  font-size: 14px;
+  font-size: var(--v-body);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -505,7 +784,7 @@ textarea.v-input {
 /* A machine label: a relay address, an id. */
 .v-item-label--mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 13px;
+  font-size: var(--v-body-s);
 }
 
 /* The add line under a list: a field, a button, an error. */
@@ -522,8 +801,9 @@ textarea.v-input {
 }
 
 .v-add-error {
-  color: var(--danger);
-  font-size: 13px;
+  color: var(--v-bad);
+  font-size: var(--v-body-s);
+  font-weight: 700;
 }
 
 .v-add-error:empty {
@@ -531,24 +811,27 @@ textarea.v-input {
 }
 
 /* ─── disclosure ────────────────────────────────────────────────
-   A <details> that opens: a bold grey summary, a chevron at its end,
-   the content indented under it. */
+   A <details> that opens: a shouted summary, a chevron at its end,
+   the content under it. */
 .v-disclosure {
   min-width: 0;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--v-line);
 }
 
 .v-disclosure > summary {
   display: flex;
   align-items: center;
   gap: var(--v-gap);
-  padding: 8px 0;
+  padding: 9px 2px;
   list-style: none;
   cursor: pointer;
   user-select: none;
-  font-size: 15px;
+  font-size: var(--v-micro);
   font-weight: 700;
-  color: var(--text-muted);
+  line-height: 1.4;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--v-ink-3);
 }
 
 .v-disclosure > summary::-webkit-details-marker {
@@ -575,11 +858,11 @@ textarea.v-input {
 }
 
 .v-disclosure > summary:hover {
-  color: var(--text);
+  color: var(--v-ink);
 }
 
 .v-disclosure[open] > summary {
-  color: var(--text);
+  color: var(--v-ink);
 }
 
 /* ─── rows that open ────────────────────────────────────────────
@@ -595,7 +878,7 @@ textarea.v-input {
 }
 
 .v-row {
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--v-line);
   min-width: 0;
 }
 
@@ -607,11 +890,18 @@ textarea.v-input {
   display: flex;
   align-items: center;
   gap: var(--v-gap);
-  padding: 6px 0;
+  padding: 7px 6px;
+  margin: 0 -6px;
+  border-radius: var(--v-radius-field);
   list-style: none;
   cursor: pointer;
   user-select: none;
-  font-size: 14px;
+  font-size: var(--v-body);
+  transition: background-color var(--v-fast) var(--v-ease);
+}
+
+.v-row > summary:hover {
+  background: var(--v-hover);
 }
 
 .v-row > summary::-webkit-details-marker {
@@ -624,8 +914,7 @@ textarea.v-input {
   height: 1em;
   margin-left: auto;
   flex-shrink: 0;
-  background-color: currentColor;
-  color: var(--text-faint);
+  background-color: var(--v-ink-3);
   -webkit-mask: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNNiAzLjVMMTAuNSA4IDYgMTIuNSIvPjwvc3ZnPg==")
     center / contain no-repeat;
   mask: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNNiAzLjVMMTAuNSA4IDYgMTIuNSIvPjwvc3ZnPg==")
@@ -638,63 +927,121 @@ textarea.v-input {
   rotate: 90deg;
 }
 
-/* ─── code ──────────────────────────────────────────────────────
-   Machine text on a plate, the launcher's code color on the
-   launcher's plate. */
+.v-row[open] > summary {
+  font-weight: 700;
+}
+
+/* ─── code and keys ─────────────────────────────────────────────
+   Machine text on a plate, the launcher's plate. A key is the same
+   thing with a line around it. */
 .v-code {
-  padding: 1px 4px;
-  border-radius: var(--v-radius);
-  background: var(--surface-alt);
+  padding: 1px 5px;
+  border: 1px solid var(--v-line);
+  border-radius: 4px;
+  background: var(--v-fill-2);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.9em;
 }
 
 .v-codeblock {
   margin: 0;
-  padding: var(--v-pad);
+  padding: var(--v-pad-loose);
+  border: 1px solid var(--v-line);
   border-radius: var(--v-radius-field);
-  background: var(--surface-alt);
+  background: var(--v-fill-2);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
-  line-height: 1.5;
+  font-size: var(--v-small);
+  line-height: 1.55;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  tab-size: 2;
+}
+
+.v-kbd {
+  display: inline-block;
+  padding: 1px 6px;
+  border: 1px solid var(--v-line);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--v-fill-2);
+  color: var(--v-ink-2);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: var(--v-micro);
+  font-weight: 700;
+  line-height: 1.6;
+  white-space: nowrap;
+  vertical-align: 1px;
+}
+
+/* ─── how far along ─────────────────────────────────────────────
+   A bar with a fill in it. width is the parent's business, so say
+   how full it is with --v-value (0%…100%). */
+.v-meter {
+  height: 8px;
+  border: 1px solid var(--v-line);
+  border-radius: var(--v-radius-pill);
+  background: var(--v-fill);
+  overflow: hidden;
+  --v-value: 0%;
+}
+
+.v-meter::after {
+  content: "";
+  display: block;
+  width: var(--v-value);
+  height: 100%;
+  border-radius: inherit;
+  background: var(--v-brand);
+  transition: width var(--v-move) var(--v-ease);
+}
+
+.v-meter--bad::after {
+  background: var(--v-bad);
+}
+
+.v-meter--warn::after {
+  background: var(--v-warn);
 }
 
 /* ─── badges ────────────────────────────────────────────────────
-   A short grey label — a type, a state, a count. A variant colors
-   it. */
+   A fact in small caps: a type, a state, a count. The tone is a
+   wash, so a row of them stays readable. */
 .v-badge {
   display: inline-flex;
   align-items: center;
   box-sizing: border-box;
-  padding: 1px 6px;
-  border-radius: var(--v-radius);
-  background: var(--chip);
-  color: var(--chip-text);
-  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: var(--v-fill);
+  color: var(--v-ink-2);
+  font-size: var(--v-micro);
+  font-weight: 700;
   line-height: 1.5;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
   white-space: nowrap;
   vertical-align: middle;
   user-select: none;
 }
 
-.v-badge--accent {
-  background: var(--accent);
-  color: var(--accent-text);
-  font-weight: 700;
+.v-badge--brand {
+  background: var(--v-brand-wash-2);
+  color: var(--v-brand);
 }
 
-.v-badge--danger {
-  background: var(--chip);
-  color: var(--danger);
-  font-weight: 700;
+.v-badge--solid {
+  background: var(--v-brand);
+  color: var(--v-brand-ink);
 }
 
-.v-badge--dev {
-  background: var(--dev);
-  color: var(--dev-text);
-  font-weight: 700;
+.v-badge--bad {
+  background: var(--v-bad-wash);
+  color: var(--v-bad);
+}
+
+.v-badge--warn {
+  background: var(--v-warn);
+  color: var(--v-warn-ink);
 }
 
 /* ─── icons ─────────────────────────────────────────────────────
@@ -839,8 +1186,9 @@ textarea.v-input {
   box-sizing: border-box;
   overflow: hidden;
   flex-shrink: 0;
+  border: 1px solid var(--v-line);
   border-radius: var(--v-radius-field);
-  background: var(--chip);
+  background: var(--v-fill);
   vertical-align: middle;
 }
 
@@ -874,13 +1222,13 @@ textarea.v-input {
 
 .v-appicon--l > img,
 .v-appicon--xl > img {
-  border-radius: var(--v-radius);
+  border-radius: 4px;
 }
 
 /* The image eases in once it has loaded. */
 .v-appicon--fade > img {
   opacity: 0;
-  transition: opacity var(--v-fast) var(--v-ease);
+  transition: opacity var(--v-move) var(--v-ease);
 }
 
 .v-appicon--fade > img.loaded {
@@ -888,18 +1236,21 @@ textarea.v-input {
 }
 
 /* ─── notices ───────────────────────────────────────────────────
-   A line to heed, on a plate in its tone. Warn by default — the
-   launcher's amber is the one it already has. */
+   A line to heed, on a plate in its tone with a rail down its
+   near edge. Warn by default — the launcher's amber is the one it
+   already has. */
 .v-notice {
   display: flex;
   align-items: flex-start;
   gap: var(--v-gap);
   box-sizing: border-box;
   padding: 10px var(--v-pad-loose);
+  border-left: 4px solid var(--v-line);
   border-radius: var(--v-radius-field);
-  background: var(--chip);
-  font-size: 14px;
-  line-height: 1.4;
+  background: var(--v-fill-2);
+  color: var(--v-ink);
+  font-size: var(--v-body);
+  line-height: 1.45;
 }
 
 .v-notice > .v-icon {
@@ -907,31 +1258,39 @@ textarea.v-input {
 }
 
 .v-notice--warn {
-  background: var(--dev);
-  color: var(--dev-text);
+  border-left-color: var(--v-warn);
+  background: var(--v-warn);
+  color: var(--v-warn-ink);
 }
 
-.v-notice--danger {
-  background: color-mix(in srgb, var(--danger) 12%, var(--surface));
-  color: var(--danger);
+.v-notice--bad {
+  border-left-color: var(--v-bad);
+  background: var(--v-bad-wash);
+  color: var(--v-bad);
 }
 
 .v-notice--info {
-  background: var(--chip);
-  color: var(--text-muted);
+  border-left-color: var(--v-brand);
+  background: var(--v-brand-wash);
+  color: var(--v-ink);
 }
 
 /* ─── empty line ────────────────────────────────────────────────
-   What a list says when it has nothing yet. */
+   What a list says when it has nothing yet: a label, not a
+   sentence, so it never competes with the rows. */
 .v-empty {
-  padding: 6px 0;
-  font-size: 14px;
-  color: var(--text-faint);
+  padding: var(--v-pad) 2px;
+  font-size: var(--v-micro);
+  font-weight: 700;
+  line-height: 1.4;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--v-ink-3);
 }
 
 /* ─── links ─────────────────────────────────────────────────────
-   A row of them, wrapping. In the text's color, dimmed, lit on
-   hover. */
+   A row of them, wrapping: the brand, underlined from the start so
+   a link looks like a link. */
 .v-links {
   display: flex;
   flex-wrap: wrap;
@@ -939,14 +1298,16 @@ textarea.v-input {
 }
 
 .v-links a {
-  color: var(--text-muted);
-  text-decoration: none;
-  font-size: 14px;
+  color: var(--v-brand);
+  font-size: var(--v-body);
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
 }
 
 .v-links a:hover {
-  color: var(--text);
-  text-decoration: underline;
+  text-decoration-color: currentColor;
 }
 
 /* ─── busy ──────────────────────────────────────────────────────
@@ -974,7 +1335,7 @@ textarea.v-input {
   height: 1em;
   flex-shrink: 0;
   vertical-align: -0.125em;
-  border: 2px solid color-mix(in srgb, currentColor 20%, transparent);
+  border: 2px solid color-mix(in srgb, currentColor 22%, transparent);
   border-top-color: currentColor;
   border-radius: 50%;
   animation: v-spin 0.7s linear infinite;
@@ -997,21 +1358,15 @@ textarea.v-input {
   }
 }
 
-/* ─── a hairline ────────────────────────────────────────────────
-   Under a section, above a footer. */
-.v-rule {
-  height: 0;
-  margin: var(--v-gap) 0;
-  border: 0;
-  border-top: 1px solid var(--border);
-}
-
 /* ─── hidden ────────────────────────────────────────────────────
    The kit sets display on its boxes, which would beat [hidden]. */
 :is(
     .v-col,
     .v-bar,
     .v-card,
+    .v-plate,
+    .v-header,
+    .v-section,
     .v-btn,
     .v-chip,
     .v-tabs,
@@ -1021,12 +1376,14 @@ textarea.v-input {
     .v-add,
     .v-radios,
     .v-check-label,
+    .v-switch,
     .v-field,
     .v-disclosure,
     .v-rows,
     .v-notice,
     .v-links,
-    .v-spinner
+    .v-spinner,
+    .v-meter
   )[hidden] {
   display: none;
 }

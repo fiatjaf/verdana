@@ -37,10 +37,17 @@ func TestUIKitScriptCarriesTheKit(t *testing.T) {
 	if err := json.NewDecoder(strings.NewReader(script[start+len(marker):])).Decode(&css); err != nil {
 		t.Fatalf("stylesheet is not a JSON string: %v", err)
 	}
-	if css != uiCSS {
+	if css != fontFaceCSS()+"\n"+uiCSS {
 		t.Fatal("the script does not carry napp-ui.css whole")
 	}
-	if !strings.Contains(css, ".v-btn--accent") {
+	// the launcher's own face travels with the kit, in all three of its faces
+	for _, want := range []string{"font-family:Verdana", "font-style:normal", "font-style:italic",
+		"font-weight:400", "font-weight:700", "data:font/woff2;base64,"} {
+		if !strings.Contains(css, want) {
+			t.Errorf("no %q in the kit's font-face block", want)
+		}
+	}
+	if !strings.Contains(css, ".v-btn--brand") {
 		t.Fatal("no buttons in the kit")
 	}
 
@@ -53,8 +60,11 @@ func TestUIKitScriptCarriesTheKit(t *testing.T) {
 	}
 }
 
-// glyphRe finds the rule for one of the kit's glyph classes.
-var glyphRe = regexp.MustCompile(`(?s)\.v-icon--([a-z]+) \{\s*(-webkit-mask-image|mask-image): url\("([^"]+)"\);`)
+// glyphRuleRe finds a rule of one of the kit's glyph classes, glyphMaskRe the
+// masks inside a rule: both the prefixed and the plain property have to be
+// there, since the kit runs on WebKit as well as on the Blink-based shells.
+var glyphRuleRe = regexp.MustCompile(`(?s)\.v-icon--([a-z]+) \{(.*?)\n\}`)
+var glyphMaskRe = regexp.MustCompile(`(-webkit-mask-image|mask-image): url\("([^"]+)"\);`)
 
 // TestEveryGlyphIsDrawable guards the glyph classes: a hand-written base64
 // svg is easy to mistype, and a broken one draws nothing at all — the icon
@@ -62,28 +72,37 @@ var glyphRe = regexp.MustCompile(`(?s)\.v-icon--([a-z]+) \{\s*(-webkit-mask-imag
 // decode, be an svg, and be the same drawing in both properties.
 func TestEveryGlyphIsDrawable(t *testing.T) {
 	seen := map[string]string{}
-	for _, m := range glyphRe.FindAllStringSubmatch(uiCSS, -1) {
-		name, property, uri := m[1], m[2], m[3]
+	for _, rule := range glyphRuleRe.FindAllStringSubmatch(uiCSS, -1) {
+		name, body := rule[1], rule[2]
 
-		payload, ok := strings.CutPrefix(uri, "data:image/svg+xml;base64,")
-		if !ok {
-			t.Errorf(".v-icon--%s: %s is not a base64 svg", name, property)
-			continue
+		masks := glyphMaskRe.FindAllStringSubmatch(body, -1)
+		if len(masks) != 2 {
+			t.Errorf(".v-icon--%s: %d mask-image properties, want -webkit-mask-image and mask-image", name, len(masks))
 		}
-		svg, err := base64.StdEncoding.DecodeString(payload)
-		if err != nil {
-			t.Errorf(".v-icon--%s: %s does not decode: %v", name, property, err)
-			continue
+		for _, mask := range masks {
+			property, uri := mask[1], mask[2]
+
+			payload, ok := strings.CutPrefix(uri, "data:image/svg+xml;base64,")
+			if !ok {
+				t.Errorf(".v-icon--%s: %s is not a base64 svg", name, property)
+				continue
+			}
+			svg, err := base64.StdEncoding.DecodeString(payload)
+			if err != nil {
+				t.Errorf(".v-icon--%s: %s does not decode: %v", name, property, err)
+				continue
+			}
+			shape := string(svg)
+			if !strings.HasPrefix(shape, "<svg") || !strings.Contains(shape, "<svg") ||
+				(!strings.Contains(shape, "<path") && !strings.Contains(shape, "<circle")) {
+				t.Errorf(".v-icon--%s: %s is not a drawing: %.60s", name, property, shape)
+				continue
+			}
+			if before, ok := seen[name]; ok && before != shape {
+				t.Errorf(".v-icon--%s: %s draws something else than the other property", name, property)
+			}
+			seen[name] = shape
 		}
-		if !strings.HasPrefix(string(svg), "<svg") || !strings.Contains(string(svg), "<path") &&
-			!strings.Contains(string(svg), "<circle") {
-			t.Errorf(".v-icon--%s: %s is not a drawing", name, property)
-			continue
-		}
-		if before, ok := seen[name]; ok && before != string(svg) {
-			t.Errorf(".v-icon--%s: %s draws something else than the other property", name, property)
-		}
-		seen[name] = string(svg)
 	}
 
 	for _, want := range []string{"check", "x", "warning", "info", "trash", "search", "sun", "window"} {

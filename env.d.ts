@@ -334,8 +334,12 @@ type Napp = {
 /** What a kit helper is given, and what it hands back. */
 type NappButtonOpts = {
   label?: string
-  /** "accent" | "danger" | "quiet" | "plain" — the default is the neutral one. */
-  variant?: "accent" | "danger" | "quiet" | "plain"
+  /**
+   * "brand" is the one action a screen is about, "bad" is destructive, "line"
+   * is there but not the point, "quiet" appears on hover, "plain" is inline
+   * text, "icon" is a square for one glyph. The default is the neutral plate.
+   */
+  variant?: "brand" | "bad" | "quiet" | "line" | "plain" | "icon"
   /** One of the kit's glyph names, drawn before the label. */
   icon?: string
   /** The tooltip, and the name an icon-only button has. */
@@ -348,7 +352,10 @@ type NappButtonOpts = {
 
 type NappChipOpts = {
   label: string
+  /** The picked one, filled with the brand. */
   active?: boolean
+  /** "bad" | "warn" say what the chip is; "static" makes it a fact, not a pick. */
+  tone?: "bad" | "warn" | "static"
   icon?: string
   title?: string
   className?: string
@@ -398,6 +405,28 @@ type NappUi = {
     rows?: number
     className?: string
   }) => HTMLTextAreaElement
+  /** The voice that names a group: small caps, tracked, grey. */
+  label: (value: string) => HTMLElement
+  display: (value: string) => HTMLElement
+  /** kbd is a key; header is a screen's first line; section is a named group. */
+  kbd: (value: string) => HTMLElement
+  header: (...children: (Node | string)[]) => HTMLElement
+  section: (label: string, ...children: (Node | string)[]) => HTMLElement
+  plate: (...children: (Node | string)[]) => HTMLElement
+  /** grow is a row's filler: what follows it is pushed to the far end. */
+  grow: () => HTMLElement
+  /** meter says how far along something is; set(v) moves it, v is 0…1. */
+  meter: (opts?: { value?: number; tone?: "bad" | "warn" }) => HTMLElement & {
+    value: number
+    set: (value: number) => void
+  }
+  /** switch is a setting that is on or off, and where it stands. */
+  switch: (opts?: {
+    label?: string
+    note?: string
+    checked?: boolean
+    onChange?: (checked: boolean) => void
+  }) => HTMLElement & { input: HTMLInputElement }
   /** field wraps its control in a label, so the words focus it. */
   field: (opts: {
     label?: string
@@ -444,13 +473,13 @@ type NappUi = {
     add: (item: unknown) => void
     delete: (item: unknown) => void
   }
-  /** tone: "warn" (the default) | "danger" | "info". */
+  /** tone: "warn" (the default) | "bad" | "info". */
   notice: (
     message: string,
-    opts?: { tone?: "warn" | "danger" | "info"; icon?: string | null }
+    opts?: { tone?: "warn" | "bad" | "info"; icon?: string | null }
   ) => HTMLElement
-  /** tone: "accent" | "danger" | "dev". */
-  badge: (label: string, opts?: { tone?: "accent" | "danger" | "dev" }) => HTMLElement
+  /** tone: "brand" (a wash) | "solid" (filled) | "bad" | "warn". */
+  badge: (label: string, opts?: { tone?: "brand" | "solid" | "bad" | "warn" }) => HTMLElement
   icon: (name: string) => HTMLElement
   /** size: "s" | "m" | "l" | "xl". fade eases the image in. */
   appIcon: (opts?: { src?: string; size?: string; fade?: boolean; alt?: string }) => HTMLElement & {
@@ -473,38 +502,50 @@ interface Window {
 // ── The ui kit ───────────────────────────────────────────────────────────
 //
 // "requires": ["ui"] in metadata.json makes the launcher put its kit
-// (napp-ui.css) in the page, ahead of the napp's own styles. It is classes
-// only — no script, nothing to call — so plain markup looks like the
-// launcher, and a napp that disagrees with the kit wins. The colors are the
-// launcher's own tokens, set on <html> as --surface, --surface-alt, --text,
-// --text-muted, --text-faint, --border, --chip, --chip-text, --accent,
-// --accent-text, --danger, --dev and --dev-text, and they follow the theme
-// the user picked.
+// (napp-ui.css) in the page, ahead of the napp's own styles. The kit carries
+// the launcher's own face — Verdana, in three faces, inlined — so a napp is
+// set in the launcher's typography whatever the machine has. It is classes
+// only: no script, nothing to call, so plain markup looks like the launcher
+// and a napp that disagrees with the kit wins. The colors are the launcher's
+// own tokens, set on <html> as --surface, --surface-alt, --text, --text-muted,
+// --text-faint, --border, --chip, --chip-text, --accent, --accent-text,
+// --danger, --dev and --dev-text, and they follow the theme the user picked.
 //
 // A class says how a thing looks, never where it goes: width, margins and
 // placement are the parent's business.
 //
-//   layout   v-col (a column) · v-bar (a row) · v-card (a plate) · v-rule
-//   type     v-title · v-heading · v-caption · v-hint (italic) · v-mono
-//   buttons  v-btn, and v-btn--accent | --danger | --quiet | --plain
-//   chips    v-chip, v-chip--on (the picked one)
-//   tabs     v-tabs, v-tab, v-tab--on
-//   fields   v-input · v-field (with v-field-note)
-//   checks   v-check · v-radio · v-check-label (with v-check-text,
-//            v-check-note) · v-radios
-//   lists    v-items · v-item · v-item-label (--mono) · v-add (with
-//            v-add-error) · v-rows · v-row
-//   folding  v-disclosure (a <details>) · v-empty
-//   code     v-code (inline) · v-codeblock (a <pre>)
-//   badges   v-badge, v-badge--accent | --danger | --dev
-//   icons    v-icon with v-icon-<name>: check, x, plus, minus, chevron,
-//            arrow, trash, reload, search, external, warning, info, star,
-//            copy, folder, user, home, settings, sun, moon, bolt, link,
-//            save, window
-//   images   v-appicon with v-appicon--s | --m | --l | --xl, --fade
-//   notices  v-notice with v-notice--warn | --danger | --info
-//   more     v-links · v-busy · v-spinner
+//   layout    v-col (a column) · v-bar (a row) · v-grow (a row's filler) ·
+//             v-card (a plate with a line) · v-plate (a plate with no fill) ·
+//             v-header (a name and what acts on it) · v-section (a named
+//             group) · v-divider
+//   type      v-title · v-display · v-heading · v-label (small caps: what
+//             names a group) · v-caption · v-hint (italic) · v-mono · v-kbd
+//   buttons   v-btn, and v-btn--brand | --bad | --quiet | --line | --plain
+//             | --icon
+//   chips     v-chip, v-chip--on (the picked one) · --bad · --warn · --static
+//   tabs      v-tabs, v-tab, v-tab--on
+//   fields    v-input (--mono) · v-field (with v-field-note)
+//   checks    v-check · v-radio · v-check-label (with v-check-text,
+//             v-check-note) · v-radios · v-switch (with v-switch-track)
+//   lists     v-items · v-item · v-item-label (--mono) · v-add (with
+//             v-add-error) · v-rows · v-row
+//   folding   v-disclosure (a <details>) · v-empty
+//   code      v-code (inline) · v-codeblock (a <pre>)
+//   badges    v-badge, v-badge--brand | --solid | --bad | --warn
+//   icons     v-icon with v-icon-<name>: check, x, plus, minus, chevron,
+//             arrow, trash, reload, search, external, warning, info, star,
+//             copy, folder, user, home, settings, sun, moon, bolt, link,
+//             save, window
+//   images    v-appicon with v-appicon--s | --m | --l | --xl, --fade
+//   notices   v-notice with v-notice--warn | --bad | --info
+//   more      v-links · v-busy · v-spinner · v-meter (with --v-value)
 
-// The kit's own measurements, for a napp that wants them: --v-gap,
-// --v-gap-tight, --v-gap-loose, --v-pad, --v-pad-loose, --v-radius,
-// --v-radius-field, --v-radius-card, --v-radius-dialog, --v-fast, --v-ease.
+// The kit's own names for the launcher's colors, for a napp that paints with
+// them: --v-ink, --v-ink-2, --v-ink-3, --v-fill, --v-fill-2, --v-line,
+// --v-brand, --v-brand-ink, --v-bad, --v-warn, --v-warn-ink, plus the washes
+// --v-brand-wash, --v-brand-wash-2, --v-bad-wash, --v-hover and --v-press.
+//
+// Its measurements, for a napp that wants them: --v-gap, --v-gap-tight,
+// --v-gap-loose, --v-pad, --v-pad-loose, --v-pad-roomy, --v-radius,
+// --v-radius-field, --v-radius-plate, --v-radius-card, --v-radius-pill, the
+// type ladder --v-micro … --v-display, and --v-fast, --v-move, --v-ease.
