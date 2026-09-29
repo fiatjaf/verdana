@@ -114,9 +114,15 @@ func layoutPrompt(
 					return optBtns[i].Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 						open := opt.Instance != ""
 						bgColor, fgColor := p.chipBg, p.chipFg
-						if opt.Dev {
+						// the napp the user keeps picking for this action gets
+						// its own color, and it outranks the other two: it is
+						// the reason the list is in this order
+						switch {
+						case opt.Suggested:
+							bgColor, fgColor = p.suggestBg, p.suggestFg
+						case opt.Dev:
 							bgColor, fgColor = p.devBg, p.devFg
-						} else if open {
+						case open:
 							bgColor, fgColor = p.contrastBg, p.contrastFg
 						}
 						macro := op.Record(gtx.Ops)
@@ -132,7 +138,7 @@ func layoutPrompt(
 										return layout.Dimensions{}
 									}
 									l := material.Caption(th, truncate(opt.Detail, 80))
-									if open || opt.Dev {
+									if open || opt.Dev || opt.Suggested {
 										l.Color = fgColor
 									} else {
 										l.Color = p.muted

@@ -28,6 +28,11 @@ data class Theme(
     val inputHint: Color,
     val devBg: Color,
     val devFg: Color,
+    // the action-handler options the user has been picking already: it has to
+    // read as neither accent (an already-open window) nor dev (a napp being
+    // worked on)
+    val suggestBg: Color,
+    val suggestFg: Color,
 )
 
 fun cssHex(c: Color): String = String.format(
@@ -56,6 +61,8 @@ val lightTheme = Theme(
     inputHint = Color(0xFF999999),
     devBg = Color(0xFFFFE5B4),
     devFg = Color(0xFF704000),
+    suggestBg = Color(0xFFD8EFDC),
+    suggestFg = Color(0xFF14532D),
 )
 
 val darkTheme = Theme(
@@ -77,6 +84,8 @@ val darkTheme = Theme(
     inputHint = Color(0xFF6D717A),
     devBg = Color(0xFF5A3B1A),
     devFg = Color(0xFFFFD79A),
+    suggestBg = Color(0xFF1E3A2A),
+    suggestFg = Color(0xFFB6E3C1),
 )
 
 fun themeByName(name: String): Theme = if (name == "dark") darkTheme else lightTheme
@@ -99,6 +108,8 @@ fun themeVarsJSON(t: Theme): String {
         q("danger", cssHex(t.danger)),
         q("dev", cssHex(t.devBg)),
         q("dev-text", cssHex(t.devFg)),
+        q("suggest", cssHex(t.suggestBg)),
+        q("suggest-text", cssHex(t.suggestFg)),
     ).joinToString(",") + "}"
 }
 

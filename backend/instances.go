@@ -675,6 +675,11 @@ func runNappAction(
 
 	req := &actionRequest{name: name, payload: payload}
 
+	callerID := ""
+	if caller != nil {
+		callerID = caller.napp.ID
+	}
+
 	// an explicit instance skips every choice: route it straight there
 	if opts.Instance != "" {
 		ci := lookupInstance(opts.Instance)
@@ -683,7 +688,7 @@ func runNappAction(
 		}
 		log.Info().Str("from", callerName).Str("action", name).
 			Str("instance", ci.instance).Msg("dispatching action to instance")
-		return dispatchToInstance(ctx, ci, req)
+		return dispatchTo(ctx, callerID, name, ci, req)
 	}
 
 	candidates, open := findHandlersForAction(name)
@@ -696,7 +701,7 @@ func runNappAction(
 		if len(open) == 1 {
 			log.Info().Str("from", callerName).Str("action", name).
 				Str("instance", open[0].instance).Msg("dispatching action")
-			return dispatchToInstance(ctx, open[0], req)
+			return dispatchTo(ctx, callerID, name, open[0], req)
 		}
 		log.Info().Str("from", callerName).Str("action", name).
 			Str("napp", candidates[0].ID).Msg("launching napp for action")
@@ -704,15 +709,11 @@ func runNappAction(
 		if err != nil {
 			return nil, err
 		}
-		return dispatchToInstance(ctx, ci, req)
+		return dispatchTo(ctx, callerID, name, ci, req)
 	}
 
 	// who asked matters to the rules: the same action from another napp is
 	// another question
-	callerID := ""
-	if caller != nil {
-		callerID = caller.napp.ID
-	}
 	key := RuleKey{Napp: callerID, Permission: PermDispatch, Subject: name}
 
 	var choice PromptOption
@@ -746,7 +747,7 @@ func runNappAction(
 		if ci == nil {
 			return nil, fmt.Errorf("instance %q is gone", choice.Instance)
 		}
-		return dispatchToInstance(ctx, ci, req)
+		return dispatchTo(ctx, callerID, name, ci, req)
 	}
 	for _, n := range candidates {
 		if n.ID == choice.NappID {
@@ -754,10 +755,25 @@ func runNappAction(
 			if err != nil {
 				return nil, err
 			}
-			return dispatchToInstance(ctx, ci, req)
+			return dispatchTo(ctx, callerID, name, ci, req)
 		}
 	}
 	return nil, fmt.Errorf("napp %q is gone", choice.NappID)
+}
+
+// dispatchTo hands an action to the window that will handle it, counting where
+// it went on the way. Every dispatch a napp asked for goes through here, so
+// the counts are what actually happened rather than what the picker offered.
+func dispatchTo(
+	ctx context.Context,
+	caller, action string,
+	ci *Instance,
+	req *actionRequest,
+) (any, error) {
+	if ci != nil {
+		recordActionUse(caller, action, ci.napp.ID)
+	}
+	return dispatchToInstance(ctx, ci, req)
 }
 
 // handlerOption is the handler a rule named: an open window of that napp

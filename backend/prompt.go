@@ -58,6 +58,13 @@ type PromptOption struct {
 	NappID   string `json:"nappId"`
 	Instance string `json:"instance"`
 	Number   int    `json:"number,omitempty"`
+
+	// Suggested says the user has been choosing this napp for this action
+	// before, and Uses is how many times, so a UI can put its habitual
+	// handlers at the top in a color of their own. Set by the picker (see
+	// usage.go); a UI never has to work it out.
+	Suggested bool `json:"suggested,omitempty"`
+	Uses      int  `json:"uses,omitempty"`
 }
 
 // Prompt is a question the user has to answer before a napp can continue.
@@ -251,9 +258,12 @@ func askApproval(ci *Instance, perm Permission, title, detail, code string) bool
 // can. Open windows come first — routing into one keeps the user's state.
 func askActionHandler(caller *Instance, action string, payload json.RawMessage, candidates []Napp, open []*Instance) (PromptOption, bool) {
 	callerName := "launcher"
+	callerID := ""
 	if caller != nil {
 		callerName = caller.napp.Label()
+		callerID = caller.napp.ID
 	}
+
 	options := make([]PromptOption, 0, len(candidates)+len(open))
 	for _, dev := range []bool{true, false} {
 		for _, ci := range open {
@@ -280,6 +290,11 @@ func askActionHandler(caller *Instance, action string, payload json.RawMessage, 
 			})
 		}
 	}
+
+	// the napps the user keeps sending this action to come first, so the
+	// habitual answer is the one under their finger; everything else is left
+	// in the order it arrived in
+	sortHandlerOptions(options, callerID, action)
 
 	code := ""
 	if len(payload) != 0 && string(payload) != "null" {

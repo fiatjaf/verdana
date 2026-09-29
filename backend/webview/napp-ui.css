@@ -41,6 +41,8 @@
   --danger: #cc2222;
   --dev: #ffe5b4;
   --dev-text: #704000;
+  --suggest: #d8efdc;
+  --suggest-text: #14532d;
   /* The kit's own names for the launcher's colors, so a rule reads as
      "ink on a fill" rather than as a hex value picked once. */
   --v-ink: var(--text);
@@ -104,6 +106,8 @@
     --danger: #ff6b6b;
     --dev: #5a3b1a;
     --dev-text: #ffd79a;
+    --suggest: #1e3a2a;
+    --suggest-text: #b6e3c1;
     color-scheme: dark;
   }
 }
@@ -122,6 +126,8 @@
   --danger: #ff6b6b;
   --dev: #5a3b1a;
   --dev-text: #ffd79a;
+  --suggest: #1e3a2a;
+  --suggest-text: #b6e3c1;
   color-scheme: dark;
 }
 

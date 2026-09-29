@@ -344,11 +344,12 @@ type promptView struct {
 }
 
 type promptOptionView struct {
-	Label    string `json:"label"`
-	Detail   string `json:"detail"`
-	NappID   string `json:"nappId"`
-	Instance string `json:"instance"`
-	Dev      bool   `json:"dev"`
+	Label     string `json:"label"`
+	Detail    string `json:"detail"`
+	NappID    string `json:"nappId"`
+	Instance  string `json:"instance"`
+	Dev       bool   `json:"dev"`
+	Suggested bool   `json:"suggested"`
 }
 
 // promptAnswer is the bound call the overlay's buttons make. It sends the
@@ -395,6 +396,8 @@ const promptLibScript = "(function(){" +
 	"var accentText = tok('accent-text', '#ffffff');" +
 	"var dev = tok('dev', dark ? '#5a3b1a' : '#ffe5b4');" +
 	"var devText = tok('dev-text', dark ? '#ffd79a' : '#704000');" +
+	"var suggest = tok('suggest', dark ? '#1e3a2a' : '#d8efdc');" +
+	"var suggestText = tok('suggest-text', dark ? '#b6e3c1' : '#14532d');" +
 	"var border = tok('border', dark ? '#3a3d45' : '#cccccc');" +
 	"var o = document.createElement('div');" +
 	"o.id = '__verdana_prompt';" +
@@ -426,6 +429,7 @@ const promptLibScript = "(function(){" +
 	"var bgc = card, fgc = fg;" +
 	"if (tone === 'accent') { bgc = accent; fgc = accentText }" +
 	"if (tone === 'dev') { bgc = dev; fgc = devText }" +
+	"if (tone === 'suggest') { bgc = suggest; fgc = suggestText }" +
 	"var b = document.createElement('button');" +
 	"b.style.cssText = 'display:block;width:100%;max-width:360px;margin:0 auto 8px;padding:10px 14px" +
 	";border:0;border-radius:8px;background:' + bgc + ';color:' + fgc + ';font-size:14px;text-align:left" +
@@ -448,9 +452,10 @@ const promptLibScript = "(function(){" +
 	"var isPicker = p.options && p.options.length;" +
 	"if (isPicker) {" +
 	"p.options.forEach(function(opt, i) {" +
-	"var b = btn(opt.label, opt.dev ? 'dev' : (opt.instance ? 'accent' : 'chip'), true, i, 'once');" +
+	"var tone = opt.suggested ? 'suggest' : (opt.dev ? 'dev' : (opt.instance ? 'accent' : 'chip'));" +
+	"var b = btn(opt.label, tone, true, i, 'once');" +
 	"if (opt.detail) { var sub = document.createElement('div'); sub.textContent = opt.detail;" +
-	"sub.style.cssText = 'margin-top:3px;color:' + (opt.dev ? devText : (opt.instance ? accentText : muted))" +
+	"sub.style.cssText = 'margin-top:3px;color:' + (tone === 'suggest' ? suggestText : (tone === 'dev' ? devText : (tone === 'accent' ? accentText : muted)))" +
 	"+ ';font-size:11px;opacity:.75;'; b.appendChild(sub); }" +
 	"box.appendChild(b);" +
 	"});" +

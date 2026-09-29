@@ -744,14 +744,26 @@ fun PromptWindow(p: Prompt, onAnswer: (Boolean, Int, String) -> Unit) {
         Spacer(Modifier.height(16.dp))
         if (p.options.isNotEmpty()) {
             p.options.forEachIndexed { i, opt ->
+                // the napp the user keeps picking for this action gets its own
+                // color: it is why the list is in this order
+                val ink = if (opt.suggested) theme.suggestFg else theme.accentText
                 Button(
                     onClick = { onAnswer(true, i, "once") },
                     modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (opt.suggested) theme.suggestBg else MaterialTheme.colorScheme.primary,
+                        contentColor = ink,
+                    ),
                 ) {
                     if (opt.detail.isNotBlank()) {
                         Column {
                             Text(opt.label, maxLines = 1)
-                            Text(opt.detail, fontSize = 11.sp, color = theme.subtle, maxLines = 1)
+                            Text(
+                                opt.detail,
+                                fontSize = 11.sp,
+                                color = if (opt.suggested) ink else theme.subtle,
+                                maxLines = 1,
+                            )
                         }
                     } else {
                         Text(opt.label, maxLines = 1)

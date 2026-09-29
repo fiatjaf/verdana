@@ -28,6 +28,9 @@ data class PromptOption(
     val detail: String,
     val nappId: String = "",
     val instance: String = "",
+    // the backend has already ordered these by how often the user picked
+    // them; suggested says which ones carry that evidence
+    val suggested: Boolean = false,
 )
 
 data class Prompt(
@@ -136,6 +139,7 @@ fun parsePrompt(json: String): Prompt? {
                 detail = p.optString("detail"),
                 nappId = p.optString("nappId"),
                 instance = p.optString("instance"),
+                suggested = p.optBoolean("suggested"),
             )
         },
     )

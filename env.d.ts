@@ -509,7 +509,8 @@ interface Window {
 // and a napp that disagrees with the kit wins. The colors are the launcher's
 // own tokens, set on <html> as --surface, --surface-alt, --text, --text-muted,
 // --text-faint, --border, --chip, --chip-text, --accent, --accent-text,
-// --danger, --dev and --dev-text, and they follow the theme the user picked.
+// --danger, --dev and --dev-text, --suggest and --suggest-text, and they
+// follow the theme the user picked.
 //
 // A class says how a thing looks, never where it goes: width, margins and
 // placement are the parent's business.

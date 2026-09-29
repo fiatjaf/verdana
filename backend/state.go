@@ -31,6 +31,13 @@ type AppState struct {
 	// in memory and go when the launcher quits.
 	Rules map[string]Rule `json:"rules"`
 
+	// ActionUsage counts how often each napp ended up handling each action,
+	// keyed by usageKey (see usage.go): both "from this napp, this action
+	// went there" and "this action went there". Nothing is dispatched from
+	// these — they only order the options the user gets to choose from. The
+	// "this session" ones are not here either.
+	ActionUsage map[string]int `json:"action_usage"`
+
 	// Theme is "light" or "dark": what the launcher draws with and what
 	// every napp window is told to track.
 	Theme string `json:"theme"`
@@ -70,6 +77,9 @@ func loadState() {
 	}
 	if state.Rules == nil {
 		state.Rules = make(map[string]Rule)
+	}
+	if state.ActionUsage == nil {
+		state.ActionUsage = make(map[string]int)
 	}
 	if state.Theme != "light" && state.Theme != "dark" {
 		state.Theme = "light"

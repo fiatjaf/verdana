@@ -30,6 +30,13 @@ type themePalette struct {
 	devBg      color.NRGBA
 	devFg      color.NRGBA
 
+	// suggestBg/suggestFg mark the action-handler options the user has been
+	// choosing already, as opposed to the rest of the list. It has to read
+	// as neither of the other two: not accent (which means "already open")
+	// and not dev (which means "a napp you are working on").
+	suggestBg color.NRGBA
+	suggestFg color.NRGBA
+
 	// the rest of what layout.go paints with
 	card     color.NRGBA
 	chipBg   color.NRGBA
@@ -56,6 +63,8 @@ var lightPalette = themePalette{
 	contrastFg: rgb(0xffffff),
 	devBg:      rgb(0xffe5b4),
 	devFg:      rgb(0x704000),
+	suggestBg:  rgb(0xd8efdc),
+	suggestFg:  rgb(0x14532d),
 	card:       rgb(0xf2f2f2),
 	chipBg:     rgb(0xe8e8e8),
 	chipFg:     rgb(0x333333),
@@ -77,6 +86,8 @@ var darkPalette = themePalette{
 	contrastFg: rgb(0xffffff),
 	devBg:      rgb(0x5a3b1a),
 	devFg:      rgb(0xffd79a),
+	suggestBg:  rgb(0x1e3a2a),
+	suggestFg:  rgb(0xb6e3c1),
 	card:       rgb(0x23252b),
 	chipBg:     rgb(0x2b2e35),
 	chipFg:     rgb(0xd8d8dc),
@@ -135,19 +146,21 @@ func cssHex(c color.NRGBA) string {
 // on :root, so a napp painting with them tracks the launcher for free.
 func (p themePalette) vars() map[string]string {
 	return map[string]string{
-		"surface":     cssHex(p.bg),
-		"surface-alt": cssHex(p.card),
-		"text":        cssHex(p.fg),
-		"text-muted":  cssHex(p.subtle),
-		"text-faint":  cssHex(p.muted),
-		"border":      cssHex(p.border),
-		"chip":        cssHex(p.chipBg),
-		"chip-text":   cssHex(p.chipFg),
-		"accent":      cssHex(p.contrastBg),
-		"accent-text": cssHex(p.contrastFg),
-		"dev":         cssHex(p.devBg),
-		"dev-text":    cssHex(p.devFg),
-		"danger":      cssHex(p.danger),
+		"surface":      cssHex(p.bg),
+		"surface-alt":  cssHex(p.card),
+		"text":         cssHex(p.fg),
+		"text-muted":   cssHex(p.subtle),
+		"text-faint":   cssHex(p.muted),
+		"border":       cssHex(p.border),
+		"chip":         cssHex(p.chipBg),
+		"chip-text":    cssHex(p.chipFg),
+		"accent":       cssHex(p.contrastBg),
+		"accent-text":  cssHex(p.contrastFg),
+		"dev":          cssHex(p.devBg),
+		"dev-text":     cssHex(p.devFg),
+		"suggest":      cssHex(p.suggestBg),
+		"suggest-text": cssHex(p.suggestFg),
+		"danger":       cssHex(p.danger),
 	}
 }
 
