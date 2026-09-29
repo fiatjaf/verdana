@@ -19,6 +19,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/puzpuzpuz/xsync/v3"
 )
 
 // Dev napps are temporary, in-memory napps for development: they live only in
@@ -65,10 +67,7 @@ type devNapp struct {
 	target string
 }
 
-var (
-	devMu    sync.Mutex
-	devNapps = make(map[string]*devNapp)
-)
+var devNapps = xsync.NewMapOf[string, *devNapp]()
 
 // pageURL is where the napp's shell should navigate: the throwaway server for
 // folder napps, the dev server itself for url napps.
@@ -80,9 +79,8 @@ func (d *devNapp) pageURL() string {
 }
 
 func devLookup(id string) *devNapp {
-	devMu.Lock()
-	defer devMu.Unlock()
-	return devNapps[id]
+	d, _ := devNapps.Load(id)
+	return d
 }
 
 // DevSourceKind says where a loaded dev napp came from: "folder" or "url", ""
@@ -96,12 +94,10 @@ func DevSourceKind(id string) string {
 
 // DevNapps lists the loaded dev napps, by name.
 func DevNapps() []Napp {
-	devMu.Lock()
-	out := make([]Napp, 0, len(devNapps))
-	for _, d := range devNapps {
+	out := make([]Napp, 0, devNapps.Size())
+	for _, d := range devNapps.Range {
 		out = append(out, d.napp)
 	}
-	devMu.Unlock()
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
 }
@@ -169,9 +165,7 @@ func DevLoadFolder(dir string) {
 		setDevErr(err.Error())
 		return
 	}
-	devMu.Lock()
-	devNapps[napp.ID] = &devNapp{napp: napp, source: "folder", dir: dir}
-	devMu.Unlock()
+	devNapps.Store(napp.ID, &devNapp{napp: napp, source: "folder", dir: dir})
 	setDevErr("")
 	refreshDev()
 	log.Info().Str("napp", napp.ID).Str("dir", dir).Int("files", len(napp.Paths)).Msg("dev napp loaded from folder")
@@ -201,9 +195,7 @@ func DevLoadURL(rawurl string) {
 		setDevErr(err.Error())
 		return
 	}
-	devMu.Lock()
-	devNapps[napp.ID] = &devNapp{napp: napp, source: "url", target: target}
-	devMu.Unlock()
+	devNapps.Store(napp.ID, &devNapp{napp: napp, source: "url", target: target})
 	setDevErr("")
 	refreshDev()
 	log.Info().Str("napp", napp.ID).Str("url", target).Msg("dev napp loaded from url")
@@ -228,9 +220,7 @@ func DevUnload(id string) {
 	for _, ci := range runningForNapp(id) {
 		ci.Close()
 	}
-	devMu.Lock()
-	delete(devNapps, id)
-	devMu.Unlock()
+	devNapps.Delete(id)
 	refreshDev()
 	log.Info().Str("napp", id).Msg("dev napp unloaded")
 }

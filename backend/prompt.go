@@ -7,6 +7,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/puzpuzpuz/xsync/v3"
 )
 
 // Prompts are the launcher's only synchronous conversation with the user: a
@@ -323,10 +325,7 @@ func askActionHandler(caller *Instance, action string, payload json.RawMessage, 
 // promptOverlays tracks the instances currently showing a prompt overlay, so
 // each screen gets exactly one and stale ones come down when the prompt is
 // answered (or times out).
-var (
-	promptOverlayMu sync.Mutex
-	promptOverlays  = map[string]bool{}
-)
+var promptOverlays = xsync.NewMapOf[string, bool]()
 
 // syncPromptOverlays makes what each napp window shows match the prompt
 // state: one overlay per window with a pending prompt, none elsewhere.
@@ -349,20 +348,17 @@ func syncPromptOverlays() {
 	var hide []string
 	var showList []*Prompt
 
-	promptOverlayMu.Lock()
-	for inst := range promptOverlays {
+	for inst := range promptOverlays.Range {
 		if _, ok := targets[inst]; !ok {
 			hide = append(hide, inst)
-			delete(promptOverlays, inst)
+			promptOverlays.Delete(inst)
 		}
 	}
 	for inst, p := range targets {
-		if !promptOverlays[inst] {
+		if _, shown := promptOverlays.LoadOrStore(inst, true); !shown {
 			showList = append(showList, p)
-			promptOverlays[inst] = true
 		}
 	}
-	promptOverlayMu.Unlock()
 
 	for _, inst := range hide {
 		if ci := lookupInstance(inst); ci != nil {
@@ -378,9 +374,7 @@ func syncPromptOverlays() {
 			ci.send(WireMsg{T: "prompt", Params: string(raw)})
 		} else {
 			// the window is already gone: never mark it as covered
-			promptOverlayMu.Lock()
-			delete(promptOverlays, p.Instance)
-			promptOverlayMu.Unlock()
+			promptOverlays.Delete(p.Instance)
 		}
 	}
 }

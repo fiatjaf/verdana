@@ -3,7 +3,8 @@ package backend
 import (
 	"sort"
 	"strings"
-	"sync"
+
+	"github.com/puzpuzpuz/xsync/v3"
 )
 
 // Which napp the user keeps sending an action to, counted. When a napp fires
@@ -26,12 +27,9 @@ import (
 // it: what the user has been doing in the last five minutes is the best
 // evidence there is, and the habit it sits on top of is still true tomorrow.
 
-var (
-	// sessionUsage is the in-memory layer. Kept next to sessionRules in
-	// spirit — an answer for this run only, never written down.
-	usageMu      sync.Mutex
-	sessionUsage = make(map[string]int)
-)
+// sessionUsage is the in-memory layer. Kept next to sessionRules in spirit —
+// an answer for this run only, never written down.
+var sessionUsage = xsync.NewMapOf[string, int]()
 
 // usageKey is what a count is filed under: the napp that sent the action ("" for
 // the launcher's own), the action, and the napp that handled it.
@@ -82,11 +80,9 @@ func recordActionUse(caller, action, target string) {
 		keys = keys[1:]
 	}
 
-	usageMu.Lock()
 	for _, k := range keys {
-		sessionUsage[k.usageID()]++
+		sessionUsage.Compute(k.usageID(), func(n int, _ bool) (int, bool) { return n + 1, false })
 	}
-	usageMu.Unlock()
 
 	stateMu.Lock()
 	if state.ActionUsage == nil {
@@ -157,10 +153,7 @@ func rankFor(caller, action, target string) suggested {
 }
 
 func sessionUsageCount(id string) (int, bool) {
-	usageMu.Lock()
-	defer usageMu.Unlock()
-	n, ok := sessionUsage[id]
-	return n, ok
+	return sessionUsage.Load(id)
 }
 
 func storedUsageCount(id string) (int, bool) {
@@ -203,14 +196,12 @@ func sortHandlerOptions(options []PromptOption, caller, action string) {
 // later shouldn't inherit a history the user never formed with the copy they
 // have now.
 func forgetActionUsage(napp string) {
-	usageMu.Lock()
-	for id := range sessionUsage {
+	for id := range sessionUsage.Range {
 		k := usageKeyFromID(id)
 		if k.Napp == napp || k.Target == napp {
-			delete(sessionUsage, id)
+			sessionUsage.Delete(id)
 		}
 	}
-	usageMu.Unlock()
 
 	stateMu.Lock()
 	changed := false

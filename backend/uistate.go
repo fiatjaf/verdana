@@ -5,6 +5,8 @@ import (
 	"sort"
 	"sync"
 	"sync/atomic"
+
+	"github.com/puzpuzpuz/xsync/v3"
 )
 
 // Everything a launcher UI draws lives here, so the Gio window and the Compose
@@ -128,18 +130,24 @@ var ls = launcherState{phase: PhaseLoading, busy: make(map[string]bool)}
 // The Napp model crosses the gomobile boundary by value, so per-napp "an
 // update is out there" flags can't be shared mutable state on it: Snapshot()
 // stamps them from this atomic set instead, keyed by napp id.
+//
+// The set is swapped whole rather than refilled in place, so a snapshot never
+// catches a check halfway through replacing it.
 var (
-	updateMu        sync.RWMutex
-	updateAvailable map[string]Napp
-	updateChecking  atomic.Bool
+	updateSet      atomic.Pointer[xsync.MapOf[string, Napp]]
+	updateChecking atomic.Bool
 )
+
+func init() { updateSet.Store(xsync.NewMapOf[string, Napp]()) }
 
 // setUpdateAvailable replaces the "has an update" set and republishes the
 // launcher state.
 func setUpdateAvailable(apps map[string]Napp) {
-	updateMu.Lock()
-	updateAvailable = apps
-	updateMu.Unlock()
+	next := xsync.NewMapOf[string, Napp]()
+	for id, n := range apps {
+		next.Store(id, n)
+	}
+	updateSet.Store(next)
 	notifyState()
 }
 
@@ -175,13 +183,11 @@ func Snapshot() State {
 	s.ManagedWindows = ManagedWindows()
 	s.Shortcuts = shortcuts()
 	s.UpdateCheckRunning = updateChecking.Load()
-	updateMu.RLock()
 	for i := range s.Installed {
-		if newVersion, ok := updateAvailable[s.Installed[i].ID]; ok {
+		if newVersion, ok := updateSet.Load().Load(s.Installed[i].ID); ok {
 			s.Installed[i].UpdateAvailable = &newVersion
 		}
 	}
-	updateMu.RUnlock()
 	// author names resolve in the background and are stamped on every
 	// snapshot, so the UIs get them for free (display and filtering).
 	for i := range s.Installed {

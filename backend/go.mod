@@ -5,6 +5,7 @@ go 1.26.2
 require (
 	fiatjaf.com/nostr v0.0.0-20260919022302-cf8167ebdb95
 	github.com/dgraph-io/ristretto/v2 v2.3.0
+	github.com/puzpuzpuz/xsync/v3 v3.5.1
 	github.com/rs/zerolog v1.35.1
 	github.com/wizenheimer/blaze v0.0.0-20251014083344-98727d655839
 	golang.org/x/mobile v0.0.0-20260908204917-8b95e45f8d3e
@@ -38,7 +39,6 @@ require (
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/mschoch/smat v0.2.0 // indirect
-	github.com/puzpuzpuz/xsync/v3 v3.5.1 // indirect
 	github.com/templexxx/cpu v0.0.1 // indirect
 	github.com/templexxx/xhex v0.0.0-20200614015412-aed53437177b // indirect
 	github.com/tidwall/gjson v1.18.0 // indirect

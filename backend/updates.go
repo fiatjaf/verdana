@@ -164,14 +164,7 @@ func applyUpdate(current, newer Napp) {
 	stateMu.Unlock()
 
 	// the previously available update is now the installed version
-	updateMu.Lock()
-	upd := make(map[string]Napp, len(updateAvailable))
-	for id, n := range updateAvailable {
-		upd[id] = n
-	}
-	delete(upd, current.ID)
-	updateAvailable = upd
-	updateMu.Unlock()
+	updateSet.Load().Delete(current.ID)
 
 	refreshInstalled()
 	log.Info().Str("napp", current.ID).Msg("update complete")
@@ -181,12 +174,9 @@ func applyUpdate(current, newer Napp) {
 // from the in-memory cache a check round built, falling back to a live relay
 // lookup on the discovery relays and the author's outbox.
 func newerVersion(n Napp) *Napp {
-	updateMu.RLock()
-	if latest, ok := updateAvailable[n.ID]; ok && latest.CreatedAt > n.CreatedAt {
-		updateMu.RUnlock()
+	if latest, ok := updateSet.Load().Load(n.ID); ok && latest.CreatedAt > n.CreatedAt {
 		return &latest
 	}
-	updateMu.RUnlock()
 
 	if ts, ok := updateCache.Get(n.ID); ok && ts > n.CreatedAt {
 		if evt := fetchCurrentEvent(n.Author, n.D); evt != nil {

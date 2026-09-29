@@ -16,6 +16,7 @@ import (
 
 	"github.com/abemedia/go-webview"
 	_ "github.com/abemedia/go-webview/embedded"
+	"github.com/puzpuzpuz/xsync/v3"
 	"github.com/rs/zerolog"
 
 	nappbridge "verdana/backend/webview"
@@ -49,8 +50,7 @@ var (
 	meta      nappMeta
 	outMu     sync.Mutex
 	outEnc    *json.Encoder
-	pendingMu sync.Mutex
-	pending   = make(map[int]chan wireMsg)
+	pending   = xsync.NewMapOf[int, chan wireMsg]()
 	reqSerial atomic.Int64
 	log       zerolog.Logger
 )
@@ -236,16 +236,12 @@ func rpcBound(method string, params string) string {
 func rpc(method string, params string) (json.RawMessage, error) {
 	id := int(reqSerial.Add(1))
 	ch := make(chan wireMsg, 1)
-	pendingMu.Lock()
-	pending[id] = ch
-	pendingMu.Unlock()
+	pending.Store(id, ch)
 
 	writeMsg(wireMsg{T: "rpc", ID: id, Method: method, Params: params})
 
 	resp := <-ch
-	pendingMu.Lock()
-	delete(pending, id)
-	pendingMu.Unlock()
+	pending.Delete(id)
 
 	if resp.Error != "" {
 		return nil, errors.New(resp.Error)
@@ -276,10 +272,7 @@ func reader(w webview.WebView) {
 			code := promptOverlayCode(pv)
 			w.Dispatch(func() { w.Eval(code) })
 		case "resp":
-			pendingMu.Lock()
-			ch := pending[m.ID]
-			pendingMu.Unlock()
-			if ch != nil {
+			if ch, ok := pending.Load(m.ID); ok {
 				ch <- m
 			}
 		case "eval":

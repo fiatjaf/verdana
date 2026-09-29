@@ -3,7 +3,8 @@ package backend
 import (
 	"sort"
 	"strings"
-	"sync"
+
+	"github.com/puzpuzpuz/xsync/v3"
 )
 
 // The rules a napp runs under: what it may do without asking, and what it may
@@ -107,13 +108,10 @@ func decisionOf(ok bool) Decision {
 
 // ─── the layers ──────────────────────────────────────────────────
 
-var (
-	// sessionRules are the answers the "allow/deny this session" buttons
-	// gave: they live in memory for as long as the launcher runs and are
-	// never written down.
-	sessionMu    sync.Mutex
-	sessionRules = make(map[string]Rule)
-)
+// sessionRules are the answers the "allow/deny this session" buttons gave:
+// they live in memory for as long as the launcher runs and are never written
+// down.
+var sessionRules = xsync.NewMapOf[string, Rule]()
 
 // lookupRule is the one place a question is answered from: the installed
 // configuration first (it states what a napp needs, so it comes before
@@ -151,22 +149,15 @@ func remember(key RuleKey, r Rule, scope Scope) {
 }
 
 func sessionRule(key RuleKey) (Rule, bool) {
-	sessionMu.Lock()
-	defer sessionMu.Unlock()
-	r, ok := sessionRules[key.ruleID()]
-	return r, ok
+	return sessionRules.Load(key.ruleID())
 }
 
 func setSessionRule(key RuleKey, r Rule) {
-	sessionMu.Lock()
-	sessionRules[key.ruleID()] = r
-	sessionMu.Unlock()
+	sessionRules.Store(key.ruleID(), r)
 }
 
 func clearSessionRule(key RuleKey) {
-	sessionMu.Lock()
-	delete(sessionRules, key.ruleID())
-	sessionMu.Unlock()
+	sessionRules.Delete(key.ruleID())
 }
 
 func storedRule(key RuleKey) (Rule, bool) {
@@ -231,14 +222,12 @@ func PermissionRules() []PermissionRule {
 		out = append(out, permissionRuleOf(ruleKeyFromID(r.id), r.rule))
 	}
 
-	sessionMu.Lock()
-	pending := make([]keyed, 0, len(sessionRules))
-	for id, rule := range sessionRules {
+	pending := make([]keyed, 0, sessionRules.Size())
+	for id, rule := range sessionRules.Range {
 		if !seen[id] {
 			pending = append(pending, keyed{id, rule})
 		}
 	}
-	sessionMu.Unlock()
 	for _, r := range pending {
 		out = append(out, permissionRuleOf(ruleKeyFromID(r.id), r.rule))
 	}
@@ -292,17 +281,13 @@ func ForgetPermission(napp string, perm Permission) {
 		return key.Napp == napp && (perm == "" || key.Permission == perm)
 	}
 
-	sessionMu.Lock()
-	dropped := make([]string, 0, len(sessionRules))
-	for id := range sessionRules {
+	dropped := false
+	for id := range sessionRules.Range {
 		if matches(ruleKeyFromID(id)) {
-			dropped = append(dropped, id)
+			sessionRules.Delete(id)
+			dropped = true
 		}
 	}
-	for _, id := range dropped {
-		delete(sessionRules, id)
-	}
-	sessionMu.Unlock()
 
 	stateMu.Lock()
 	saved := false
@@ -318,7 +303,7 @@ func ForgetPermission(napp string, perm Permission) {
 	}
 	stateMu.Unlock()
 
-	if len(dropped) > 0 || saved {
+	if dropped || saved {
 		log.Info().Str("napp", napp).Str("permission", string(perm)).Msg("forgot a remembered answer")
 		notifyState()
 	}

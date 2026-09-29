@@ -17,6 +17,8 @@ import (
 
 	"fiatjaf.com/nostr"
 	"fiatjaf.com/nostr/sdk"
+
+	"github.com/puzpuzpuz/xsync/v3"
 )
 
 // An Instance is one open napp window, whatever a window happens to be on
@@ -95,13 +97,12 @@ var (
 	instances      []*Instance
 	instanceSerial atomic.Int64
 	windowSerial   atomic.Int64
-
-	// windows is every window opened this run, keyed by instance: the open
-	// ones plus the closed ones still listed for reopening. A window is
-	// closed when its instance is gone from instances.
-	windowsMu sync.Mutex
-	windows   = make(map[string]windowRecord)
 )
+
+// windows is every window opened this run, keyed by instance: the open ones
+// plus the closed ones still listed for reopening. A window is closed when its
+// instance is gone from instances.
+var windows = xsync.NewMapOf[string, windowRecord]()
 
 // ─── registry ────────────────────────────────────────────────────
 
@@ -502,10 +503,8 @@ func launchWithInstance(ctx context.Context, napp Napp, requestedInstance string
 // ─── window records ───────────────────────────────────────────────
 
 func windowRecords() []windowRecord {
-	windowsMu.Lock()
-	defer windowsMu.Unlock()
-	out := make([]windowRecord, 0, len(windows))
-	for _, w := range windows {
+	out := make([]windowRecord, 0, windows.Size())
+	for _, w := range windows.Range {
 		w.Actions = append([]ShortcutAction(nil), w.Actions...)
 		out = append(out, w)
 	}
@@ -513,9 +512,7 @@ func windowRecords() []windowRecord {
 }
 
 func lookupWindow(instance string) *windowRecord {
-	windowsMu.Lock()
-	defer windowsMu.Unlock()
-	w, ok := windows[instance]
+	w, ok := windows.Load(instance)
 	if !ok {
 		return nil
 	}
@@ -532,9 +529,7 @@ func windowHistory(instance string) []ShortcutAction {
 }
 
 func putWindow(w windowRecord) {
-	windowsMu.Lock()
-	windows[w.Instance] = w
-	windowsMu.Unlock()
+	windows.Store(w.Instance, w)
 }
 
 // rememberWindow starts the record of a window that just came up, keeping the
@@ -599,22 +594,29 @@ func recordAction(ci *Instance, req *actionRequest, replace bool) {
 	if ci.replaying.Load() {
 		return
 	}
-	windowsMu.Lock()
-	w := windows[ci.instance]
-	w.Instance = ci.instance
-	if w.NappID == "" {
-		w.NappID = ci.napp.ID
-	}
-	if replace && len(w.Actions) > 0 {
-		w.Actions[len(w.Actions)-1] = asShortcutAction(req)
-	} else {
-		w.Actions = append(w.Actions, asShortcutAction(req))
-		if len(w.Actions) > maxWindowActions {
-			w.Actions = append([]ShortcutAction(nil), w.Actions[len(w.Actions)-maxWindowActions:]...)
+	windows.Compute(ci.instance, func(w windowRecord, _ bool) (windowRecord, bool) {
+		w.Instance = ci.instance
+		if w.NappID == "" {
+			w.NappID = ci.napp.ID
 		}
-	}
-	windows[ci.instance] = w
-	windowsMu.Unlock()
+		// the log is rebuilt rather than appended to in place: a record read
+		// out of the map shares its Actions slice, and readers no longer take
+		// a lock that would keep this write from landing under them
+		act := asShortcutAction(req)
+		actions := make([]ShortcutAction, 0, maxWindowActions)
+		if replace && len(w.Actions) > 0 {
+			actions = append(actions, w.Actions[:len(w.Actions)-1]...)
+			actions = append(actions, act)
+		} else {
+			actions = append(actions, w.Actions...)
+			actions = append(actions, act)
+			if len(actions) > maxWindowActions {
+				actions = append([]ShortcutAction(nil), actions[len(actions)-maxWindowActions:]...)
+			}
+		}
+		w.Actions = actions
+		return w, false
+	})
 }
 
 // asShortcutAction is an action as the log and the bundle editor keep it: a
