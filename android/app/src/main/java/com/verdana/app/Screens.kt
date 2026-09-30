@@ -537,21 +537,17 @@ private fun outlinedColors(theme: Theme) = OutlinedTextFieldDefaults.colors(
     unfocusedTextColor = theme.fg,
 )
 
-// ─── the browser-like chrome ─────────────────────────────────────────
+// ─── the launcher chrome ────────────────────────────────────────────
 //
-// A fixed header: tab count box on the left, app name + current window id
-// on one line in the middle, logged-user picture on the right (tap it for
-// the profile screen); tapping the count box lists the open windows (and
-// the pending prompt, which is just another window) to jump between.
+// A fixed header: the open-napps count box on the left, "Verdana" in the
+// middle, the logged-user picture on the right (tap it for the profile
+// screen); tapping the count box lists the open napp windows — each one its
+// own task now — to bring to the front or close.
 
 @Composable
 fun AppHeader(
     st: LauncherState,
-    subtitle: String,
-    promptActive: Boolean,
     theme: Theme,
-    onHome: () -> Unit,
-    onShowPrompt: () -> Unit,
     onActivate: (String) -> Unit,
     onClose: (String) -> Unit,
     onProfile: () -> Unit,
@@ -585,23 +581,9 @@ fun AppHeader(
 
             Spacer(Modifier.width(8.dp))
 
-            // the app name + current window id on one line: tap for launcher
-            Row(
-                Modifier.weight(1f).clickable { showList = false; onHome() },
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
+            // the app name in the middle
+            Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
                 Text("Verdana", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = theme.fg)
-                if (subtitle.isNotBlank()) {
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        subtitle,
-                        fontSize = 11.sp,
-                        color = theme.muted,
-                        maxLines = 1,
-                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false),
-                    )
-                }
             }
 
             Spacer(Modifier.width(8.dp))
@@ -615,15 +597,10 @@ fun AppHeader(
         if (showList) {
             WindowSwitcher(
                 st = st,
-                promptActive = promptActive,
                 theme = theme,
                 onPick = { instance ->
                     showList = false
                     onActivate(instance)
-                },
-                onPickPrompt = {
-                    showList = false
-                    onShowPrompt()
                 },
                 onClose = onClose,
             )
@@ -634,23 +611,11 @@ fun AppHeader(
 @Composable
 private fun WindowSwitcher(
     st: LauncherState,
-    promptActive: Boolean,
     theme: Theme,
     onPick: (String) -> Unit,
-    onPickPrompt: () -> Unit,
     onClose: (String) -> Unit,
 ) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
-        if (promptActive) {
-            SwitcherRow(
-                label = "Prompt",
-                detail = "waiting for your answer",
-                active = true,
-                theme = theme,
-                onClick = onPickPrompt,
-                onClose = null,
-            )
-        }
         st.windows.forEach { w ->
             SwitcherRow(
                 label = w.name.ifBlank { w.nappId },
@@ -708,9 +673,9 @@ private fun SwitcherRow(
     }
 }
 
-// PromptWindow is the prompt as one of the browser-like windows: a full
-// screen under the same header, force-switched to whenever an action is
-// invoked, and reachable again from the window switcher.
+// PromptWindow is the prompt as a full-screen overlay over whatever asked
+// for it: the launcher when the launcher asked, the napp's own window when
+// a napp did. It is a blocking question — back never dismisses it.
 @Composable
 fun PromptWindow(p: Prompt, onAnswer: (Boolean, Int, String) -> Unit) {
     val theme = themeByName(currentThemeName)

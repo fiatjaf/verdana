@@ -10,9 +10,13 @@
         android:allowBackup="false"
         android:usesCleartextTraffic="true"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        <!-- the launcher: login, the napp lists, the profile. Every napp is
+             a window of its own (see NappActivity), never a screen here. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTask"
+            android:excludeFromRecents="false"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
@@ -20,5 +24,19 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- one napp window = one task = one card in Recents. intoExisting
+             is what makes the task key off the intent's data: launching
+             verdana://napp/7 again brings window 7 back instead of opening a
+             second one, and any other instance gets a window of its own. -->
+        <activity
+            android:name=".NappActivity"
+            android:exported="false"
+            android:launchMode="standard"
+            android:documentLaunchMode="intoExisting"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Material.Light.NoActionBar"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"
+            android:windowSoftInputMode="adjustResize" />
     </application>
 </manifest>

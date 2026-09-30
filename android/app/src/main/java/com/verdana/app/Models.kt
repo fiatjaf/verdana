@@ -43,6 +43,9 @@ data class Prompt(
     // remember says the answer can stick: the launcher then offers this
     // prompt only, this session, and always, and files the wider answers away.
     val remember: Boolean = false,
+    // instance is the window the prompt belongs over, when a napp fired it.
+    // Blank for questions the launcher asked itself.
+    val instance: String = "",
 )
 
 data class LauncherState(
@@ -142,6 +145,7 @@ fun parsePrompt(json: String): Prompt? {
                 suggested = p.optBoolean("suggested"),
             )
         },
+        instance = o.optString("instance"),
     )
 }
 

@@ -1,6 +1,7 @@
 package com.verdana.app
 
 import android.annotation.SuppressLint
+import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
 import android.webkit.WebResourceRequest
@@ -37,10 +38,11 @@ object NappOrigins {
 }
 
 class NappWebView(
-    private val activity: MainActivity,
+    private val activity: Context,
     val instance: String,
     val name: String,
     private val spec: WindowSpec,
+    private val onClose: () -> Unit,
 ) {
     val view: WebView = WebView(activity)
 
@@ -154,7 +156,7 @@ class NappWebView(
                 )
                 view.post { view.evaluateJavascript(code, null) }
             }
-            "close" -> activity.closeTab(instance)
+            "close" -> onClose()
         }
     }
 
