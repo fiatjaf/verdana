@@ -568,9 +568,9 @@ func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 		// ─── event fetching ──────────────────────────────────────
 		case "napp.loadEvent":
 			var p struct {
-				Code   string   `json:"code"`
-				Relays []string `json:"relays"`
-				Author string   `json:"author"`
+				Code   json.RawMessage `json:"code"`
+				Relays []string        `json:"relays"`
+				Author string          `json:"author"`
 			}
 			if err := json.Unmarshal([]byte(params), &p); err != nil {
 				return nil, err

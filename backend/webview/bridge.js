@@ -530,6 +530,8 @@
       searchUser: term => rpc("napp.searchUser", String(term ?? "")),
 
       // ── event fetching ───────────────────────────
+      // code: nip19 code / `nostr:` URI / bare hex id, or a decoded pointer
+      // ({id,…} for nevent, {identifier,pubkey,kind,…} for naddr)
       loadEvent: (code, relays, author) => rpc("napp.loadEvent", { code, relays, author }),
       loadEvents: ids => rpc("napp.loadEvents", ids),
       verifyEvent: event => rpc("napp.verifyEvent", event),

@@ -252,6 +252,31 @@ object VerdanaHost : UI {
         }
     }
 
+    // amberRequest is the Go side's one entry into the phone's signer app:
+    // launch the request off the main thread and answer how it went. The
+    // signer's answer itself arrives later, through the launcher callback,
+    // which calls Mobile.answerAmber.
+    override fun amberRequest(
+        id: String,
+        op: String,
+        payload: String,
+        pubkey: String,
+        counterpart: String,
+        pkg: String,
+    ): Boolean {
+        val done = java.util.concurrent.Semaphore(0)
+        var went = false
+        appContext?.startActivityOnMain {
+            went = Amber.request(op, payload, pubkey, counterpart, pkg, id)
+            done.release()
+        }
+        // startActivityOnMain posts when off the main thread; the Go caller
+        // needs the answer of "did it launch", which is the only thing that
+        // can be known this early, so wait for just that
+        done.tryAcquire(java.util.concurrent.TimeUnit.SECONDS.toNanos(5), java.util.concurrent.TimeUnit.NANOSECONDS)
+        return went
+    }
+
     private fun mimeGuess(name: String): String = when {
         name.endsWith(".html") -> "text/html"
         name.endsWith(".png") -> "image/png"

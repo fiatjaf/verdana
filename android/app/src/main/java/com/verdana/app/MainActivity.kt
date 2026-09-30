@@ -1,10 +1,12 @@
 package com.verdana.app
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -29,6 +31,22 @@ import mobile.Mobile
 class MainActivity : ComponentActivity() {
 
     private var showProfile by mutableStateOf(false)
+
+    // NIP-55: the launcher this activity hands to Amber while it is in
+    // front, so signer requests started anywhere route through the window
+    // the user is actually looking at
+    private val amberLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { Amber.handle(it) }
+
+    override fun onResume() {
+        super.onResume()
+        Amber.attach(amberLauncher)
+    }
+
+    override fun onPause() {
+        super.onPause()
+        Amber.detach(amberLauncher)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

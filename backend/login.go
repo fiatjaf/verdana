@@ -3,6 +3,7 @@ package backend
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"fiatjaf.com/nostr"
@@ -21,9 +22,48 @@ var (
 	sessionCancel context.CancelFunc
 )
 
-// Login takes an nsec or a bunker:// URL, resolves the signer and moves the
-// launcher to its main phase. Blocking: call it from a goroutine.
+// loginAmber finishes logging in through a NIP-55 signer app: the Android
+// side already got the key's pubkey and the signer's package from the app
+// itself, so this only wire it up and save it for the next launches. The
+// input is "amber:<pkg>:<pubkeyhex>" — pkg is part of what is stored so a
+// restart resumes with the same signer.
+func loginAmber(input string) {
+	rest := strings.TrimPrefix(input, "amber:")
+	pkg, pkHex, found := strings.Cut(rest, ":")
+	pk, err := nostr.PubKeyFromHex(pkHex)
+	if !found || err != nil {
+		setLoginErr("unreadable NIP-55 signer login: " + input)
+		return
+	}
+	log.Info().Str("pkg", pkg).Str("pubkey", pk.Hex()).Msg("logging in through a NIP-55 signer")
+
+	// no handshake to wait on: the signer app is the session, and it holds
+	// the key whether we are online or not
+	userKeyer = AmberSigner{PubKey: pk, Package: pkg}
+	userPubkey = pk
+	sessionCancel = nil
+
+	stateMu.Lock()
+	if state.Login != input {
+		state.Login = input
+		saveState()
+	}
+	stateMu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	setProfileFromUser(ctx, pk)
+}
+
+// setProfileFromUser is the tail every login shares: fetch the metadata of// Login takes an nsec, a bunker:// URL or an "amber:<pkg>:<pubkeyhex>" NIP-55
+// signer url, resolves the signer and moves the launcher to its main phase.
+// Blocking: call it from a goroutine.
 func Login(input string) {
+	if strings.HasPrefix(input, "amber:") {
+		loginAmber(input)
+		return
+	}
+
 	if input == "" {
 		setLoginErr("no key or bunker url given")
 		return
@@ -106,6 +146,12 @@ func Login(input string) {
 	}
 	stateMu.Unlock()
 
+	setProfileFromUser(ctx, pk)
+}
+
+// setProfileFromUser is the tail every login shares: fetch that key's
+// profile metadata, put it on the launcher state and go discover napps.
+func setProfileFromUser(ctx context.Context, pk nostr.PubKey) {
 	pm := sys.FetchProfileMetadata(ctx, pk)
 	name := pm.Name
 	if name == "" {

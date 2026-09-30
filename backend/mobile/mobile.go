@@ -47,6 +47,12 @@ type UI interface {
 	SaveFile(name string, data []byte) (string, error)
 	SaveFileTarget() string
 	OpenLink(url string) error
+
+	// AmberRequest hands a NIP-55 operation to the signer app the user has
+	// on the phone (Amber and co): show the request in the foreground and
+	// deliver the answer back to AnswerAmber carrying the same id. False
+	// when no signer could be launched at all.
+	AmberRequest(id, op, payload, pubkey, counterpart, pkg string) bool
 }
 
 // ─── host adapter ────────────────────────────────────────────────
@@ -82,6 +88,16 @@ func (h mobileHost) CopyText(text string) error                  { return h.ui.C
 func (h mobileHost) SaveFileTarget() string                      { return h.ui.SaveFileTarget() }
 func (h mobileHost) OpenLink(url string) error                   { return h.ui.OpenLink(url) }
 func (h mobileHost) SaveFile(n string, d []byte) (string, error) { return h.ui.SaveFile(n, d) }
+func (h mobileHost) AmberRequest(id, op, payload, pubkey, counterpart, pkg string) bool {
+	return h.ui.AmberRequest(id, op, payload, pubkey, counterpart, pkg)
+}
+
+// AnswerAmber delivers one NIP-55 signer app answer back to whoever on the
+// backend is waiting for the request with that id. Called by the UI when
+// the signer activity came back.
+func AnswerAmber(id string, answer string, ok bool) {
+	backend.AnswerAmber(id, answer, ok)
+}
 
 // shortcut files are a desktop concept: on Android the launcher either isn't
 // running (no shortcut files) or has no OS shortcut system to talk to.

@@ -1,5 +1,9 @@
 package com.verdana.app
 
+import android.app.Activity
+import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -24,6 +28,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import android.graphics.BitmapFactory
 import kotlinx.coroutines.withContext
+import mobile.Mobile
 import java.util.concurrent.ConcurrentHashMap
 
 // The name of the theme the launcher is currently drawing with, kept in one
@@ -37,6 +42,108 @@ fun setCurrentThemeName(name: String) { currentThemeName = name }
 // state.
 
 private val iconCache = ConcurrentHashMap<String, ImageBitmap?>()
+
+// AMBER_PKG is Amber's own package: the fallback when a signer app answers
+// the login without naming itself.
+private const val AMBER_PKG = "com.greenart7c3.nostrsigner"
+
+// AmberLogin is the NIP-55 login button: it asks the signer app for the
+// key's pubkey (one launch when Amber is the only signer installed, a
+// picker otherwise) and turns the answer into the same "amber:" login the
+// backend resumes sessions with. Reports on the same error line the typed
+// login reports through.
+@Composable
+private fun AmberLogin(activity: MainActivity, theme: Theme, onErr: (String) -> Unit) {
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
+        val d = r.data
+        when {
+            r.resultCode != Activity.RESULT_OK || d == null -> onErr("The signer app said no to the login.")
+            d.getStringExtra("result").isNullOrBlank() -> onErr("The signer app gave no key back.")
+            else -> {
+                val pk = d.getStringExtra("result")!!
+                val pkg = (d.getStringExtra("package") ?: "").ifBlank { AMBER_PKG }
+                Mobile.login("amber:$pkg:$pk")
+            }
+        }
+    }
+    val signers = remember { Amber.signerApps(activity) }
+    if (signers.size <= 1) {
+        Button(
+            onClick = { tryLaunch(launcher, null, onErr) },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("Log in with Amber")
+        }
+    } else {
+        var showPicker by remember { mutableStateOf(false) }
+        if (showPicker) {
+            SignerPickerDialog(activity, theme, { showPicker = false }) { pkg ->
+                showPicker = false
+                tryLaunch(launcher, pkg, onErr)
+            }
+        }
+        Button(
+            onClick = { showPicker = true },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("Log in with a signer app")
+        }
+    }
+}
+
+// tryLaunch is the launcher invocation with the failure path built in: no
+// installed signer, or one that refuses to open, reads as an error and not
+// as a frozen screen.
+private fun tryLaunch(
+    launcher: androidx.activity.result.ActivityResultLauncher<Intent>,
+    pkg: String?,
+    onErr: (String) -> Unit,
+) {
+    try {
+        launcher.launch(Amber.loginIntent(pkg))
+    } catch (_: Exception) {
+        onErr("Could not open the signer app.")
+    }
+}
+
+// SignerPickerDialog is the chooser for when more than one NIP-55 signer
+// app is installed: name and package of each, one tap to pick.
+@Composable
+private fun SignerPickerDialog(
+    activity: MainActivity,
+    theme: Theme,
+    onDismissRequest: () -> Unit,
+    onPick: (String) -> Unit,
+) {
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismissRequest) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(theme.card)
+                .padding(20.dp),
+        ) {
+            Text("Which signer app?", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium, color = theme.fg)
+            Spacer(Modifier.height(10.dp))
+            Amber.signerApps(activity).forEach { app ->
+                val pkg = app.activityInfo.packageName
+                TextButton(
+                    onClick = { onPick(pkg) },
+                    contentPadding = PaddingValues(0.dp),
+                ) {
+                    Column {
+                        Text(app.loadLabel(activity.packageManager).toString(), color = theme.fg)
+                        Text(pkg, fontSize = 11.sp, color = theme.muted)
+                    }
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+            TextButton(onClick = onDismissRequest) {
+                Text("Cancel", color = theme.chipFg)
+            }
+        }
+    }
+}
 
 @Composable
 fun LoadingScreen() {
@@ -76,6 +183,17 @@ fun LoginScreen(activity: MainActivity, st: LauncherState) {
         Spacer(Modifier.height(12.dp))
         Button(onClick = { activity.login(input.trim()) }, modifier = Modifier.fillMaxWidth()) {
             Text("Log in")
+        }
+        Spacer(Modifier.height(8.dp))
+        Text("— or —", style = MaterialTheme.typography.bodyMedium, color = theme.subtle)
+        Spacer(Modifier.height(16.dp))
+        if (Amber.installed(activity)) {
+            var amberErr by remember { mutableStateOf("") }
+            AmberLogin(activity, theme) { amberErr = it }
+            if (amberErr.isNotBlank()) {
+                Spacer(Modifier.height(8.dp))
+                Text(amberErr, color = theme.danger, style = MaterialTheme.typography.bodySmall)
+            }
         }
         if (st.loginErr.isNotBlank()) {
             Spacer(Modifier.height(12.dp))

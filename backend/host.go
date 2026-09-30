@@ -53,6 +53,12 @@ type Host interface {
 	// where the launcher rediscovers them. Anything unreadable or unparseable
 	// is left out. Nothing where there are no OS shortcuts.
 	ListShortcutFiles() []ShortcutFile
+
+	// AmberRequest hands a NIP-55 operation (sign_event, nip44_encrypt, …)
+	// to the phone's signer app — the Android host launches the signer and
+	// the answer comes back to AnswerAmber with the same id. False means
+	// the signer app could not be launched at all.
+	AmberRequest(id, op, payload, pubkey, counterpart, pkg string) bool
 }
 
 // ShortcutFile is one bundle shortcut found on disk: the name the user gave
@@ -125,3 +131,6 @@ func (noopHost) CreateShortcutFile(string, string) (string, error) {
 }
 func (noopHost) DeleteShortcutFile(string) error   { return nil }
 func (noopHost) ListShortcutFiles() []ShortcutFile { return nil }
+func (noopHost) AmberRequest(string, string, string, string, string, string) bool {
+	return false
+}

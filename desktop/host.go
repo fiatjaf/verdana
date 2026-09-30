@@ -77,6 +77,12 @@ func (gioHost) SaveFile(name string, data []byte) (string, error) {
 
 func (gioHost) SaveFileTarget() string { return downloadsDir() }
 
+// AmberRequest is a NIP-55 phone-signer concept: the desktop has no signer
+// app to reach, so there is nothing to launch.
+func (gioHost) AmberRequest(string, string, string, string, string, string) bool {
+	return false
+}
+
 // CreateShortcutFile writes an OS shortcut whose whole job is calling
 // verdana with one quoted argument: the bundle token. The OS-specific file
 // shapes live in the shortcutfile_<goos>.go files.

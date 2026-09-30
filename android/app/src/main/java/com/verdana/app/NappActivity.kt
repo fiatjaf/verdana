@@ -10,6 +10,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.systemBarsPadding
@@ -42,6 +43,23 @@ class NappActivity : ComponentActivity() {
 
     private var shell: NappWebView? = null
 
+    // NIP-55: while this window is in front it is the one forwarding signer
+    // requests, whatever napp asked for them
+    private val amberLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { Amber.handle(it) }
+
+    override fun onResume() {
+        super.onResume()
+        visible = true
+        Amber.attach(amberLauncher)
+    }
+
+    override fun onPause() {
+        super.onPause()
+        visible = false
+        Amber.detach(amberLauncher)
+    }
+
     // ownsWindow says this activity is the window the backend talks to. A
     // task can be created for an instance that is already up — that one is a
     // duplicate, and closing it must not take the real window with it.
@@ -50,16 +68,6 @@ class NappActivity : ComponentActivity() {
     // visible is whether this window is the one in front, which is not the
     // same as "has been resumed at some point"
     private var visible = false
-
-    override fun onResume() {
-        super.onResume()
-        visible = true
-    }
-
-    override fun onPause() {
-        super.onPause()
-        visible = false
-    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

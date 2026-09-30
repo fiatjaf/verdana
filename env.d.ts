@@ -234,7 +234,9 @@ type NappUtils = {
   searchUser(term: string): Promise<NostrUser[]>
 
   // Event fetching
-  loadEvent(code: string, relays?: string[], author?: string): Promise<NostrEvent | null>
+  // code: nip19 code / `nostr:` URI / bare hex id, or a decoded pointer
+  // ({id,…} for nevent, {identifier,pubkey,kind,…} for naddr)
+  loadEvent(code: string | EventPointer | AddressPointer, relays?: string[], author?: string): Promise<NostrEvent | null>
   // Batched by-id fetch — one REQ over the id union; non-64-hex ids are dropped.
   loadEvents(ids: string[]): Promise<NostrEvent[]>
   // Verify an event's id + signature on the host (nostr-tools verifyEvent).

@@ -2,6 +2,7 @@ package backend
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"time"
 
@@ -518,38 +519,20 @@ func loadNostrUser(ctx context.Context, input string, extraRelays []string) (map
 }
 
 // ─── event fetching ──────────────────────────────────────────────
-func loadEvent(ctx context.Context, code string, relays []string, author string) *nostr.Event {
-	code = strings.TrimSpace(code)
-	if code == "" || sys == nil {
+// loadEvent resolves whatever reference a napp hands over — a nip19 code as
+// pasted (padded, or as a NIP-21 `nostr:` URI), a bare hex id, or an
+// already-decoded pointer object ({id,…} for nevent, {identifier,pubkey,
+// kind,…} for naddr, exactly what window.napp.nip19.decode hands out) — and
+// fetches the event it names.
+func loadEvent(ctx context.Context, codeRaw json.RawMessage, relays []string, author string) *nostr.Event {
+	if sys == nil {
 		return nil
 	}
 
-	var pointer nostr.Pointer
-	if prefix, data, err := nip19.Decode(code); err == nil {
-		switch prefix {
-		case "nevent":
-			ep := data.(nostr.EventPointer)
-			ep.Relays = append(ep.Relays, relays...)
-			pointer = ep
-		case "naddr":
-			ap := data.(nostr.EntityPointer)
-			ap.Relays = append(ap.Relays, relays...)
-			pointer = ap
-		case "note":
-			pointer = nostr.EventPointer{ID: data.(nostr.ID), Relays: relays}
-		}
-	}
+	pointer, label := resolveLoadEventPointer(codeRaw, relays, author)
 	if pointer == nil {
-		id, err := nostr.IDFromHex(code)
-		if err != nil {
-			log.Debug().Str("code", preview(code, 40)).Msg("loadEvent: not an event reference")
-			return nil
-		}
-		ep := nostr.EventPointer{ID: id, Relays: relays}
-		if pk, err := nostr.PubKeyFromHex(author); err == nil {
-			ep.Author = pk
-		}
-		pointer = ep
+		log.Debug().Str("code", label).Msg("loadEvent: not an event reference")
+		return nil
 	}
 
 	fetchCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
@@ -558,10 +541,115 @@ func loadEvent(ctx context.Context, code string, relays []string, author string)
 		SaveToLocalStore: true,
 	})
 	if err != nil {
-		log.Debug().Err(err).Str("code", preview(code, 40)).Msg("loadEvent failed")
+		log.Debug().Err(err).Str("code", label).Msg("loadEvent failed")
 		return nil
 	}
 	return evt
+}
+
+// resolveLoadEventPointer turns the `code` argument of a loadEvent call into
+// the pointer it names, folding the caller's relays/author in as hints. An
+// object with an "identifier" key is an AddressPointer (an naddr may carry an
+// empty d tag, so key presence — not truthiness — decides), any other object
+// is an EventPointer.
+func resolveLoadEventPointer(codeRaw json.RawMessage, relays []string, author string) (nostr.Pointer, string) {
+	label := preview(strings.TrimSpace(string(codeRaw)), 40)
+
+	// A nip19 code / bare hex id arrives as a JSON string.
+	var codeStr string
+	if err := json.Unmarshal(codeRaw, &codeStr); err == nil {
+		code := strings.TrimSpace(codeStr)
+		if len(code) > 6 && strings.EqualFold(code[:6], "nostr:") {
+			code = strings.TrimSpace(code[6:])
+		}
+		label = preview(code, 40)
+		if code == "" {
+			return nil, label
+		}
+
+		var pointer nostr.Pointer
+		if prefix, data, err := nip19.Decode(code); err == nil {
+			switch prefix {
+			case "nevent":
+				ep := data.(nostr.EventPointer)
+				ep.Relays = append(ep.Relays, relays...)
+				pointer = ep
+			case "naddr":
+				ap := data.(nostr.EntityPointer)
+				ap.Relays = append(ap.Relays, relays...)
+				pointer = ap
+			case "note":
+				pointer = nostr.EventPointer{ID: data.(nostr.ID), Relays: relays}
+			}
+		}
+		if pointer == nil {
+			id, err := nostr.IDFromHex(code)
+			if err != nil {
+				return nil, label
+			}
+			ep := nostr.EventPointer{ID: id, Relays: relays}
+			if pk, err := nostr.PubKeyFromHex(author); err == nil {
+				ep.Author = pk
+			}
+			pointer = ep
+		}
+		return pointer, label
+	}
+
+	// Otherwise it is an already-decoded pointer object.
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(codeRaw, &obj); err != nil {
+		return nil, label
+	}
+	if _, isAddr := obj["identifier"]; isAddr {
+		var ap struct {
+			Identifier string     `json:"identifier"`
+			Pubkey     string     `json:"pubkey"`
+			Kind       nostr.Kind `json:"kind"`
+			Relays     []string   `json:"relays"`
+		}
+		if err := json.Unmarshal(codeRaw, &ap); err != nil {
+			return nil, label
+		}
+		pk, err := nostr.PubKeyFromHex(strings.TrimSpace(ap.Pubkey))
+		if err != nil {
+			return nil, label
+		}
+		return nostr.EntityPointer{
+			PublicKey:  pk,
+			Kind:       ap.Kind,
+			Identifier: ap.Identifier,
+			Relays:     append(ap.Relays, relays...),
+		}, label
+	}
+
+	var ep struct {
+		ID     string     `json:"id"`
+		Relays []string   `json:"relays"`
+		Author string     `json:"author"`
+		Kind   nostr.Kind `json:"kind"`
+	}
+	if err := json.Unmarshal(codeRaw, &ep); err != nil {
+		return nil, label
+	}
+	id, err := nostr.IDFromHex(strings.TrimSpace(ep.ID))
+	if err != nil {
+		return nil, label
+	}
+	ptr := nostr.EventPointer{ID: id, Kind: ep.Kind, Relays: append(ep.Relays, relays...)}
+	if pk, err := nostr.PubKeyFromHex(strings.TrimSpace(firstNonEmpty(ep.Author, author))); err == nil {
+		ptr.Author = pk
+	}
+	return ptr, label
+}
+
+func firstNonEmpty(s ...string) string {
+	for _, v := range s {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // loadEventsByID is the batched by-id fetch: the local store answers what it
