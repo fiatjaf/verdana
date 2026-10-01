@@ -128,7 +128,6 @@ func main() {
 	if err != nil {
 		log.Fatal().Err(err).Msg("could not start the backend")
 	}
-	defer closeStores()
 
 	// the backend is up: the token this launcher was started with opens its
 	// napps, and the ones forwarded in while it was starting stop waiting.
@@ -148,10 +147,14 @@ func main() {
 		ui.tab = 2
 	}
 
-	gioMain()
-
-	backend.CloseAllWindows()
-	killAllChildren()
+	go func() {
+		gioMain()
+		backend.CloseAllWindows()
+		killAllChildren()
+		closeStores()
+		os.Exit(0)
+	}()
+	app.Main()
 }
 
 func setTab(t int) {
