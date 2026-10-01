@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/url"
 	"strings"
+	"unicode"
 )
 
 // The small NAP domains: theme, storage and link.
@@ -159,36 +160,75 @@ func napStorageKeys(c *napCall) {
 
 // ─── link ────────────────────────────────────────────────────────
 
-func napLinkOpen(c *napCall) {
-	var r struct {
-		URL string `json:"url"`
+const maxNapLinkLabelRunes = 200
+
+type napLinkOpenReq struct {
+	URL     string `json:"url"`
+	Options struct {
+		Label string `json:"label"`
+	} `json:"options"`
+}
+
+func napLinkDenied(c *napCall, code string) {
+	c.reply(map[string]any{"status": "denied", "error": code})
+}
+
+// napLinkLabel makes untrusted, optional prompt text display-safe. It remains
+// supplementary: the actual normalized URL is always the prompt's code field.
+func napLinkLabel(label string) string {
+	label = strings.Map(func(r rune) rune {
+		// Format controls include bidirectional overrides that could make the
+		// untrusted label visually disagree with the URL shown below it.
+		if unicode.IsControl(r) || unicode.In(r, unicode.Cf) {
+			return ' '
+		}
+		return r
+	}, label)
+	label = strings.Join(strings.Fields(label), " ")
+	runes := []rune(label)
+	if len(runes) > maxNapLinkLabelRunes {
+		label = string(runes[:maxNapLinkLabelRunes]) + "…"
 	}
+	return label
+}
+
+func napLinkOpen(c *napCall) {
+	var r napLinkOpenReq
 	if err := c.decode(&r); err != nil || strings.TrimSpace(r.URL) == "" {
-		c.reply(map[string]any{"error": "invalid-url"})
+		napLinkDenied(c, "invalid-url")
 		return
 	}
 	u, err := url.Parse(strings.TrimSpace(r.URL))
 	if err != nil {
-		c.reply(map[string]any{"error": "invalid-url"})
+		napLinkDenied(c, "invalid-url")
+		return
+	}
+	if u.Scheme == "" {
+		napLinkDenied(c, "invalid-url")
 		return
 	}
 	// javascript:, data:, blob:, file: and every other scheme never leave
 	if u.Scheme != "https" && u.Scheme != "http" {
-		c.reply(map[string]any{"error": "unsupported-scheme"})
+		napLinkDenied(c, "unsupported-scheme")
 		return
 	}
 	if u.Host == "" {
-		c.reply(map[string]any{"error": "invalid-url"})
+		napLinkDenied(c, "invalid-url")
 		return
 	}
 	link := u.String()
+	detail := ""
+	if label := napLinkLabel(r.Options.Label); label != "" {
+		detail = "The napplet describes this link as: " + label
+	}
 	c.async(func(context.Context) {
-		if !askApproval(c.ci, PermOpenLink, "open a link in your browser", "", preview(link, 200)) {
-			c.reply(map[string]any{"status": "denied"})
+		if !askApproval(c.ci, PermOpenLink, "open a link in your browser", detail, preview(link, 200)) {
+			napLinkDenied(c, "user-denied")
 			return
 		}
 		if err := openExternalLink(link); err != nil {
-			c.reply(map[string]any{"error": err.Error()})
+			log.Warn().Err(err).Str("url", link).Msg("approved NAP-LINK request could not be opened")
+			napLinkDenied(c, "blocked-by-policy")
 			return
 		}
 		c.reply(map[string]any{"status": "opened"})

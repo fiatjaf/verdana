@@ -223,7 +223,13 @@ func TestNapSessionHandshake(t *testing.T) {
 
 	init := rec.find("shell.init")[0]
 	domains, _ := init["capabilities"].(map[string]any)["domains"].([]any)
-	for _, want := range []string{"relay", "identity", "storage", "inc", "intent", "upload"} {
+	// Supported APIs are a shell capability, not a least-privilege grant. The
+	// shell injects all of them even though this test napplet advertises no
+	// requirements.
+	if len(ci.napp.Requires) != 0 {
+		t.Fatalf("test napplet unexpectedly has requirements: %v", ci.napp.Requires)
+	}
+	for _, want := range napDomains {
 		if !slices.Contains(domains, any(want)) {
 			t.Errorf("shell.init lacks %s: %v", want, domains)
 		}
@@ -612,9 +618,82 @@ func TestNapLinkRejectsSchemes(t *testing.T) {
 	for i, u := range []string{"javascript:alert(1)", "data:text/html,x", "file:///etc/passwd", "blob:null/x"} {
 		post(t, ci, map[string]any{"type": "link.open", "id": u, "url": u})
 		got := rec.wait(t, "link.open.result", i+1)
-		if got["status"] != nil || got["error"] == nil {
+		if got["id"] != u || got["status"] != "denied" || got["error"] != "unsupported-scheme" {
 			t.Errorf("%s: %v", u, got)
 		}
+	}
+}
+
+type napLinkTestHost struct {
+	noopHost
+	opened []string
+	err    error
+}
+
+func (h *napLinkTestHost) OpenLink(url string) error {
+	h.opened = append(h.opened, url)
+	return h.err
+}
+
+func TestNapLinkResultsAndLabelSanitizing(t *testing.T) {
+	setupNapTest(t)
+	ci, rec := openNapplet(t, "link-results")
+	ready(t, ci, rec, 1)
+	key := RuleKey{Napp: ci.napp.ID, Permission: PermOpenLink}
+	t.Cleanup(func() { clearSessionRule(key) })
+
+	invalid := []struct {
+		id, url, code string
+	}{
+		{"missing", "", "invalid-url"},
+		{"relative", "/somewhere", "invalid-url"},
+		{"hostless", "https:///somewhere", "invalid-url"},
+	}
+	for i, tc := range invalid {
+		post(t, ci, map[string]any{"type": "link.open", "id": tc.id, "url": tc.url})
+		got := rec.wait(t, "link.open.result", i+1)
+		if got["id"] != tc.id || got["status"] != "denied" || got["error"] != tc.code {
+			t.Errorf("%s: %v", tc.id, got)
+		}
+	}
+
+	setSessionRule(key, Rule{Decision: DecisionDeny})
+	post(t, ci, map[string]any{"type": "link.open", "id": "deny", "url": "https://example.com"})
+	denied := rec.wait(t, "link.open.result", len(invalid)+1)
+	if denied["status"] != "denied" || denied["error"] != "user-denied" {
+		t.Fatalf("user denial: %v", denied)
+	}
+
+	linkHost := &napLinkTestHost{}
+	host = linkHost
+	setSessionRule(key, Rule{Decision: DecisionAllow})
+	post(t, ci, map[string]any{
+		"type": "link.open", "id": "open", "url": "https://example.com/read",
+		"options": map[string]any{"label": "Read this\nmisleading page"},
+	})
+	opened := rec.wait(t, "link.open.result", len(invalid)+2)
+	if opened["id"] != "open" || opened["status"] != "opened" || opened["error"] != nil {
+		t.Fatalf("opened result: %v", opened)
+	}
+	if !slices.Equal(linkHost.opened, []string{"https://example.com/read"}) {
+		t.Fatalf("opened URLs: %v", linkHost.opened)
+	}
+
+	linkHost.err = errors.New("platform details must not cross the wire")
+	post(t, ci, map[string]any{"type": "link.open", "id": "failure", "url": "https://example.com/fail"})
+	failed := rec.wait(t, "link.open.result", len(invalid)+3)
+	if failed["status"] != "denied" || failed["error"] != "blocked-by-policy" {
+		t.Fatalf("platform failure: %v", failed)
+	}
+}
+
+func TestNapLinkLabel(t *testing.T) {
+	if got := napLinkLabel("  Read\nthis\t\u202epage  "); got != "Read this page" {
+		t.Fatalf("sanitized label = %q", got)
+	}
+	long := strings.Repeat("界", maxNapLinkLabelRunes+1)
+	if got := napLinkLabel(long); len([]rune(got)) != maxNapLinkLabelRunes+1 || !strings.HasSuffix(got, "…") {
+		t.Fatalf("truncated label has %d runes and suffix %q", len([]rune(got)), got[len(got)-3:])
 	}
 }
 
