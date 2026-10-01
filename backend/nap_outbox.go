@@ -172,9 +172,14 @@ func outboxFilters(raw json.RawMessage, o outboxReadOptions) ([]nostr.Filter, er
 	return filters, nil
 }
 
-// outboxRoutes is where every filter of a request is asked.
+// outboxRoutes is where every filter of a request is asked. Finding the
+// relays is the part of a subscription timeoutMs bounds.
 func outboxRoutes(ctx context.Context, filters []nostr.Filter, o outboxReadOptions) []nostr.DirectedFilter {
-	rctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	limit := 5 * time.Second
+	if o.TimeoutMs > 0 {
+		limit = min(limit, o.timeout())
+	}
+	rctx, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
 	hints := o.hintRelays(rctx)
 	authors := o.hintAuthors()
@@ -222,6 +227,9 @@ func napOutboxQuery(c *napCall) {
 		}
 		byID := map[nostr.ID]*found{}
 		order := []*found{}
+		// the pool drops an event a second relay sends, so the hints are
+		// the first relay it came from; one already in the store gets that
+		// relay added when the network sends it too
 		add := func(evt nostr.Event, relay string) {
 			if f, ok := byID[evt.ID]; ok {
 				if relay != "" {
@@ -285,11 +293,23 @@ func napOutboxSubscribe(c *napCall) {
 		Filters json.RawMessage   `json:"filters"`
 		Options outboxReadOptions `json:"options"`
 	}
-	if err := c.decode(&r); err != nil || r.SubID == "" {
-		return
+	err := c.decode(&r)
+	if r.SubID == "" {
+		// nothing to answer on: the shim always sends one
+		var id struct {
+			SubID string `json:"subId"`
+		}
+		if json.Unmarshal(c.raw, &id) != nil || id.SubID == "" {
+			return
+		}
+		r.SubID = id.SubID
 	}
 	closed := func(reason string) {
 		c.ci.napPushGen(c.gen, map[string]any{"type": "outbox.closed", "subId": r.SubID, "reason": reason})
+	}
+	if err != nil {
+		closed("invalid filter")
+		return
 	}
 	filters, err := outboxFilters(r.Filters, r.Options)
 	if err != nil {
@@ -402,6 +422,9 @@ func napOutboxClose(c *napCall) {
 	if cancel != nil {
 		cancel()
 	}
+	// every request is answered (NAP-OUTBOX); the shim has already dropped
+	// the handle, so this only confirms the end of the stream
+	c.ci.napPushGen(c.gen, map[string]any{"type": "outbox.closed", "subId": r.SubID, "reason": "closed"})
 }
 
 // ─── publish ─────────────────────────────────────────────────────
@@ -448,7 +471,7 @@ func napOutboxPublish(c *napCall) {
 		// recipient with no inbox fails the publish, not just their copy
 		tctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 		targets, required, err := outboxFanout(tctx, nip65Lists, napExplicitRelay,
-			user, toOutbox, inboxes, r.Options.Relays)
+			user, toOutbox, inboxes, r.Options.Relays, Relays())
 		cancel()
 		if err != nil {
 			fail(err.Error())
@@ -457,6 +480,10 @@ func napOutboxPublish(c *napCall) {
 
 		evt, res, err := napApprovePublish(ctx, c, r.Event.event(user), nostr.ZeroPK, "", targets)
 		if err != nil {
+			if err.Error() == "user-denied" {
+				// NAP-OUTBOX's name for it
+				err = errors.New("publish denied")
+			}
 			fail(err.Error())
 			return
 		}

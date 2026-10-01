@@ -124,7 +124,7 @@ func TestOutboxFanout(t *testing.T) {
 	})
 	ctx := context.Background()
 
-	targets, inboxes, err := outboxFanout(ctx, lists, napExplicitRelay, user, true, []nostr.PubKey{bob}, []string{"wss://1.0.0.1"})
+	targets, inboxes, err := outboxFanout(ctx, lists, napExplicitRelay, user, true, []nostr.PubKey{bob}, []string{"wss://1.0.0.1"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,20 +136,25 @@ func TestOutboxFanout(t *testing.T) {
 	}
 
 	// inbox only: the user's own outbox stays out of it
-	targets, _, err = outboxFanout(ctx, lists, napExplicitRelay, user, false, []nostr.PubKey{bob}, nil)
+	targets, _, err = outboxFanout(ctx, lists, napExplicitRelay, user, false, []nostr.PubKey{bob}, nil, nil)
 	if err != nil || !slices.Equal(targets, []string{"wss://8.8.8.8"}) {
 		t.Errorf("inbox only: %v %v", targets, err)
 	}
 
-	if _, _, err := outboxFanout(ctx, lists, napExplicitRelay, user, true, []nostr.PubKey{nolist}, nil); !errors.Is(err, errNoInbox) {
+	if _, _, err := outboxFanout(ctx, lists, napExplicitRelay, user, true, []nostr.PubKey{nolist}, nil, nil); !errors.Is(err, errNoInbox) {
 		t.Errorf("a recipient with no relay list: %v", err)
 	}
 	for _, bad := range []string{"ws://127.0.0.1:7777", "wss://localhost", "https://1.1.1.1"} {
-		if _, _, err := outboxFanout(ctx, lists, napExplicitRelay, user, true, nil, []string{bad}); err == nil {
-			t.Errorf("explicit relay %s accepted", bad)
+		if _, _, err := outboxFanout(ctx, lists, napExplicitRelay, user, true, nil, []string{bad}, nil); !errors.Is(err, errPolicyDenied) {
+			t.Errorf("explicit relay %s: %v", bad, err)
 		}
 	}
-	if _, _, err := outboxFanout(ctx, lists, napExplicitRelay, nolist, true, nil, nil); err == nil {
+	// no relay list of one's own: the configured relays stand in for it
+	targets, _, err = outboxFanout(ctx, lists, napExplicitRelay, nolist, true, nil, nil, []string{"wss://1.1.1.1/"})
+	if err != nil || !slices.Equal(targets, []string{"wss://1.1.1.1"}) {
+		t.Errorf("fallback outbox: %v %v", targets, err)
+	}
+	if _, _, err := outboxFanout(ctx, lists, napExplicitRelay, nolist, true, nil, nil, nil); err == nil {
 		t.Error("published to nowhere")
 	}
 }
@@ -235,6 +240,17 @@ func TestNapOutboxSubscribe(t *testing.T) {
 	post(t, ci, map[string]any{"type": "outbox.subscribe", "id": "s2", "subId": "bad", "filters": "nope"})
 	if got := rec.wait(t, "outbox.closed", 2); got["subId"] != "bad" || got["reason"] != "invalid filter" {
 		t.Errorf("invalid filters: %v", got)
+	}
+	// a request that doesn't decode is still answered on its subId
+	post(t, ci, map[string]any{"type": "outbox.subscribe", "id": "s3", "subId": "typo",
+		"filters": []any{map[string]any{"kinds": []int{1}}}, "options": map[string]any{"limit": "ten"}})
+	if got := rec.wait(t, "outbox.closed", 3); got["subId"] != "typo" || got["reason"] != "invalid filter" {
+		t.Errorf("undecodable request: %v", got)
+	}
+	// and so is a close
+	post(t, ci, map[string]any{"type": "outbox.close", "id": "c", "subId": "feed"})
+	if got := rec.wait(t, "outbox.closed", 4); got["subId"] != "feed" {
+		t.Errorf("close: %v", got)
 	}
 	for _, typ := range rec.types() {
 		if typ == "outbox.eose" || typ == "relay.eose" {

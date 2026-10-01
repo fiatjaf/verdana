@@ -248,18 +248,25 @@ func normalizedUnique(urls []string) []string {
 // errNoInbox is a toInboxes author with no NIP-65 read relays to deliver to.
 var errNoInbox = errors.New("relay list unavailable")
 
+// errPolicyDenied is an explicit relay the launcher won't connect to.
+var errPolicyDenied = errors.New("policy denied")
+
 // outboxFanout is the relay set for one outbox.publish: the user's write
 // relays (toOutbox), every toInboxes person's read relays, and the
 // napplet's explicit relays. Each inbox relay comes from someone else's
 // relay list, so it gets the same public-host check as an explicit one;
 // inboxes maps each person to the relays kept for them. A person with no
 // usable inbox is an error: delivering to them was asked, not hoped for.
+// A user with no relay list publishes to the fallback relays instead.
 func outboxFanout(ctx context.Context, lists relayListFunc, check func(context.Context, string) (string, error),
-	user nostr.PubKey, toOutbox bool, toInboxes []nostr.PubKey, explicit []string,
+	user nostr.PubKey, toOutbox bool, toInboxes []nostr.PubKey, explicit, fallback []string,
 ) (targets []string, inboxes map[nostr.PubKey][]string, err error) {
 	targets = []string{}
 	if toOutbox {
 		write, _, _ := lists(ctx, user)
+		if len(write) == 0 {
+			write = normalizedUnique(fallback)
+		}
 		for _, u := range write {
 			targets = nostr.AppendUnique(targets, u)
 		}
@@ -283,7 +290,7 @@ func outboxFanout(ctx context.Context, lists relayListFunc, check func(context.C
 	for _, raw := range explicit {
 		u, err := check(ctx, raw)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, errPolicyDenied
 		}
 		targets = nostr.AppendUnique(targets, u)
 	}
