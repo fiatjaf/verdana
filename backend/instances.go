@@ -77,9 +77,10 @@ type Instance struct {
 type actionRequest struct {
 	name    string
 	payload json.RawMessage
-	// sender names who asked, for napplet targets (inc.event's sender): the
+	// sender names who asked, for napplet targets (IntentDelivery.sender): the
 	// calling napp's or napplet's d-tag, or "launcher"
 	sender string
+	accept func(*Instance)
 }
 
 // windowRecord is what the launcher remembers about a window it has opened
@@ -698,6 +699,12 @@ type actionOptions struct {
 	// the routing to one napp (or napplet), as an explicit handler address.
 	Choose bool   `json:"-"`
 	NappID string `json:"-"`
+
+	// Accept transfers delivery responsibility to the runtime after a target
+	// has been resolved (and launched, when necessary), but before delivery.
+	// Delivery then continues on a runtime-owned context so it is independent
+	// of the caller's window lifecycle.
+	Accept func(*Instance) `json:"-"`
 }
 
 // dispatchReport is filled with where an action went, for callers that
@@ -749,7 +756,7 @@ func runNappAction(
 		callerName = caller.napp.Label()
 	}
 
-	req := &actionRequest{name: name, payload: payload, sender: "launcher"}
+	req := &actionRequest{name: name, payload: payload, sender: "launcher", accept: opts.Accept}
 
 	callerID := ""
 	if caller != nil {
@@ -865,6 +872,16 @@ func dispatchTo(
 			r.ci = ci
 			r.mu.Unlock()
 		}
+	}
+	if accept := req.accept; accept != nil {
+		accept(ci)
+		req.accept = nil
+		go func() {
+			if _, err := dispatchToInstance(context.Background(), ci, req); err != nil {
+				log.Warn().Err(err).Str("action", action).Msg("accepted intent delivery failed")
+			}
+		}()
+		return nil, nil
 	}
 	return dispatchToInstance(ctx, ci, req)
 }
@@ -1001,26 +1018,40 @@ func dispatchToInstance(ctx context.Context, ci *Instance, req *actionRequest) (
 	}
 }
 
-// dispatchToNapplet delivers an action to a napplet the way NAP-INTENT does:
-// as an inc.event on the action's topic, once the napplet listens on it (its
-// inc.subscribe is the readiness signal, so a cold-started napplet gets the
-// event as soon as it is ready for it). Delivery is one-way: a napplet has
-// no result to give back.
+// dispatchToNapplet delivers an accepted convention through NAP-INTENT's
+// carrier-neutral intent.deliver event. The shim buffers the event until the
+// napplet registers onDelivery; the runtime only waits for shell.ready.
 func dispatchToNapplet(ctx context.Context, ci *Instance, req *actionRequest, payload json.RawMessage) (any, error) {
-	waitCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
-	_, ok := ci.waitForHandler(waitCtx, req.name)
-	cancel()
-	if !ok {
-		return nil, fmt.Errorf("%w: %s is not listening for %q", errNoHandler, ci.napp.Label(), req.name)
+	for {
+		ci.nap.mu.Lock()
+		ready := ci.nap.ready
+		established := ci.nap.established
+		ci.nap.mu.Unlock()
+		if established {
+			break
+		}
+		select {
+		case <-ready:
+		case <-ci.gone:
+			return nil, errors.New("target closed before intent delivery")
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
 	}
 	ci.lastAction.Store(&actionRequest{name: req.name, payload: payload})
 	notifyState()
 
-	ev := map[string]any{"type": "inc.event", "topic": req.name, "sender": req.sender}
-	if len(payload) > 0 && string(payload) != "null" {
-		ev["payload"] = payload
+	archetype, action, ok := conventionParts(req.name)
+	if !ok {
+		return nil, fmt.Errorf("invalid intent convention %q", req.name)
 	}
-	ci.napPush(ev)
+	delivery := map[string]any{
+		"sender": req.sender, "archetype": archetype, "action": action, "convention": req.name,
+	}
+	if len(payload) > 0 && string(payload) != "null" {
+		delivery["payload"] = payload
+	}
+	ci.napPush(map[string]any{"type": "intent.deliver", "delivery": delivery})
 	return nil, nil
 }
 

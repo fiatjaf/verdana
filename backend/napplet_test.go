@@ -316,6 +316,15 @@ func TestNIP5DManifestChecks(t *testing.T) {
 		t.Errorf("display: %q %q", n.Name, n.Description)
 	}
 
+	contractTags := append(nip5dTags("contracts", index),
+		nostr.Tag{"archetype", "note", "napplet:note/open", "kind:1", "kind:30023"})
+	contractNapp, err := nappletFromEvent(signedNapplet(t, contractTags, ""))
+	if err != nil || len(contractNapp.Conventions) != 1 ||
+		!slices.Equal(contractNapp.Conventions[0].EventKinds, []uint64{1, 30023}) ||
+		!slices.Equal(contractNapp.Actions, []string{"napplet:note/open"}) {
+		t.Errorf("intent contracts: err=%v napp=%+v", err, contractNapp)
+	}
+
 	bad := map[string]nostr.Tags{
 		"wrong x":     append(nip5dTags("app", index), nostr.Tag{"x", strings.Repeat("0", 64), "aggregate"}),
 		"no index":    nip5dTags("app", asset),

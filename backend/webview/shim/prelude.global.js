@@ -1182,10 +1182,13 @@ var NappletShimPrelude = (() => {
     const names = /* @__PURE__ */ new Set();
     const entries = [];
     const query4 = uri.slice(queryIndex + 1);
+    if (!query4) {
+      throw new Error("Convention URI query must not be empty");
+    }
     if (query4) {
       for (const pair of query4.split("&")) {
         const separator = pair.indexOf("=");
-        if (separator < 0) {
+        if (separator <= 0) {
           throw new Error("Convention URI query parameters must use name=value form");
         }
         const name = decodeURIComponent(pair.slice(0, separator));
@@ -2677,6 +2680,8 @@ var NappletShimPrelude = (() => {
   var pendingAvailable = /* @__PURE__ */ new Map();
   var pendingHandlers = /* @__PURE__ */ new Map();
   var changedHandlers = /* @__PURE__ */ new Set();
+  var deliveryHandlers = /* @__PURE__ */ new Set();
+  var pendingDeliveries = [];
   var installed11 = false;
   function isMessageType9(msg, type) {
     return msg.type === type;
@@ -2684,7 +2689,9 @@ var NappletShimPrelude = (() => {
   function isIntentResult(value) {
     if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
     const result = value;
-    return typeof result.ok === "boolean" && typeof result.archetype === "string" && typeof result.action === "string" && typeof result.handled === "boolean";
+    if (typeof result.ok !== "boolean") return false;
+    if (!result.ok) return typeof result.error === "string";
+    return typeof result.archetype === "string" && typeof result.action === "string" && typeof result.convention === "string" && typeof result.handler === "string";
   }
   function handleInvokeResult(msg) {
     const pending4 = pendingInvoke.get(msg.id);
@@ -2723,6 +2730,14 @@ var NappletShimPrelude = (() => {
     if (!msg.availability) return;
     for (const callback of changedHandlers) callback(msg.availability);
   }
+  function handleDelivery(msg) {
+    if (!msg.delivery) return;
+    if (deliveryHandlers.size === 0) {
+      pendingDeliveries.push(msg.delivery);
+      return;
+    }
+    for (const callback of deliveryHandlers) callback(msg.delivery);
+  }
   function handleIntentMessage(msg) {
     if (isMessageType9(msg, "intent.invoke.result")) {
       handleInvokeResult(msg);
@@ -2732,9 +2747,13 @@ var NappletShimPrelude = (() => {
       handleHandlersResult(msg);
     } else if (isMessageType9(msg, "intent.changed")) {
       handleChanged(msg);
+    } else if (isMessageType9(msg, "intent.deliver")) {
+      handleDelivery(msg);
     }
   }
-  function invoke(request7) {
+  function invoke(uri, options = {}) {
+    const { payload, ...hints } = options;
+    const request7 = { ...normalizeConventionUri(uri, payload), ...hints };
     const id = crypto.randomUUID();
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
@@ -2749,8 +2768,12 @@ var NappletShimPrelude = (() => {
       postToShell(msg);
     });
   }
-  function open2(archetype, payload, opts) {
-    return invoke({ archetype, action: "open", payload, ...opts });
+  function open2(uri, options) {
+    const normalized = normalizeConventionUri(uri, options?.payload);
+    if (normalized.action !== "open") {
+      throw new Error("intent.open requires a convention URI whose intent is open");
+    }
+    return invoke(uri, options);
   }
   function available(archetype) {
     const id = crypto.randomUUID();
@@ -2789,6 +2812,19 @@ var NappletShimPrelude = (() => {
       }
     };
   }
+  function onDelivery(handler) {
+    deliveryHandlers.add(handler);
+    if (pendingDeliveries.length > 0) {
+      const deliveries = pendingDeliveries;
+      pendingDeliveries = [];
+      for (const delivery of deliveries) handler(delivery);
+    }
+    return {
+      close() {
+        deliveryHandlers.delete(handler);
+      }
+    };
+  }
   function installIntentShim() {
     if (installed11) return () => void 0;
     installed11 = true;
@@ -2800,6 +2836,8 @@ var NappletShimPrelude = (() => {
       pendingAvailable.clear();
       pendingHandlers.clear();
       changedHandlers.clear();
+      deliveryHandlers.clear();
+      pendingDeliveries = [];
       installed11 = false;
     };
   }
@@ -4233,7 +4271,8 @@ var NappletShimPrelude = (() => {
         open: open2,
         available,
         handlers,
-        onChanged: onChanged3
+        onChanged: onChanged3,
+        onDelivery
       };
     }
     if (domains.has("webrtc")) {

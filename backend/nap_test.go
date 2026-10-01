@@ -567,7 +567,6 @@ func TestNapIncChannelOpsRequireMembership(t *testing.T) {
 func TestIntentDeliveryToNapplet(t *testing.T) {
 	setupNapTest(t)
 	ci, rec := openNapplet(t, "handler")
-	ready(t, ci, rec, 1)
 
 	done := make(chan error, 1)
 	go func() {
@@ -576,14 +575,15 @@ func TestIntentDeliveryToNapplet(t *testing.T) {
 		done <- err
 	}()
 
-	// cold start: the intent waits for the napplet to listen
+	// A cold-start delivery waits for shell.ready, not an INC subscription.
 	time.Sleep(50 * time.Millisecond)
-	if len(rec.find("inc.event")) != 0 {
-		t.Fatal("delivered before the napplet listened")
+	if len(rec.find("intent.deliver")) != 0 {
+		t.Fatal("delivered before the napplet was ready")
 	}
-	post(t, ci, map[string]any{"type": "inc.subscribe", "id": "s", "topic": "napplet:profile/open"})
-	ev := rec.wait(t, "inc.event", 1)
-	if ev["topic"] != "napplet:profile/open" || ev["sender"] != "caller" ||
+	ready(t, ci, rec, 1)
+	ev := rec.wait(t, "intent.deliver", 1)["delivery"].(map[string]any)
+	if ev["convention"] != "napplet:profile/open" || ev["archetype"] != "profile" ||
+		ev["action"] != "open" || ev["sender"] != "caller" ||
 		ev["payload"].(map[string]any)["pubkey"] != "abc" {
 		t.Errorf("intent event: %v", ev)
 	}
@@ -592,20 +592,74 @@ func TestIntentDeliveryToNapplet(t *testing.T) {
 	}
 }
 
-func TestSplitConvention(t *testing.T) {
-	topic, payload, err := splitConvention("napplet:profile/open?pubkey=ab%20c&x=1+2")
-	if err != nil || topic != "napplet:profile/open" {
-		t.Fatalf("%q %v", topic, err)
+func TestConventionPartsAcceptsOnlyStableIdentity(t *testing.T) {
+	archetype, action, ok := conventionParts("napplet:profile/open")
+	if !ok || archetype != "profile" || action != "open" {
+		t.Fatalf("parts = %q %q %v", archetype, action, ok)
 	}
-	var p map[string]string
-	_ = json.Unmarshal(payload, &p)
-	if p["pubkey"] != "ab c" || p["x"] != "1+2" {
-		t.Errorf("payload: %v", p)
-	}
-	for _, bad := range []string{"napplet:p/open#f", "napplet:p/open?a", "napplet:p/open?a=1&a=2", "https://x/y", "napplet:P/open"} {
-		if _, _, err := splitConvention(bad); err == nil {
+	for _, bad := range []string{"napplet:p/open#f", "napplet:p/open?a=1", "https://x/y", "napplet:P/open", "napplet:p/a/b"} {
+		if _, _, ok := conventionParts(bad); ok {
 			t.Errorf("accepted %q", bad)
 		}
+	}
+}
+
+func TestNapIntentAcceptanceSurvivesSourceLifecycle(t *testing.T) {
+	setupNapTest(t)
+	caller, recCaller := openNapplet(t, "intent-caller")
+	handler, recHandler := openNapplet(t, "profile-handler")
+	handler.napp.Conventions = []NappletConvention{{ID: "napplet:profile/open"}}
+	handler.napp.Actions = []string{"napplet:profile/open"}
+
+	stateMu.Lock()
+	if state.InstalledNapps == nil {
+		state.InstalledNapps = make(map[string]Napp)
+	}
+	state.InstalledNapps[handler.napp.ID] = handler.napp
+	stateMu.Unlock()
+	t.Cleanup(func() {
+		stateMu.Lock()
+		delete(state.InstalledNapps, handler.napp.ID)
+		stateMu.Unlock()
+	})
+	key := RuleKey{Napp: caller.napp.ID, Permission: PermDispatch, Subject: "napplet:profile/open"}
+	setSessionRule(key, Rule{Decision: DecisionAllow, Target: handler.napp.ID})
+	t.Cleanup(func() { clearSessionRule(key) })
+
+	ready(t, caller, recCaller, 1)
+	post(t, caller, map[string]any{"type": "intent.available", "id": "available", "archetype": "profile"})
+	availability := recCaller.wait(t, "intent.available.result", 1)["availability"].(map[string]any)
+	candidates := availability["candidates"].([]any)
+	contract := candidates[0].(map[string]any)["contracts"].([]any)[0].(map[string]any)
+	if contract["convention"] != "napplet:profile/open" {
+		t.Fatalf("availability contracts: %v", availability)
+	}
+
+	post(t, caller, map[string]any{"type": "intent.invoke", "id": "mismatch", "request": map[string]any{
+		"archetype": "profile", "action": "open", "convention": "napplet:note/open",
+	}})
+	rejected := recCaller.wait(t, "intent.invoke.result", 1)["result"].(map[string]any)
+	if rejected["ok"] != false || rejected["error"] != "invalid convention" {
+		t.Fatalf("mismatched convention accepted: %v", rejected)
+	}
+
+	post(t, caller, map[string]any{"type": "intent.invoke", "id": "invoke", "request": map[string]any{
+		"archetype": "profile", "action": "open", "convention": "napplet:profile/open",
+		"payload": map[string]any{"pubkey": "abc"},
+	}})
+	result := recCaller.wait(t, "intent.invoke.result", 2)["result"].(map[string]any)
+	if result["ok"] != true || result["handler"] != handler.napp.D || result["handled"] != nil || result["windowId"] != nil {
+		t.Fatalf("acceptance result: %v", result)
+	}
+
+	// End the source session before the target becomes ready. Accepted delivery
+	// belongs to the runtime and must still reach the target afterward.
+	caller.napReset()
+	ready(t, handler, recHandler, 1)
+	delivery := recHandler.wait(t, "intent.deliver", 1)["delivery"].(map[string]any)
+	if delivery["sender"] != caller.napp.D || delivery["convention"] != "napplet:profile/open" ||
+		delivery["payload"].(map[string]any)["pubkey"] != "abc" {
+		t.Errorf("delivery: %v", delivery)
 	}
 }
 
