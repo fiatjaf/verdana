@@ -8,6 +8,8 @@ import (
 
 	"fiatjaf.com/nostr"
 	"fiatjaf.com/nostr/keyer"
+	"fiatjaf.com/nostr/nip05"
+	"fiatjaf.com/nostr/nip46"
 )
 
 var (
@@ -59,7 +61,12 @@ func loginAmber(input string) {
 // setProfileFromUser is the tail every login shares: fetch the metadata of// Login takes an nsec, a bunker:// URL or an "amber:<pkg>:<pubkeyhex>" NIP-55
 // signer url, resolves the signer and moves the launcher to its main phase.
 // Blocking: call it from a goroutine.
-func Login(input string) {
+func Login(input string) { login(input, false) }
+
+// resumeLogin is Login for the input stored by a previous run.
+func resumeLogin(input string) { login(input, true) }
+
+func login(input string, resume bool) {
 	if strings.HasPrefix(input, "amber:") {
 		loginAmber(input)
 		return
@@ -96,12 +103,18 @@ func Login(input string) {
 		err error
 	}
 	keyerDone := make(chan keyerResult, 1)
+	onAuth := func(url string) {
+		log.Info().Str("url", url).Msg("bunker auth")
+	}
 	go func() {
+		if resume && (nip46.IsValidBunkerURL(input) || nip05.IsValidIdentifier(input)) {
+			k, err := resumeBunker(sessionCtx, clientKey, input, onAuth)
+			keyerDone <- keyerResult{k, err}
+			return
+		}
 		k, err := keyer.New(sessionCtx, sys.Pool, input, &keyer.SignerOptions{
 			BunkerClientSecretKey: clientKey,
-			BunkerAuthHandler: func(url string) {
-				log.Info().Str("url", url).Msg("bunker auth")
-			},
+			BunkerAuthHandler:     onAuth,
 		})
 		keyerDone <- keyerResult{k, err}
 	}()
@@ -149,6 +162,21 @@ func Login(input string) {
 	stateMu.Unlock()
 
 	setProfileFromUser(ctx, pk)
+}
+
+// resumeBunker reattaches to a bunker that already accepted our client key in
+// an earlier run. NIP-46 only wants "connect" once: the bunker remembers the
+// client pubkey, and the secret in the URL is single-use, so replaying it on
+// every launch makes a signer like Amber prompt for a new connection (or
+// ignore it) while the login times out. The first RPC (get_public_key) tells
+// whether the bunker still knows us.
+func resumeBunker(ctx context.Context, clientKey nostr.SecretKey, input string, onAuth func(string)) (nostr.Keyer, error) {
+	parsed, err := nip46.ParseBunkerInput(ctx, input)
+	if err != nil {
+		return nil, err
+	}
+	bc := nip46.NewBunker(ctx, clientKey, parsed.HostPubKey, parsed.Relays, sys.Pool, onAuth)
+	return keyer.NewBunkerSignerFromBunkerClient(bc), nil
 }
 
 // setProfileFromUser is the tail every login shares: fetch that key's

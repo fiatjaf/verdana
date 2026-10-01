@@ -80,7 +80,7 @@ func Start(opts Options) (func(), error) {
 
 	// resume the stored login, or ask for one
 	if stored := StoredLogin(); stored != "" {
-		go Login(stored)
+		go resumeLogin(stored)
 	} else {
 		setPhase(PhaseLogin)
 	}
