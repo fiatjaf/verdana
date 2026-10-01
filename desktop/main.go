@@ -76,7 +76,32 @@ var (
 	// with the window's other widgets).
 	filterEd          widget.Editor
 	installedFilterEd widget.Editor
+
+	// discoKind is which apps the discovery tab lists (one of the
+	// discoKind* constants), switched by discoKindBtns.
+	discoKind     int
+	discoKindBtns [3]widget.Clickable
 )
+
+const (
+	discoKindAll = iota
+	discoKindNapps
+	discoKindNapplets
+)
+
+// discoKindLabels name the discovery tab's kind buttons, in discoKind order.
+var discoKindLabels = [3]string{"All", "Napps", "Napplets"}
+
+// matchesKind says whether a napp belongs under a discovery kind tab.
+func matchesKind(n backend.Napp, kind int) bool {
+	switch kind {
+	case discoKindNapps:
+		return !n.IsNapplet()
+	case discoKindNapplets:
+		return n.IsNapplet()
+	}
+	return true
+}
 
 const APP_TITLE = "Verdana"
 
@@ -205,10 +230,23 @@ func setShortcutEdit(edit *shortcutEditState) {
 //
 // A napp address (an naddr, a nostr: link) typed there is looked up on
 // relays too; once found, it is listed and it alone passes the filter.
+//
+// The kind tabs narrow it further to napps or napplets, except for an
+// address: that names one app, whatever its kind.
 func discoveryFilter(st backend.State) []int {
 	backend.LookupAddress(filterEd.Text())
 	q := strings.ToLower(strings.TrimSpace(filterEd.Text()))
-	return nappFilter(st.Discovery, q)
+	vis := nappFilter(st.Discovery, q)
+	if discoKind == discoKindAll || backend.IsNappAddress(q) {
+		return vis
+	}
+	out := vis[:0]
+	for _, i := range vis {
+		if matchesKind(st.Discovery[i], discoKind) {
+			out = append(out, i)
+		}
+	}
+	return out
 }
 
 // installedFilter is the same thing for the installed list.
@@ -425,6 +463,11 @@ func gioMain() {
 					if fetchBtn.Clicked(gtx) {
 						backend.SetRelays(parseRelays(relaysEd.Text()))
 						go backend.Discover()
+					}
+					for k := range discoKindBtns {
+						if discoKindBtns[k].Clicked(gtx) {
+							discoKind = k
+						}
 					}
 					for len(cardBtns) < len(st.Installed) {
 						cardBtns = append(cardBtns, widget.Clickable{})

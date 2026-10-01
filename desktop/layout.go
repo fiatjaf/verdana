@@ -2,6 +2,7 @@ package main
 
 import (
 	"image"
+	"strconv"
 	"strings"
 	"verdana/backend"
 
@@ -860,37 +861,79 @@ func layoutDiscoveryTab(
 				}),
 			)
 		}),
-		layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
+		// the kind tabs (all, napps, napplets) and, at the other end, the
+		// refresh button that asks the relays again
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			counts := [3]int{len(discovery)}
+			for _, n := range discovery {
+				if matchesKind(n, discoKindNapplets) {
+					counts[discoKindNapplets]++
+				} else {
+					counts[discoKindNapps]++
+				}
+			}
+			kindBtn := func(k int) layout.FlexChild {
+				return layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return layout.Inset{Right: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						pointer.CursorPointer.Add(gtx.Ops)
+						label := discoKindLabels[k]
+						if counts[k] > 0 {
+							label += " (" + strconv.Itoa(counts[k]) + ")"
+						}
+						b := material.Button(th, &discoKindBtns[k], label)
+						b.TextSize = unit.Sp(13)
+						b.Inset = layout.Inset{Top: unit.Dp(6), Bottom: unit.Dp(6), Left: unit.Dp(12), Right: unit.Dp(12)}
+						if discoKind == k {
+							b.Background = th.Palette.ContrastBg
+						} else {
+							b.Background = currentTheme().chipBg
+							b.Color = currentTheme().chipFg
+						}
+						return b.Layout(gtx)
+					})
+				})
+			}
 			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+				kindBtn(discoKindAll),
+				kindBtn(discoKindNapps),
+				kindBtn(discoKindNapplets),
+				layout.Flexed(1, layout.Spacer{}.Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					pointer.CursorPointer.Add(gtx.Ops)
-					label := "Fetch napps"
+					label := "Refresh"
 					if fetching {
-						label = "Fetching\u2026"
+						label = "Refreshing\u2026"
 					}
-					return material.Button(th, fetchBtn, label).Layout(gtx)
-				}),
-				layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					if fetchErr == "" {
-						return layout.Dimensions{}
-					}
-					l := material.Body2(th, fetchErr)
-					l.Color = currentTheme().danger
-					return l.Layout(gtx)
+					b := material.Button(th, fetchBtn, label)
+					b.TextSize = unit.Sp(13)
+					b.Inset = layout.Inset{Top: unit.Dp(6), Bottom: unit.Dp(6), Left: unit.Dp(12), Right: unit.Dp(12)}
+					return b.Layout(gtx)
 				}),
 			)
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if fetchErr == "" {
+				return layout.Dimensions{}
+			}
+			return layout.Inset{Top: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				l := material.Body2(th, fetchErr)
+				l.Color = currentTheme().danger
+				return l.Layout(gtx)
+			})
 		}),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			if len(vis) == 0 {
-				msg := "No napps yet. Pick some good relays and click \"Fetch napps\"."
+				msg := "No napps yet. Pick some good relays and click \"Refresh\"."
 				if fetching {
 					msg = "Searching relays\u2026"
 				}
 				if len(discovery) > 0 {
 					msg = "Nothing matches the filter."
+					if strings.TrimSpace(filterEd.Text()) == "" {
+						msg = "No " + strings.ToLower(discoKindLabels[discoKind]) + " found on these relays."
+					}
 				}
 				if lookup != nil {
 					switch {

@@ -208,6 +208,7 @@ fun LauncherScreen(activity: MainActivity, st: LauncherState) {
     var tab by remember { mutableStateOf(if (st.installed.isNotEmpty()) 0 else 1) }
     var relaysEd by remember(st.relays.hashCode()) { mutableStateOf(st.relays.joinToString("\n")) }
     var discoveryFilter by remember { mutableStateOf("") }
+    var discoveryKind by remember { mutableStateOf(DiscoveryKind.All) }
     var installedFilter by remember { mutableStateOf("") }
     // ephemeral detail tabs: vanish the moment any other tab is picked
     var detailNapp by remember { mutableStateOf<Napp?>(null) }
@@ -265,6 +266,7 @@ fun LauncherScreen(activity: MainActivity, st: LauncherState) {
             tab == 0 -> InstalledTab(activity, st, theme, installedFilter, { installedFilter = it },
                 onDetail = { openNapp(it) }, onAuthor = { openProfile(it) })
             else -> DiscoveryTab(activity, st, theme, relaysEd, { relaysEd = it }, discoveryFilter, { discoveryFilter = it },
+                discoveryKind, { discoveryKind = it },
                 onDetail = { openNapp(it) }, onAuthor = { openProfile(it) })
         }
     }
@@ -386,6 +388,19 @@ private fun LogoutConfirmDialog(theme: Theme, onConfirm: () -> Unit, onDismiss: 
     }
 }
 
+// DiscoveryKind is which apps the discovery tab lists.
+enum class DiscoveryKind(val label: String) {
+    All("All"),
+    Napps("Napps"),
+    Napplets("Napplets");
+
+    fun matches(n: Napp): Boolean = when (this) {
+        All -> true
+        Napps -> !n.isNapplet
+        Napplets -> n.isNapplet
+    }
+}
+
 @Composable
 private fun TabChip(label: String, active: Boolean, theme: Theme, onClick: () -> Unit) {
     Button(
@@ -469,6 +484,8 @@ private fun DiscoveryTab(
     setRelaysEd: (String) -> Unit,
     filter: String,
     setFilter: (String) -> Unit,
+    kind: DiscoveryKind,
+    setKind: (DiscoveryKind) -> Unit,
     onDetail: (Napp) -> Unit,
     onAuthor: (String) -> Unit,
 ) {
@@ -478,7 +495,10 @@ private fun DiscoveryTab(
     // up on relays instead, and only what it names is listed.
     LaunchedEffect(filter) { activity.lookupAddress(filter) }
     val lookup = st.lookup?.takeIf { it.query == filter.trim() }
-    val visible = if (lookup != null) st.discovery.filter { it.id == lookup.nappId } else st.discovery.matching(filter)
+    // The kind tabs narrow the list to napps or napplets, except for an
+    // address, which names one app whatever its kind.
+    val visible = if (lookup != null) st.discovery.filter { it.id == lookup.nappId }
+    else st.discovery.matching(filter).filter { kind.matches(it) }
     LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
             // the filter comes first
@@ -503,21 +523,30 @@ private fun DiscoveryTab(
                     minLines = 2,
                 )
             }
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(10.dp))
+            // the kind tabs, and at the other end the refresh button that
+            // asks the relays again
             Row(verticalAlignment = Alignment.CenterVertically) {
+                DiscoveryKind.entries.forEach { k ->
+                    val count = st.discovery.count { k.matches(it) }
+                    TabChip(if (count > 0) "${k.label} ($count)" else k.label, kind == k, theme) { setKind(k) }
+                    Spacer(Modifier.width(6.dp))
+                }
+                Spacer(Modifier.weight(1f))
                 Button(
                     onClick = {
                         activity.saveRelays(relaysEd)
                         activity.fetchNapps()
                     },
                     enabled = !st.fetching,
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
                 ) {
-                    Text(if (st.fetching) "Fetching…" else "Fetch napps")
+                    Text(if (st.fetching) "Refreshing…" else "Refresh", fontSize = 13.sp)
                 }
-                if (st.fetchErr.isNotBlank()) {
-                    Spacer(Modifier.width(12.dp))
-                    Text(st.fetchErr, color = theme.danger, fontSize = 12.sp, modifier = Modifier.weight(1f))
-                }
+            }
+            if (st.fetchErr.isNotBlank()) {
+                Spacer(Modifier.height(6.dp))
+                Text(st.fetchErr, color = theme.danger, fontSize = 12.sp)
             }
             Spacer(Modifier.height(12.dp))
             if (visible.isEmpty()) {
@@ -526,8 +555,9 @@ private fun DiscoveryTab(
                         lookup?.pending == true -> "Looking up that address…"
                         lookup != null && lookup.err.isNotBlank() -> "Couldn't open that address: ${lookup.err}."
                         st.fetching -> "Searching relays…"
+                        st.discovery.isNotEmpty() && filter.isBlank() -> "No ${kind.label.lowercase()} found on these relays."
                         st.discovery.isNotEmpty() -> "Nothing matches the filter."
-                        else -> "No napps yet. Tap \"Fetch napps\"."
+                        else -> "No napps yet. Tap \"Refresh\"."
                     },
                     color = theme.muted,
                 )
