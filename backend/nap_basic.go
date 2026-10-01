@@ -2,8 +2,10 @@ package backend
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/url"
 	"strings"
 	"unicode"
@@ -73,16 +75,26 @@ const nappletStorageQuota = 512 * 1024
 
 var errNappletQuota = errors.New("quota exceeded")
 
-// napStoreID is which store a storage call goes to. Shared storage belongs to
-// the napplet's address (its id), not to one build of it: an update keeps
-// the user's data. (NAP-STORAGE scopes by the artifact hash as well; the
-// launcher deliberately does not, so a napplet update is not a data wipe.)
-// Instance storage belongs to the window.
+// napStoreID returns a domain-separated, collision-resistant storage key.
+// NAP-STORAGE requires shared data to be isolated by address and artifact;
+// instance data is further partitioned by an opaque per-window identifier.
 func napStoreID(c *napCall, scope string) string {
-	if scope == "instance" {
-		return c.ci.napp.ID + "#" + c.ci.instance
+	// Legacy/test napplet records created before NIP-5D artifact identities
+	// were stored keep their old shared namespace. Installed NIP-5D napplets
+	// always have ArtifactHash and use the conforming namespace below.
+	if c.ci.napp.ArtifactHash == "" && scope != "instance" {
+		return c.ci.napp.ID
 	}
-	return c.ci.napp.ID
+	identity := c.ci.napp.ID + "\x00" + c.ci.napp.ArtifactHash
+	if scope == "instance" {
+		instance := c.ci.storageInstance
+		if instance == "" {
+			instance = c.ci.instance
+		}
+		identity += "\x00" + instance
+	}
+	sum := sha256.Sum256([]byte(identity))
+	return fmt.Sprintf("napplet-%x", sum)
 }
 
 type napStorageReq struct {
@@ -146,7 +158,10 @@ func napStorageRemove(c *napCall) {
 		c.reply(map[string]any{"error": "missing key"})
 		return
 	}
-	storageRemove(napStoreID(c, r.Scope), *r.Key)
+	if _, err := storageRemove(napStoreID(c, r.Scope), *r.Key); err != nil {
+		c.reply(map[string]any{"error": err.Error()})
+		return
+	}
 	c.reply(nil)
 }
 

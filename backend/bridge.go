@@ -707,13 +707,21 @@ func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 			if err := json.Unmarshal([]byte(params), &p); err != nil {
 				return nil, err
 			}
-			if storageRemove(ci.napp.ID, p.Key) {
+			removed, err := storageRemove(ci.napp.ID, p.Key)
+			if err != nil {
+				return nil, err
+			}
+			if removed {
 				broadcastStorage(ci.napp.ID, ci.instance, "remove", p.Key, "")
 			}
 			return nil, nil
 
 		case "napp.storageClear":
-			if storageClear(ci.napp.ID) {
+			cleared, err := storageClear(ci.napp.ID)
+			if err != nil {
+				return nil, err
+			}
+			if cleared {
 				broadcastStorage(ci.napp.ID, ci.instance, "clear", "", "")
 			}
 			return nil, nil

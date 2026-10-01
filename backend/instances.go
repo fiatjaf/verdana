@@ -29,8 +29,12 @@ type Instance struct {
 	// instance is what the napp sees as window.napp.instance: a serial,
 	// unique per window.
 	instance string
-	number   int
-	napp     Napp
+	// storageInstance is an opaque, unguessable namespace for NAP-STORAGE's
+	// instance scope. Unlike instance's process-local serial, it is never
+	// reused by a fresh window after a launcher restart.
+	storageInstance string
+	number          int
+	napp            Napp
 
 	sendMu    sync.Mutex
 	transport Transport
@@ -90,9 +94,10 @@ type actionRequest struct {
 // actions of that napp. Session state, not persisted: nothing here survives
 // the launcher quitting.
 type windowRecord struct {
-	Instance string
-	NappID   string
-	Actions  []ShortcutAction
+	Instance        string
+	StorageInstance string
+	NappID          string
+	Actions         []ShortcutAction
 }
 
 // maxWindowActions bounds a window's log: the tail is what puts a reopened
@@ -503,15 +508,20 @@ func launchWithInstance(ctx context.Context, napp Napp, requestedInstance string
 	if instance == "" {
 		instance = strconv.FormatInt(instanceSerial.Add(1), 10)
 	}
+	storageInstance := randomID()
+	if old := lookupWindow(instance); old != nil && old.StorageInstance != "" {
+		storageInstance = old.StorageInstance
+	}
 	ci := &Instance{
-		instance:   instance,
-		number:     int(windowSerial.Add(1)),
-		napp:       napp,
-		subs:       make(map[int]context.CancelFunc),
-		actions:    make(map[string]int),
-		changed:    make(chan struct{}),
-		dispatches: make(map[int]chan WireMsg),
-		gone:       make(chan struct{}),
+		instance:        instance,
+		storageInstance: storageInstance,
+		number:          int(windowSerial.Add(1)),
+		napp:            napp,
+		subs:            make(map[int]context.CancelFunc),
+		actions:         make(map[string]int),
+		changed:         make(chan struct{}),
+		dispatches:      make(map[int]chan WireMsg),
+		gone:            make(chan struct{}),
 	}
 	if napp.IsNapplet() {
 		ci.nap = newNapSession()
@@ -585,7 +595,7 @@ func putWindow(w windowRecord) {
 // actions a previous window with the same instance id had reached (a reopen
 // landing on the same id).
 func rememberWindow(ci *Instance) {
-	w := windowRecord{Instance: ci.instance, NappID: ci.napp.ID}
+	w := windowRecord{Instance: ci.instance, StorageInstance: ci.storageInstance, NappID: ci.napp.ID}
 	if old := lookupWindow(ci.instance); old != nil {
 		w.Actions = old.Actions
 	}
