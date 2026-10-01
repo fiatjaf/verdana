@@ -30,6 +30,11 @@ const (
 	PermOpenLink Permission = "open_link"
 	PermSaveFile Permission = "save_file"
 	PermCopyText Permission = "copy_text"
+	// PermUpload lets a napplet publish bytes to the signed-in user's
+	// Blossom servers (NAP-UPLOAD). It is separate from publishing a Nostr
+	// event: the identity linkage and public network egress deserve their own
+	// remembered decision.
+	PermUpload Permission = "upload"
 	// PermFetch is a napplet having the launcher download from the web for
 	// it (NAP-RESOURCE): napplets have no network of their own.
 	PermFetch Permission = "fetch"

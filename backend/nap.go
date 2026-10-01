@@ -33,7 +33,7 @@ import (
 // never the napplet's R/O tags (WEB-NAPPLET.md forbids gating on those).
 var napDomains = []string{
 	"relay", "identity", "storage", "resource", "common",
-	"theme", "inc", "intent", "link",
+	"theme", "inc", "intent", "link", "upload",
 }
 
 // napSession is what one napplet window has going: the subscriptions and
@@ -59,6 +59,9 @@ type napSession struct {
 	topics map[string]bool
 	// open resource requests by id, for resource.cancel
 	fetches map[string]context.CancelFunc
+	// uploads are scoped to one document/session. A reload cancels active
+	// network work and makes its upload ids unreachable to the new document.
+	uploads map[string]*napUploadStatus
 	// the session's answers to its standing questions ("may it fetch from
 	// the web", "may it read encrypted messages"): asked once per session,
 	// grantMu makes concurrent requests wait for that one question
@@ -93,6 +96,12 @@ func (s *napSession) resetLocked() {
 	s.subs = make(map[string]context.CancelFunc)
 	s.topics = make(map[string]bool)
 	s.fetches = make(map[string]context.CancelFunc)
+	for _, upload := range s.uploads {
+		if upload.cancel != nil {
+			upload.cancel()
+		}
+	}
+	s.uploads = make(map[string]*napUploadStatus)
 	s.grants = make(map[Permission]bool)
 	s.established = false
 }

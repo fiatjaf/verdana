@@ -68,9 +68,57 @@
       })
   })()
 
-  // the biggest envelope a napplet may send in one message; anything larger
-  // is dropped like any other malformed message
+  // Ordinary NAP envelopes stay small. NAP-UPLOAD may carry up to 16 MiB of
+  // raw bytes; base64 plus its JSON envelope needs a larger transport bound.
   const MAX_ENVELOPE = 1024 * 1024
+  const MAX_UPLOAD_BYTES = 16 * 1024 * 1024
+  const MAX_UPLOAD_ENVELOPE = 24 * 1024 * 1024
+
+  const bytesToBase64 = bytes => {
+    let out = ""
+    const chunk = 0x8000
+    for (let i = 0; i < bytes.length; i += chunk) {
+      out += String.fromCharCode(...bytes.subarray(i, i + chunk))
+    }
+    return btoa(out)
+  }
+
+  // postMessage gives this launcher-owned page real Blob/ArrayBuffer values,
+  // but the native RPC carrier is JSON. Encode them here so napplets still use
+  // NAP-UPLOAD's structured-clone API and never have to base64 their own data.
+  const dehydrate = async (value, seen = new WeakSet()) => {
+    if (value instanceof Blob) {
+      if (value.size > MAX_UPLOAD_BYTES) throw new Error("upload is too large")
+      const bytes = new Uint8Array(await value.arrayBuffer())
+      return { __blob: { b64: bytesToBase64(bytes), mime: value.type || "" } }
+    }
+    if (value instanceof ArrayBuffer) {
+      if (value.byteLength > MAX_UPLOAD_BYTES) throw new Error("upload is too large")
+      return { __blob: { b64: bytesToBase64(new Uint8Array(value)), mime: "" } }
+    }
+    if (ArrayBuffer.isView(value)) {
+      if (value.byteLength > MAX_UPLOAD_BYTES) throw new Error("upload is too large")
+      const bytes = new Uint8Array(value.buffer, value.byteOffset, value.byteLength)
+      return { __blob: { b64: bytesToBase64(bytes), mime: "" } }
+    }
+    if (Array.isArray(value)) {
+      if (seen.has(value)) throw new Error("cyclic NAP envelope")
+      seen.add(value)
+      const out = []
+      for (const item of value) out.push(await dehydrate(item, seen))
+      seen.delete(value)
+      return out
+    }
+    if (value && typeof value === "object") {
+      if (seen.has(value)) throw new Error("cyclic NAP envelope")
+      seen.add(value)
+      const out = {}
+      for (const key of Object.keys(value)) out[key] = await dehydrate(value[key], seen)
+      seen.delete(value)
+      return out
+    }
+    return value
+  }
 
   let frame = null
 
@@ -122,19 +170,18 @@
     if (!frame || event.source !== frame.contentWindow) return
     const data = event.data
     if (!data || typeof data !== "object" || typeof data.type !== "string") return
-    let json
-    try {
-      json = JSON.stringify(data)
-    } catch {
-      return
-    }
-    if (!json || json.length > MAX_ENVELOPE) return
     // one at a time: the desktop binding runs every call on its own thread,
     // so two calls in flight can reach Go in either order, and NAP needs the
     // napplet's order kept (shell.ready first, a subscribe before its close).
     // Go only queues the envelope before answering, so the wait is short.
     outbound = outbound
-      .then(() => rpc("nap.msg", json))
+      .then(async () => {
+        const encoded = await dehydrate(data)
+        const json = JSON.stringify(encoded)
+        const limit = data.type === "upload.upload" ? MAX_UPLOAD_ENVELOPE : MAX_ENVELOPE
+        if (!json || json.length > limit) throw new Error("NAP envelope is too large")
+        return rpc("nap.msg", json)
+      })
       .then(deliver, err => console.error("[napplet-host]", err))
   })
 

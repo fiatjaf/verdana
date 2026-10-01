@@ -24,6 +24,7 @@ import (
 	"fiatjaf.com/nostr"
 	"fiatjaf.com/nostr/keyer"
 	"fiatjaf.com/nostr/nip19"
+	"fiatjaf.com/nostr/nipb7/blossom"
 )
 
 // ─── test rig ────────────────────────────────────────────────────
@@ -222,7 +223,7 @@ func TestNapSessionHandshake(t *testing.T) {
 
 	init := rec.find("shell.init")[0]
 	domains, _ := init["capabilities"].(map[string]any)["domains"].([]any)
-	for _, want := range []string{"relay", "identity", "storage", "inc", "intent"} {
+	for _, want := range []string{"relay", "identity", "storage", "inc", "intent", "upload"} {
 		if !slices.Contains(domains, any(want)) {
 			t.Errorf("shell.init lacks %s: %v", want, domains)
 		}
@@ -236,6 +237,143 @@ func TestNapSessionHandshake(t *testing.T) {
 		if strings.HasPrefix(typ, "nope") {
 			t.Fatalf("unknown type was answered: %v", rec.types())
 		}
+	}
+}
+
+// ─── uploads ────────────────────────────────────────────────────
+
+func setupNapUploadTest(t *testing.T, ci *Instance) {
+	t.Helper()
+	previousKeyer, previousPubkey := userKeyer, userPubkey
+	previousServers, previousUpload := napUploadServers, napUploadToServer
+	userSK := nostr.Generate()
+	userKeyer, userPubkey = keyer.NewPlainKeySigner(userSK), userSK.Public()
+	setSessionRule(RuleKey{Napp: ci.napp.ID, Permission: PermUpload}, Rule{Decision: DecisionAllow})
+	t.Cleanup(func() {
+		userKeyer, userPubkey = previousKeyer, previousPubkey
+		napUploadServers, napUploadToServer = previousServers, previousUpload
+		clearSessionRule(RuleKey{Napp: ci.napp.ID, Permission: PermUpload})
+	})
+}
+
+func uploadEnvelope(id string, data []byte) map[string]any {
+	return map[string]any{
+		"type": "upload.upload", "id": id,
+		"request": map[string]any{
+			"rail": "blossom", "filename": "hello.txt", "caption": "a greeting",
+			"data": map[string]any{"__blob": map[string]any{
+				"b64": base64.StdEncoding.EncodeToString(data), "mime": "text/plain",
+			}},
+		},
+	}
+}
+
+func TestNapUploadBlossomReplicatesAndReportsStatus(t *testing.T) {
+	setupNapTest(t)
+	ci, rec := openNapplet(t, "uploader")
+	setupNapUploadTest(t, ci)
+	ready(t, ci, rec, 1)
+
+	data := []byte("hello blossom")
+	sum := sha256.Sum256(data)
+	hash := hex.EncodeToString(sum[:])
+	napUploadServers = func(context.Context, nostr.PubKey) []string {
+		return []string{"https://one.example/", "bad", "https://two.example"}
+	}
+	var attempted []string
+	napUploadToServer = func(_ context.Context, server string, got []byte, mimeType string, _ nostr.Keyer) (*blossom.BlobDescriptor, error) {
+		attempted = append(attempted, server)
+		if !bytes.Equal(got, data) || mimeType != "text/plain" {
+			t.Fatalf("upload bytes/mime: %q %q", got, mimeType)
+		}
+		return &blossom.BlobDescriptor{
+			URL: server + "/" + hash + ".txt", SHA256: hash, Size: len(data), Type: mimeType,
+		}, nil
+	}
+
+	post(t, ci, uploadEnvelope("u1", data))
+	started := rec.wait(t, "upload.upload.result", 1)
+	result := started["result"].(map[string]any)
+	if result["status"] != "uploading" || result["rail"] != "blossom" {
+		t.Fatalf("initial result: %v", result)
+	}
+	complete := rec.wait(t, "upload.status.changed", 2)["status"].(map[string]any)
+	if complete["status"] != "complete" || complete["sha256"] != hash || complete["url"] != "https://one.example/"+hash+".txt" {
+		t.Fatalf("complete status: %v", complete)
+	}
+	if !slices.Equal(attempted, []string{"https://one.example", "https://two.example"}) {
+		t.Fatalf("server order: %v", attempted)
+	}
+	fallbacks := complete["fallbackUrls"].([]any)
+	if len(fallbacks) != 1 || fallbacks[0] != "https://two.example/"+hash+".txt" {
+		t.Fatalf("fallbacks: %v", fallbacks)
+	}
+	tags := complete["nip94"].([]any)
+	for _, want := range []any{"url", "m", "x", "size", "fallback", "alt"} {
+		if !slices.ContainsFunc(tags, func(tag any) bool { return tag.([]any)[0] == want }) {
+			t.Errorf("NIP-94 lacks %s: %v", want, tags)
+		}
+	}
+
+	post(t, ci, map[string]any{"type": "upload.status", "id": "s1", "uploadId": result["uploadId"]})
+	if got := rec.wait(t, "upload.status.result", 1)["status"].(map[string]any); got["status"] != "complete" {
+		t.Fatalf("status lookup: %v", got)
+	}
+}
+
+func TestNapUploadRejectsBadRequestsAndUnverifiedResults(t *testing.T) {
+	setupNapTest(t)
+	ci, rec := openNapplet(t, "upload-errors")
+	setupNapUploadTest(t, ci)
+	ready(t, ci, rec, 1)
+
+	post(t, ci, map[string]any{"type": "upload.upload", "id": "rail", "request": map[string]any{"rail": "nip96"}})
+	if got := rec.wait(t, "upload.upload.result", 1); got["error"] != "unsupported rail" {
+		t.Fatalf("unsupported rail: %v", got)
+	}
+	post(t, ci, map[string]any{"type": "upload.upload", "id": "data", "request": map[string]any{
+		"data": map[string]any{"__blob": map[string]any{"b64": "%%%"}},
+	}})
+	if got := rec.wait(t, "upload.upload.result", 2); got["error"] != "invalid upload data" {
+		t.Fatalf("invalid data: %v", got)
+	}
+
+	data := []byte("exact bytes")
+	napUploadServers = func(context.Context, nostr.PubKey) []string { return []string{"https://bad.example"} }
+	napUploadToServer = func(_ context.Context, server string, got []byte, mimeType string, _ nostr.Keyer) (*blossom.BlobDescriptor, error) {
+		return &blossom.BlobDescriptor{URL: server + "/wrong", SHA256: strings.Repeat("0", 64), Size: len(got)}, nil
+	}
+	post(t, ci, uploadEnvelope("bad-descriptor", data))
+	rec.wait(t, "upload.upload.result", 3)
+	failed := rec.wait(t, "upload.status.changed", 2)["status"].(map[string]any)
+	if failed["status"] != "failed" || failed["error"] != "upload failed" {
+		t.Fatalf("unverified descriptor accepted: %v", failed)
+	}
+}
+
+func TestNapUploadIsCancelledOnReload(t *testing.T) {
+	setupNapTest(t)
+	ci, rec := openNapplet(t, "upload-reload")
+	setupNapUploadTest(t, ci)
+	ready(t, ci, rec, 1)
+
+	napUploadServers = func(context.Context, nostr.PubKey) []string { return []string{"https://slow.example"} }
+	cancelled := make(chan struct{})
+	napUploadToServer = func(ctx context.Context, _ string, _ []byte, _ string, _ nostr.Keyer) (*blossom.BlobDescriptor, error) {
+		<-ctx.Done()
+		close(cancelled)
+		return nil, ctx.Err()
+	}
+	post(t, ci, uploadEnvelope("slow", []byte("wait")))
+	rec.wait(t, "upload.upload.result", 1)
+	if _, err := napRPC(ci, "nap.reset", ""); err != nil {
+		t.Fatal(err)
+	}
+	ready(t, ci, rec, 2)
+	select {
+	case <-cancelled:
+	case <-time.After(time.Second):
+		t.Fatal("reload did not cancel the upload")
 	}
 }
 
