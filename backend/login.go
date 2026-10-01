@@ -58,7 +58,7 @@ func loginAmber(input string) {
 	setProfileFromUser(ctx, pk)
 }
 
-// setProfileFromUser is the tail every login shares: fetch the metadata of// Login takes an nsec, a bunker:// URL or an "amber:<pkg>:<pubkeyhex>" NIP-55
+// Login takes an nsec, a bunker:// URL or an "amber:<pkg>:<pubkeyhex>" NIP-55
 // signer url, resolves the signer and moves the launcher to its main phase.
 // Blocking: call it from a goroutine.
 func Login(input string) { login(input, false) }
@@ -101,7 +101,7 @@ func login(input string, resume bool) {
 
 	clientKey := state.ClientKey
 
-	// keyer.New blocks on the bunker's "connect" answer, so race it
+	// a fresh bunker login blocks on the bunker's "connect" answer, so race it
 	// against the login deadline instead of handing it a ctx that dies
 	// on return (that would kill the response subscription too).
 	type keyerResult struct {
@@ -113,15 +113,12 @@ func login(input string, resume bool) {
 		log.Info().Str("url", url).Msg("bunker auth")
 	}
 	go func() {
-		if resume && (nip46.IsValidBunkerURL(input) || nip05.IsValidIdentifier(input)) {
-			k, err := resumeBunker(sessionCtx, clientKey, input, onAuth)
+		if nip46.IsValidBunkerURL(input) || nip05.IsValidIdentifier(input) {
+			k, err := loginBunker(sessionCtx, clientKey, input, resume, onAuth)
 			keyerDone <- keyerResult{k, err}
 			return
 		}
-		k, err := keyer.New(sessionCtx, sys.Pool, input, &keyer.SignerOptions{
-			BunkerClientSecretKey: clientKey,
-			BunkerAuthHandler:     onAuth,
-		})
+		k, err := keyer.New(sessionCtx, sys.Pool, input, &keyer.SignerOptions{})
 		keyerDone <- keyerResult{k, err}
 	}()
 
@@ -170,19 +167,27 @@ func login(input string, resume bool) {
 	setProfileFromUser(ctx, pk)
 }
 
-// resumeBunker reattaches to a bunker that already accepted our client key in
-// an earlier run. NIP-46 only wants "connect" once: the bunker remembers the
-// client pubkey, and the secret in the URL is single-use, so replaying it on
-// every launch makes a signer like Amber prompt for a new connection (or
-// ignore it) while the login times out. The first RPC (get_public_key) tells
-// whether the bunker still knows us.
-func resumeBunker(ctx context.Context, clientKey nostr.SecretKey, input string, onAuth func(string)) (nostr.Keyer, error) {
+// loginBunker reaches a NIP-46 signer from a bunker:// url or a NIP-05
+// address. The client key is persisted, so on resume the bunker already
+// knows us: NIP-46 only wants "connect" once, and its secret is single-use,
+// so replaying it on every launch makes a signer like Amber prompt for a new
+// connection (or ignore it) while the login times out. The first RPC
+// (get_public_key) then tells whether the bunker still knows us.
+func loginBunker(ctx context.Context, clientKey nostr.SecretKey, input string, resume bool, onAuth func(string)) (nostr.Keyer, error) {
 	parsed, err := nip46.ParseBunkerInput(ctx, input)
 	if err != nil {
 		return nil, err
 	}
-	bc := nip46.NewBunker(ctx, clientKey, parsed.HostPubKey, parsed.Relays, sys.Pool, onAuth)
-	return keyer.NewBunkerSignerFromBunkerClient(bc), nil
+	b, err := newBunkerSigner(ctx, sys.Pool, clientKey, parsed.HostPubKey, parsed.Relays, onAuth)
+	if err != nil {
+		return nil, err
+	}
+	if !resume {
+		if err := b.connect(ctx, parsed.Secret); err != nil {
+			return nil, err
+		}
+	}
+	return b, nil
 }
 
 // setProfileFromUser is the tail every login shares: fetch that key's
