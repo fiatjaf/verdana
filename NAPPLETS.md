@@ -4,12 +4,31 @@ Verdana runs two kinds of apps:
 
 - **napps** (kind `35130`): a file tree in a webview, with `window.nostr`,
   `window.nostrdb` and `window.napp` injected (see `env.d.ts`).
-- **napplets** (kind `35129`, [napplet.run](https://napplet.run)): one
-  self-contained HTML file in a sandboxed iframe, reaching the launcher only
-  through NAP messages (`window.napplet.*`). The event schema is naps
-  `WEB-NAPPLET.md`; the runtime follows NIP-5D.
+- **napplets** (kinds `35129` and `15129`, [napplet.run](https://napplet.run)):
+  one self-contained HTML file in a sandboxed iframe, reaching the launcher
+  only through NAP messages (`window.napplet.*`). The runtime follows NIP-5D.
 
 Both appear in the same lists; napplets carry a "napplet" badge.
+
+## Manifest schemas
+
+Two napplet manifest shapes are in use, and both are read. The presence of
+`path` tags tells them apart (`backend/napplet.go`, `napplet_nip5d.go`):
+
+| | NIP-5D ([nips#2303](https://github.com/nostr-protocol/nips/pull/2303)) | naps `WEB-NAPPLET.md` |
+|---|---|---|
+| Kinds | `35129` (named, `d`), `15129` (root, one per author) | `35129` |
+| Files | NIP-5A `path` tags; only `/index.html` runs | one blob, hash in `x` |
+| `x` | NIP-5A aggregate of the `path` tags. It is recomputed and must match when present | sha256 of the HTML |
+| Text | `title`, `description` (content is often empty) | `title`, content (required) |
+| Routing | `archetype <role> <convention>` | `z`, `i` |
+| Domains | `requires`: unsupported ones are flagged in the detail view | `R`/`O`: display only, never a warning |
+
+Validation of the NIP-5D shape is lenient for display tags and strict for the
+content address. Path tags that escape the napplet's directory are refused.
+WEB-NAPPLET events get every MUST in that spec, including refusing `requires`
+or `C` tags without `path` tags. Other kind 35129 events with neither shape
+are skipped. Kind `5129` snapshots are not read yet.
 
 ## How a napplet runs
 
@@ -20,16 +39,22 @@ napplet window (desktop child process / Android NappActivity)
         CSP meta · @napplet/shim prelude · install({domains}) + shell.ready · napplet HTML
 ```
 
-1. **Install** downloads the single `x` blob and checks its sha256 against
-   the event's `x` tag. It is written to `napps/<id>/index.html`.
+1. **Install** downloads every listed blob, checks its sha256 and writes it
+   under `napps/<id>/`.
 2. **Launch** opens a window with `WindowSpec.Format = "napplet"`. The shell
    loads the host page. It does not load the napp's files or `bridge.js`.
 3. The host page calls `nap.boot`. The backend re-hashes `index.html`
-   against `x`, then wraps it (`buildSrcdoc`) with:
+   against its manifest hash. It then builds a trusted wrapper
+   (`buildSrcdoc`): the launcher's own `<!doctype html><html><head>`
+   containing
    - the NIP-5D CSP (`connect-src 'none'`, no frames or workers, etc.);
    - the vendored shim (`backend/webview/shim/`);
    - an activation script that installs `window.napplet` for the domains the
      launcher implements, then posts `shell.ready`.
+
+   The napplet's bytes follow verbatim. The napplet's HTML is never parsed
+   to find an insertion point, so nothing it contains (a comment, or a script
+   mentioning `<head>`) can get ahead of the CSP.
 4. Every envelope from the frame is checked by the host page
    (`event.source === iframe.contentWindow`) and forwarded as `nap.msg`.
    Envelopes go one at a time to keep their order. The backend
@@ -50,7 +75,7 @@ rpc for it.
 | `storage` | `nap_basic.go` | 512 KB, shared or per-window scope. Keyed by the napplet's **address**, not its artifact hash, so data survives updates (a deliberate deviation from NAP-STORAGE) |
 | `theme` | `nap_basic.go` | launcher `surface/text/accent` → `background/text/primary`; `theme.changed` on switch |
 | `link` | `nap_basic.go` | http(s) only, behind the open-link prompt |
-| `common` | `nap_common.go` | follow/unfollow (kind 3), react (7), report (1984), getProfile, follows |
+| `common` | `nap_common.go` | follow/unfollow (kind 3), react (7), report (1984), getProfile, follows, encode/decodeNip19 (never `nsec`) |
 | `inc` | `nap_inc.go` | topics (exact match, never echoed back to the sender) and channels; the sender is always stamped by the launcher |
 | `intent` | `nap_intent.go` | `napplet:<archetype>/<action>` is routed through the launcher's action system (picker, rules, cold launch). Napplets receive it as an `inc.event` once they listen on the topic. Napps can handle intents by declaring the same action string |
 | `resource` | `nap_resource.go` | `data:`, `https:`, `blossom:sha256:`, `nostr:`. Public addresses only (checked at dial time on every hop), 10 MiB, 30 s, MIME sniffed, no SVG or HTML. Web fetches are asked once per session |
