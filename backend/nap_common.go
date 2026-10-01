@@ -75,7 +75,8 @@ func napCommonFollows(c *napCall) {
 	c.async(func(ctx context.Context) {
 		ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 		defer cancel()
-		c.reply(map[string]any{"ok": true, "pubkeys": identityFollows(ctx, pk)})
+		pubkeys, _ := identityFollows(ctx, pk)
+		c.reply(map[string]any{"ok": true, "pubkeys": pubkeys})
 	})
 }
 

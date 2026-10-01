@@ -2,8 +2,17 @@ package backend
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"math"
+	"net/http"
+	"net/url"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"fiatjaf.com/nostr"
@@ -28,6 +37,13 @@ func init() {
 	})
 }
 
+// The error strings NAP-IDENTITY names for results the shell can't fulfill.
+var (
+	errIdentityTimeout  = errors.New("relay timeout")
+	errUnknownListType  = errors.New("unsupported list type")
+	errIdentityInternal = errors.New("internal error")
+)
+
 // currentUser is the signed-in pubkey, if there is one.
 func currentUser() (nostr.PubKey, bool) {
 	if userKeyer == nil || userPubkey == nostr.ZeroPK {
@@ -47,8 +63,10 @@ func napIdentityGetPublicKey(c *napCall) {
 }
 
 // napIdentity builds a handler that answers field with fetch's result for
-// the current user, or with empty when there is no user or nothing came.
-func napIdentity(field string, empty any, fetch func(context.Context, nostr.PubKey) any) napHandler {
+// the current user, or with empty when there is no user or nothing came. A
+// fetch error rides along as the result's error field; every request gets
+// its result, even when fetch panics.
+func napIdentity(field string, empty any, fetch func(context.Context, nostr.PubKey) (any, error)) napHandler {
 	return func(c *napCall) {
 		pk, ok := currentUser()
 		if !ok || sys == nil {
@@ -58,55 +76,128 @@ func napIdentity(field string, empty any, fetch func(context.Context, nostr.PubK
 		c.async(func(ctx context.Context) {
 			ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 			defer cancel()
-			v := fetch(ctx, pk)
-			if v == nil {
-				v = empty
-			}
-			c.reply(map[string]any{field: v})
+			v, err := identityFetch(ctx, pk, fetch)
+			c.reply(identityResult(field, empty, v, err))
 		})
 	}
 }
 
-func identityRelays(ctx context.Context, pk nostr.PubKey) any {
-	out := map[string]any{}
-	for _, r := range sys.FetchRelayList(ctx, pk).Items {
-		out[r.URL] = map[string]bool{"read": r.Inbox, "write": r.Outbox}
+// identityFetch runs fetch, turning a panic into an error so the caller can
+// still answer.
+func identityFetch(ctx context.Context, pk nostr.PubKey, fetch func(context.Context, nostr.PubKey) (any, error)) (v any, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Error().Interface("panic", r).Msg("NAP identity fetch panicked")
+			v, err = nil, errIdentityInternal
+		}
+	}()
+	return fetch(ctx, pk)
+}
+
+// identityResult is a result's fields: the value (or its empty default) and
+// the error, if there was one.
+func identityResult(field string, empty, v any, err error) map[string]any {
+	if v == nil {
+		v = empty
+	}
+	out := map[string]any{field: v}
+	if err != nil {
+		out["error"] = err.Error()
 	}
 	return out
 }
 
-func identityProfile(ctx context.Context, pk nostr.PubKey) any {
+// timedOut is the error for an answer that came up empty because our own
+// deadline ran out before the relays did.
+func timedOut(ctx context.Context) error {
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return errIdentityTimeout
+	}
+	return nil
+}
+
+func identityRelays(ctx context.Context, pk nostr.PubKey) (any, error) {
+	list := sys.FetchRelayList(ctx, pk)
+	out := map[string]any{}
+	for _, r := range list.Items {
+		out[r.URL] = map[string]bool{"read": r.Inbox, "write": r.Outbox}
+	}
+	if list.Event == nil {
+		return out, timedOut(ctx)
+	}
+	return out, nil
+}
+
+func identityProfile(ctx context.Context, pk nostr.PubKey) (any, error) {
 	pm := sys.FetchProfileMetadata(ctx, pk)
 	if pm.Event == nil {
-		return nil
+		// no kind 0 is not an error, only running out of time is
+		return nil, timedOut(ctx)
 	}
-	return profileData(pm)
+	return profileData(pm), nil
 }
 
-func identityFollows(ctx context.Context, pk nostr.PubKey) any {
-	return profileRefHexes(sys.FetchFollowList(ctx, pk).Items)
+func identityFollows(ctx context.Context, pk nostr.PubKey) (any, error) {
+	list := sys.FetchFollowList(ctx, pk)
+	if list.Event == nil {
+		return []string{}, timedOut(ctx)
+	}
+	return profileRefHexes(list.Items), nil
 }
 
-func identityMutes(ctx context.Context, pk nostr.PubKey) any {
-	return profileRefHexes(sys.FetchMuteList(ctx, pk).Items)
+func identityMutes(ctx context.Context, pk nostr.PubKey) (any, error) {
+	list := sys.FetchMuteList(ctx, pk)
+	if list.Event == nil {
+		return []string{}, timedOut(ctx)
+	}
+	return profileRefHexes(list.Items), nil
 }
 
 // identityBlocked: the launcher keeps no separate block list beyond mutes,
 // so there is nothing more to report than an empty list.
-func identityBlocked(context.Context, nostr.PubKey) any { return []string{} }
+func identityBlocked(context.Context, nostr.PubKey) (any, error) { return []string{}, nil }
 
-// identityZaps lists the zap receipts (kind 9735) sent to the user.
-func identityZaps(ctx context.Context, pk nostr.PubKey) any {
+// identityZaps lists the zap receipts (kind 9735) sent to the user. Anyone
+// can publish a receipt that p-tags the user, so only those signed by the
+// zap provider behind the user's lightning address count (NIP-57 appendix F).
+func identityZaps(ctx context.Context, pk nostr.PubKey) (any, error) {
 	zaps := []any{}
-	filter := nostr.Filter{Kinds: []nostr.Kind{9735}, Tags: nostr.TagMap{"p": []string{pk.Hex()}}, Limit: 100}
+	pm := sys.FetchProfileMetadata(ctx, pk)
+	if pm.LUD16 == "" {
+		if pm.Event == nil {
+			return zaps, timedOut(ctx)
+		}
+		// no lightning address, no zaps
+		return zaps, nil
+	}
+	provider, ok, err := zapProvider(ctx, pm.LUD16)
+	if err != nil {
+		return zaps, err
+	}
+	if !ok {
+		// the address doesn't take nostr zaps
+		return zaps, nil
+	}
+
+	filter := nostr.Filter{
+		Kinds:   []nostr.Kind{9735},
+		Authors: []nostr.PubKey{provider},
+		Tags:    nostr.TagMap{"p": []string{pk.Hex()}},
+		Limit:   100,
+	}
+	type receipt struct {
+		at nostr.Timestamp
+		z  map[string]any
+	}
+	var found []receipt
 	seen := map[nostr.ID]bool{}
 	add := func(evt nostr.Event) {
 		if seen[evt.ID] {
 			return
 		}
 		seen[evt.ID] = true
-		if z, ok := zapReceipt(evt); ok {
-			zaps = append(zaps, z)
+		if z, ok := zapReceipt(evt, provider, pk); ok {
+			found = append(found, receipt{evt.CreatedAt, z})
 		}
 	}
 	for evt := range sys.Store.QueryEvents(filter, 100) {
@@ -116,12 +207,20 @@ func identityZaps(ctx context.Context, pk nostr.PubKey) any {
 	for re := range sys.Pool.FetchMany(ctx, relays, filter, nostr.SubscriptionOptions{Label: "verdana-nap-zaps"}) {
 		add(re.Event)
 	}
-	return zaps
+	sort.SliceStable(found, func(i, j int) bool { return found[i].at > found[j].at })
+	for _, r := range found {
+		zaps = append(zaps, r.z)
+	}
+	return zaps, nil
 }
 
-// zapReceipt reads a kind 9735 receipt: the zapped event, who zapped (from
-// the embedded request) and how much (the request's amount, in millisats).
-func zapReceipt(evt nostr.Event) (map[string]any, bool) {
+// zapReceipt reads a kind 9735 receipt from provider for recipient: who
+// zapped (the embedded, signed zap request) and how much (the invoice, in
+// millisats). eventId is the receipt's own id.
+func zapReceipt(evt nostr.Event, provider, recipient nostr.PubKey) (map[string]any, bool) {
+	if evt.Kind != 9735 || evt.PubKey != provider {
+		return nil, false
+	}
 	desc := evt.Tags.Find("description")
 	if desc == nil || len(desc) < 2 {
 		return nil, false
@@ -130,60 +229,235 @@ func zapReceipt(evt nostr.Event) (map[string]any, bool) {
 	if err := req.UnmarshalJSON([]byte(desc[1])); err != nil {
 		return nil, false
 	}
-	z := map[string]any{"eventId": evt.ID.Hex(), "sender": req.PubKey.Hex(), "amount": 0}
-	if amt := req.Tags.Find("amount"); amt != nil && len(amt) >= 2 {
-		if n, err := strconv.ParseInt(amt[1], 10, 64); err == nil {
-			z["amount"] = n
+	if req.Kind != 9734 || !req.CheckID() || !req.VerifySignature() {
+		return nil, false
+	}
+	if p := req.Tags.Find("p"); p == nil || len(p) < 2 || p[1] != recipient.Hex() {
+		return nil, false
+	}
+
+	var amount int64
+	if b := evt.Tags.Find("bolt11"); b != nil && len(b) >= 2 {
+		amount, _ = bolt11Msats(b[1])
+	}
+	if amount == 0 {
+		if amt := req.Tags.Find("amount"); amt != nil && len(amt) >= 2 {
+			amount, _ = strconv.ParseInt(amt[1], 10, 64)
 		}
 	}
+
+	z := map[string]any{"eventId": evt.ID.Hex(), "sender": req.PubKey.Hex(), "amount": amount}
 	if req.Content != "" {
 		z["content"] = req.Content
-	}
-	if e := evt.Tags.Find("e"); e != nil && len(e) >= 2 {
-		z["eventId"] = e[1]
 	}
 	return z, true
 }
 
-// identityBadges lists the badges the user displays (NIP-58 profile badges).
-func identityBadges(ctx context.Context, pk nostr.PubKey) any {
-	badges := []any{}
-	list := sys.FetchProfileBadgesList(ctx, pk)
-	if list.Event == nil {
-		return badges
+// bolt11Msats reads the amount a BOLT-11 invoice's human-readable part
+// names (ln<currency><amount><multiplier>1<data>), in millisats.
+func bolt11Msats(invoice string) (int64, bool) {
+	inv := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(invoice)), "lightning:")
+	// '1' isn't in the bech32 data charset, so the last one is the separator
+	sep := strings.LastIndexByte(inv, '1')
+	if !strings.HasPrefix(inv, "ln") || sep < 2 {
+		return 0, false
 	}
-	for _, tag := range list.Event.Tags {
-		if len(tag) < 2 || tag[0] != "a" || !strings.HasPrefix(tag[1], "30009:") {
-			continue
+	hrp := inv[2:sep]
+	// the currency prefix (bc, tb, bcrt, ...) is letters; the amount starts
+	// at the first digit, and an invoice with none names no amount
+	start := strings.IndexAny(hrp, "0123456789")
+	if start < 0 {
+		return 0, false
+	}
+	num, mult := hrp[start:], byte(0)
+	if last := num[len(num)-1]; last < '0' || last > '9' {
+		num, mult = num[:len(num)-1], last
+	}
+	n, err := strconv.ParseInt(num, 10, 64)
+	if err != nil || n <= 0 {
+		return 0, false
+	}
+	// msats per unit of the multiplier; a whole bitcoin is 1e11 msats
+	var per int64
+	switch mult {
+	case 0:
+		per = 100_000_000_000
+	case 'm':
+		per = 100_000_000
+	case 'u':
+		per = 100_000
+	case 'n':
+		per = 100
+	case 'p':
+		// a pico-bitcoin is a tenth of a millisat
+		if n%10 != 0 {
+			return 0, false
 		}
-		parts := strings.SplitN(tag[1], ":", 3)
-		if len(parts) != 3 {
-			continue
+		return n / 10, true
+	default:
+		return 0, false
+	}
+	if n > math.MaxInt64/per {
+		return 0, false
+	}
+	return n * per, true
+}
+
+// zapProviders caches lightning address lookups: lud16 → zapProviderEntry.
+var zapProviders sync.Map
+
+type zapProviderEntry struct {
+	pk nostr.PubKey
+	ok bool
+	at time.Time
+}
+
+const zapProviderTTL = time.Hour
+
+// zapProvider is the pubkey that signs zap receipts for a lightning address,
+// read from its LNURL-pay endpoint. ok is false when the address doesn't
+// take nostr zaps.
+func zapProvider(ctx context.Context, lud16 string) (nostr.PubKey, bool, error) {
+	if v, hit := zapProviders.Load(lud16); hit {
+		if e := v.(zapProviderEntry); time.Since(e.at) < zapProviderTTL {
+			return e.pk, e.ok, nil
 		}
-		b := map[string]any{"id": tag[1], "awardedBy": parts[1]}
-		if issuer, err := nostr.PubKeyFromHex(parts[1]); err == nil {
-			if def := fetchAddressable(ctx, 30009, issuer, parts[2]); def != nil {
-				for _, t := range def.Tags {
-					if len(t) < 2 {
-						continue
-					}
-					switch t[0] {
-					case "name":
-						b["name"] = t[1]
-					case "description":
-						b["description"] = t[1]
-					case "image":
-						b["image"] = t[1]
-					case "thumb":
-						thumbs, _ := b["thumbs"].([]string)
-						b["thumbs"] = append(thumbs, t[1])
-					}
-				}
+	}
+	endpoint, valid := lnurlpURL(lud16)
+	if !valid {
+		return nostr.ZeroPK, false, nil
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nostr.ZeroPK, false, nil
+	}
+	resp, err := resourceClient.Do(req)
+	if err != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return nostr.ZeroPK, false, errIdentityTimeout
+		}
+		return nostr.ZeroPK, false, fmt.Errorf("zap provider unreachable")
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nostr.ZeroPK, false, fmt.Errorf("zap provider unreachable")
+	}
+	var params struct {
+		AllowsNostr bool   `json:"allowsNostr"`
+		NostrPubkey string `json:"nostrPubkey"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&params); err != nil {
+		return nostr.ZeroPK, false, fmt.Errorf("zap provider unreachable")
+	}
+	e := zapProviderEntry{at: time.Now()}
+	if params.AllowsNostr {
+		if pk, err := nostr.PubKeyFromHex(params.NostrPubkey); err == nil {
+			e.pk, e.ok = pk, true
+		}
+	}
+	zapProviders.Store(lud16, e)
+	return e.pk, e.ok, nil
+}
+
+// lnurlpURL is a lightning address's LNURL-pay endpoint (LUD-16).
+func lnurlpURL(lud16 string) (string, bool) {
+	name, domain, found := strings.Cut(strings.ToLower(strings.TrimSpace(lud16)), "@")
+	if !found || name == "" || domain == "" || strings.ContainsAny(domain, "/?#@\\ ") {
+		return "", false
+	}
+	u := url.URL{Scheme: "https", Host: domain, Path: "/.well-known/lnurlp/" + name}
+	return u.String(), true
+}
+
+// identityBadges lists the badges awarded to the user (NIP-58 kind 8
+// awards), newest first. An award only counts when it comes from the
+// definition's own author, who is then the badge's awardedBy.
+func identityBadges(ctx context.Context, pk nostr.PubKey) (any, error) {
+	badges := []any{}
+	type award struct {
+		addr   string
+		issuer nostr.PubKey
+		d      string
+		at     nostr.Timestamp
+	}
+	var awards []*award
+	byAddr := map[string]*award{}
+	consider := func(evt nostr.Event) {
+		a := evt.Tags.Find("a")
+		if evt.Kind != 8 || a == nil || len(a) < 2 {
+			return
+		}
+		parts := strings.SplitN(a[1], ":", 3)
+		if len(parts) != 3 || parts[0] != "30009" || parts[1] != evt.PubKey.Hex() {
+			return
+		}
+		if prev := byAddr[a[1]]; prev != nil {
+			// awarded more than once: keep the newest
+			if evt.CreatedAt > prev.at {
+				prev.at = evt.CreatedAt
 			}
+			return
 		}
+		aw := &award{addr: a[1], issuer: evt.PubKey, d: parts[2], at: evt.CreatedAt}
+		byAddr[a[1]] = aw
+		awards = append(awards, aw)
+	}
+
+	filter := nostr.Filter{Kinds: []nostr.Kind{8}, Tags: nostr.TagMap{"p": []string{pk.Hex()}}, Limit: 200}
+	for evt := range sys.Store.QueryEvents(filter, 200) {
+		consider(evt)
+	}
+	relays := nostr.AppendUnique(sys.FetchInboxRelays(ctx, pk, 4), Relays()...)
+	for re := range sys.Pool.FetchMany(ctx, relays, filter, nostr.SubscriptionOptions{Label: "verdana-nap-badges"}) {
+		consider(re.Event)
+	}
+	if len(awards) == 0 {
+		return badges, timedOut(ctx)
+	}
+	sort.SliceStable(awards, func(i, j int) bool { return awards[i].at > awards[j].at })
+	if len(awards) > 50 {
+		awards = awards[:50]
+	}
+
+	// definitions in parallel: each is its own issuer's lookup
+	out := make([]map[string]any, len(awards))
+	var wg sync.WaitGroup
+	for i, aw := range awards {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			b := map[string]any{"id": aw.addr, "awardedBy": aw.issuer.Hex()}
+			if def := fetchAddressable(ctx, 30009, aw.issuer, aw.d); def != nil {
+				badgeDefinition(b, def)
+			}
+			out[i] = b
+		}()
+	}
+	wg.Wait()
+	for _, b := range out {
 		badges = append(badges, b)
 	}
-	return badges
+	return badges, nil
+}
+
+// badgeDefinition copies a kind 30009 definition's metadata onto b.
+func badgeDefinition(b map[string]any, def *nostr.Event) {
+	for _, t := range def.Tags {
+		if len(t) < 2 {
+			continue
+		}
+		switch t[0] {
+		case "name":
+			b["name"] = t[1]
+		case "description":
+			b["description"] = t[1]
+		case "image":
+			b["image"] = t[1]
+		case "thumb":
+			thumbs, _ := b["thumbs"].([]string)
+			b["thumbs"] = append(thumbs, t[1])
+		}
+	}
 }
 
 // listKinds maps NAP-IDENTITY list types onto the NIP-51 lists they name.
@@ -210,40 +484,47 @@ var listKinds = map[string]nostr.Kind{
 	"wiki-relays":     10102,
 }
 
+// listKind resolves a getList type: a name from listKinds, or a standard
+// list's kind number.
+func listKind(listType string) (nostr.Kind, bool) {
+	name := strings.ToLower(strings.TrimSpace(listType))
+	if kind, ok := listKinds[name]; ok {
+		return kind, true
+	}
+	if n, err := strconv.Atoi(name); err == nil && n >= 10000 && n < 20000 {
+		return nostr.Kind(n), true
+	}
+	return 0, false
+}
+
 func napIdentityGetList(c *napCall) {
 	var r struct {
 		ListType string `json:"listType"`
 		Type     string `json:"type"`
 	}
 	_ = c.decode(&r)
-	name := strings.ToLower(strings.TrimSpace(r.ListType))
-	if name == "" {
-		name = strings.ToLower(strings.TrimSpace(r.Type))
+	listType := r.ListType
+	if strings.TrimSpace(listType) == "" {
+		listType = r.Type
 	}
-	kind, known := listKinds[name]
+	kind, known := listKind(listType)
 	if !known {
-		if n, err := strconv.Atoi(name); err == nil && n >= 10000 && n < 20000 {
-			kind, known = nostr.Kind(n), true
-		}
-	}
-	pk, ok := currentUser()
-	if !known || !ok || sys == nil {
-		c.reply(map[string]any{"entries": []string{}})
+		c.reply(identityResult("entries", []string{}, nil, errUnknownListType))
 		return
 	}
-	c.async(func(ctx context.Context) {
-		ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
-		defer cancel()
+	napIdentity("entries", []string{}, func(ctx context.Context, pk nostr.PubKey) (any, error) {
+		evt := fetchReplaceable(ctx, kind, pk)
+		if evt == nil {
+			return []string{}, timedOut(ctx)
+		}
 		entries := []string{}
-		if evt := fetchReplaceable(ctx, kind, pk); evt != nil {
-			for _, tag := range evt.Tags {
-				if len(tag) >= 2 && tag[0] != "d" && tag[0] != "title" && tag[0] != "description" {
-					entries = append(entries, tag[1])
-				}
+		for _, tag := range evt.Tags {
+			if len(tag) >= 2 && tag[0] != "d" && tag[0] != "title" && tag[0] != "description" {
+				entries = append(entries, tag[1])
 			}
 		}
-		c.reply(map[string]any{"entries": entries})
-	})
+		return entries, nil
+	})(c)
 }
 
 // pushIdentityChanged tells every napplet who the user is now ("" when

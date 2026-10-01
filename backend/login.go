@@ -85,7 +85,13 @@ func login(input string, resume bool) {
 		sessionCancel()
 		sessionCancel = nil
 	}
-	userKeyer = nil
+	if userKeyer != nil {
+		// the old identity is gone even if this login fails, so napplets
+		// hear "" now rather than keep a key we no longer hold. Synchronous,
+		// so it can't land after the new key's push.
+		userKeyer = nil
+		pushIdentityChanged()
+	}
 
 	// The keyer outlives the handshake: a bunker signer listens for its
 	// responses on a subscription tied to this ctx, so it stays open
