@@ -495,6 +495,69 @@ func TestNapInc(t *testing.T) {
 	}
 }
 
+// A napplet can post any envelope it likes, ids and extra fields included:
+// what keeps it in its lane is that the answer goes back to the window that
+// asked and nowhere else. A windowId naming another window changes nothing.
+func TestNapReplyIsBoundToTheSendingWindow(t *testing.T) {
+	setupNapTest(t)
+	a, recA := openNapplet(t, "asker")
+	b, recB := openNapplet(t, "bystander")
+	ready(t, a, recA, 1)
+	ready(t, b, recB, 1)
+
+	post(t, a, map[string]any{"type": "identity.getPublicKey", "id": "replay-id", "windowId": b.instance})
+	if got := recA.wait(t, "identity.getPublicKey.result", 1); got["id"] != "replay-id" {
+		t.Errorf("reply: %v", got)
+	}
+
+	post(t, b, map[string]any{"type": "storage.keys", "id": "sync"})
+	recB.wait(t, "storage.keys.result", 1)
+	if got := recB.find("identity.getPublicKey.result"); len(got) != 0 {
+		t.Errorf("another window's reply reached the bystander: %v", got)
+	}
+	if got := recA.find("identity.getPublicKey.result"); len(got) != 1 {
+		t.Errorf("asker got %d replies: %v", len(got), got)
+	}
+}
+
+// A channel id is not a capability: a window that is not one of its two ends
+// can neither speak on it nor close it, however it learned the id.
+func TestNapIncChannelOpsRequireMembership(t *testing.T) {
+	setupNapTest(t)
+	a, recA := openNapplet(t, "end-a")
+	b, recB := openNapplet(t, "end-b")
+	c, recC := openNapplet(t, "outsider")
+	ready(t, a, recA, 1)
+	ready(t, b, recB, 1)
+	ready(t, c, recC, 1)
+
+	post(t, a, map[string]any{"type": "inc.channel.open", "id": "open", "target": "end-b"})
+	id, _ := recA.wait(t, "inc.channel.open.result", 1)["channelId"].(string)
+	if id == "" {
+		t.Fatal("channel was not opened")
+	}
+	recB.wait(t, "inc.channel.opened", 1)
+
+	post(t, c, map[string]any{"type": "inc.channel.emit", "channelId": id, "payload": "intruder"})
+	post(t, c, map[string]any{"type": "inc.channel.close", "channelId": id})
+	post(t, c, map[string]any{"type": "storage.keys", "id": "sync"})
+	recC.wait(t, "storage.keys.result", 1)
+
+	// the channel still works, and the first thing b hears on it is a
+	post(t, a, map[string]any{"type": "inc.channel.emit", "channelId": id, "payload": "ping"})
+	if got := recB.wait(t, "inc.channel.event", 1); got["payload"] != "ping" || got["sender"] != "end-a" {
+		t.Errorf("first event on the channel: %v", got)
+	}
+	for name, rec := range map[string]*recTransport{"end-a": recA, "end-b": recB} {
+		if got := rec.find("inc.channel.closed"); len(got) != 0 {
+			t.Errorf("%s saw the outsider close the channel: %v", name, got)
+		}
+	}
+	if got := recA.find("inc.channel.event"); len(got) != 0 {
+		t.Errorf("outsider spoke on the channel: %v", got)
+	}
+}
+
 func TestIntentDeliveryToNapplet(t *testing.T) {
 	setupNapTest(t)
 	ci, rec := openNapplet(t, "handler")
