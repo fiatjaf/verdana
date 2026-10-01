@@ -227,6 +227,32 @@ func Install(id string) {
 	}
 }
 
+// LookupAddress looks up a napp address (naddr, nostr: link) typed into the
+// discovery filter; anything else clears the lookup. The outcome shows in
+// the state's lookup, and the napp found joins its discovery list. Cheap to
+// call on every keystroke.
+func LookupAddress(input string) { backend.LookupAddress(input) }
+
+// OpenAddress opens the napp or napplet a nostr: link names: launched when
+// installed, and otherwise installed first once the user agrees in a
+// launcher prompt. It returns immediately.
+func OpenAddress(input string) {
+	go func() {
+		if err := backend.OpenAddress(input); err != nil {
+			backend.SetFetchErr("couldn't open that address: " + err.Error())
+		}
+	}()
+}
+
+// NappAddress is the naddr of a napp the launcher knows, for sharing it, or
+// "" when it doesn't know it.
+func NappAddress(id string) string {
+	if n, ok := backend.LookupNapp(id); ok {
+		return n.Naddr()
+	}
+	return ""
+}
+
 // Update applies newer event already found by update check.
 func Update(id string) { go backend.Update(id) }
 

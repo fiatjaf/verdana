@@ -54,6 +54,10 @@ type State struct {
 	Installed []Napp `json:"installed"`
 	Discovery []Napp `json:"discovery"`
 
+	// Lookup is the address typed into the discovery filter being looked
+	// up, or nil when the filter holds no address (see LookupAddress).
+	Lookup *AddressLookup `json:"lookup,omitempty"`
+
 	// Dev napps are the ephemeral in-memory ones loaded from a folder or a
 	// dev-server url (see dev.go): shown on the launcher's dev tab, never
 	// persisted.
@@ -120,6 +124,12 @@ type launcherState struct {
 	devLoading bool
 	busy       map[string]bool
 
+	// lookup is the address typed into the discovery filter, and resolved
+	// the napps found by address so far: they stay listed in discovery
+	// across refreshes (see address.go).
+	lookup   *AddressLookup
+	resolved map[string]Napp
+
 	// changed is closed and replaced on every phase change, so a waiter can
 	// block until the launcher is out of PhaseLoading.
 	changed chan struct{}
@@ -168,6 +178,7 @@ func Snapshot() State {
 		Theme:          name,
 		Installed:      append([]Napp(nil), ls.installed...),
 		Discovery:      append([]Napp(nil), ls.discovery...),
+		Lookup:         ls.lookup,
 		Dev:            append([]Napp(nil), ls.dev...),
 		DevErr:         ls.devErr,
 		DevLoading:     ls.devLoading,
@@ -300,7 +311,7 @@ func setFetching(fetching bool) {
 	ls.fetching = fetching
 	if fetching {
 		ls.fetchErr = ""
-		ls.discovery = nil
+		ls.discovery = ls.withResolved(nil)
 	}
 	ls.mu.Unlock()
 	notifyState()
@@ -308,7 +319,7 @@ func setFetching(fetching bool) {
 
 func setDiscovery(list []Napp) {
 	ls.mu.Lock()
-	ls.discovery = list
+	ls.discovery = ls.withResolved(list)
 	ls.sortDiscovery()
 	ls.mu.Unlock()
 	notifyState()

@@ -245,6 +245,11 @@ func DeleteShortcut(name string) error {
 // actions in order. Meant for a launcher being started by one of its
 // shortcut files (or forwarded the token by a second invocation).
 func RunShortcutToken(token string) error {
+	// a napp address (an naddr, a nostr: link) opens what it names, and
+	// offers to install it first when it isn't
+	if IsNappAddress(token) {
+		return OpenAddress(token)
+	}
 	entries, err := parseBundleToken(token)
 	if err != nil {
 		return err

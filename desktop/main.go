@@ -202,7 +202,11 @@ func setShortcutEdit(edit *shortcutEditState) {
 // editor's text: a case-insensitive substring on name, description, author
 // pubkey and author name. Clicks and rendering both walk this same index
 // list, so buttons stay glued to their napp no matter what the filter hides.
+//
+// A napp address (an naddr, a nostr: link) typed there is looked up on
+// relays too; once found, it is listed and it alone passes the filter.
 func discoveryFilter(st backend.State) []int {
+	backend.LookupAddress(filterEd.Text())
 	q := strings.ToLower(strings.TrimSpace(filterEd.Text()))
 	return nappFilter(st.Discovery, q)
 }
@@ -275,6 +279,7 @@ func gioMain() {
 		detailPrimaryBtn    widget.Clickable
 		detailUpdateBtn     widget.Clickable
 		detailAuthorBtn     widget.Clickable
+		detailCopyAddrBtn   widget.Clickable
 		profileList         widget.List
 		profileCardBtns     []widget.Clickable
 		profileOpenBtns     []widget.Clickable
@@ -648,6 +653,8 @@ func gioMain() {
 								}
 							} else if detailUpdateBtn.Clicked(gtx) {
 								go backend.Update(n.ID)
+							} else if detailCopyAddrBtn.Clicked(gtx) && n.Naddr() != "" {
+								gioHost{}.CopyText(n.Naddr())
 							}
 						} else {
 							// profile tab: size buttons to its napps list
@@ -806,6 +813,7 @@ func gioMain() {
 						&detailPrimaryBtn,
 						&detailUpdateBtn,
 						&detailAuthorBtn,
+						&detailCopyAddrBtn,
 						&profileList,
 						profileCardBtns,
 						profileOpenBtns,

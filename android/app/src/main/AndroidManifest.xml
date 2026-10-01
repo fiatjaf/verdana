@@ -32,6 +32,14 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- nostr:naddr1… links open (or offer to install) the napp or
+                 napplet they name -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="nostr" android:sspPrefix="naddr1" />
+            </intent-filter>
         </activity>
 
         <!-- one napp window = one task = one card in Recents. intoExisting

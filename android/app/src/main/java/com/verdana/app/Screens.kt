@@ -474,8 +474,11 @@ private fun DiscoveryTab(
 ) {
     // the filter matches on name, description, author pubkey and author
     // name (see matchesQuery); applied to the snapshot's list, cards stay
-    // keyed by id either way
-    val visible = st.discovery.matching(filter)
+    // keyed by id either way. A napp address (naddr, nostr: link) is looked
+    // up on relays instead, and only what it names is listed.
+    LaunchedEffect(filter) { activity.lookupAddress(filter) }
+    val lookup = st.lookup?.takeIf { it.query == filter.trim() }
+    val visible = if (lookup != null) st.discovery.filter { it.id == lookup.nappId } else st.discovery.matching(filter)
     LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
             // the filter comes first
@@ -483,7 +486,7 @@ private fun DiscoveryTab(
                 value = filter,
                 onValueChange = setFilter,
                 modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("filter by name, author or description", color = theme.inputHint) },
+                placeholder = { Text("filter by name, author or description, or paste an naddr", color = theme.inputHint) },
                 colors = outlinedColors(theme),
                 singleLine = true,
             )
@@ -520,8 +523,11 @@ private fun DiscoveryTab(
             if (visible.isEmpty()) {
                 Text(
                     when {
+                        lookup?.pending == true -> "Looking up that address…"
+                        lookup != null && lookup.err.isNotBlank() -> "Couldn't open that address: ${lookup.err}."
                         st.fetching -> "Searching relays…"
-                        st.discovery.isNotEmpty() -> "Nothing matches the filter."                        else -> "No napps yet. Tap \"Fetch napps\"."
+                        st.discovery.isNotEmpty() -> "Nothing matches the filter."
+                        else -> "No napps yet. Tap \"Fetch napps\"."
                     },
                     color = theme.muted,
                 )
@@ -1090,6 +1096,15 @@ fun NappDetailScreen(
         }
         Spacer(Modifier.height(12.dp))
         DetailRow("ID", napp.id, theme)
+        // the naddr is how a napp is shared; a tap copies it
+        val address = remember(napp.id) { Mobile.nappAddress(napp.id) }
+        if (address.isNotBlank()) {
+            Spacer(Modifier.height(4.dp))
+            Row(Modifier.clickable { VerdanaHost.copyText(address) }) {
+                Text("Address: ", color = theme.subtle, fontSize = 13.sp)
+                Text(address, color = theme.fg, fontSize = 13.sp, modifier = Modifier.weight(1f))
+            }
+        }
         if (napp.d.isNotBlank()) DetailRow("d", napp.d, theme)
         DetailRow("Author", napp.author, theme)
         if (napp.actions.any { it.isNotBlank() }) DetailRow("Actions", napp.actions.filter { it.isNotBlank() }.joinToString(", "), theme)

@@ -195,7 +195,7 @@ func layoutNappDetail(
 	gtx layout.Context,
 	th *material.Theme,
 	tab *extraTab,
-	openBtn, primaryBtn, updateBtn, authorBtn *widget.Clickable,
+	openBtn, primaryBtn, updateBtn, authorBtn, copyAddrBtn *widget.Clickable,
 	installedSet map[string]bool,
 	busy map[string]bool,
 	st backend.State,
@@ -320,6 +320,24 @@ func layoutNappDetail(
 					pointer.CursorPointer.Add(gtx.Ops)
 					return material.Button(th, updateBtn, "Update").Layout(gtx)
 				}),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					if !hasUpdate || updateBtn == nil {
+						return layout.Dimensions{}
+					}
+					return layout.Spacer{Width: unit.Dp(8)}.Layout(gtx)
+				}),
+				// the naddr is how a napp is shared: pasted into another
+				// launcher's discovery filter, it finds this one
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					if copyAddrBtn == nil || n.Naddr() == "" {
+						return layout.Dimensions{}
+					}
+					pointer.CursorPointer.Add(gtx.Ops)
+					b := material.Button(th, copyAddrBtn, "Copy address")
+					b.Background = currentTheme().chipBg
+					b.Color = currentTheme().chipFg
+					return b.Layout(gtx)
+				}),
 			)
 		})
 	}))
@@ -334,6 +352,7 @@ func layoutNappDetail(
 	}
 	children = append(children,
 		detailRow(th, "ID", n.ID),
+		detailRow(th, "Address", n.Naddr()),
 		detailRow(th, "d", n.D),
 		detailRow(th, "Author", n.Author.Hex()),
 		detailRow(th, "Created", n.CreatedAt.Time().Format(time.RFC3339)),

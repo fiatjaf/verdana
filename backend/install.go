@@ -30,8 +30,16 @@ func refreshInstalled() {
 
 // Install downloads a napp's files and records it as installed. Blocking:
 // call it from a goroutine (progress shows up as IsBusy). It also takes
-// updates: an already-installed napp is simply re-downloaded over.
+// updates: an already-installed napp is simply re-downloaded over. A failure
+// is shown in the launcher.
 func Install(n Napp) {
+	if err := InstallNapp(n); err != nil {
+		SetFetchErr("install failed: " + err.Error())
+	}
+}
+
+// InstallNapp is Install for a caller that handles the failure itself.
+func InstallNapp(n Napp) error {
 	log.Info().Str("napp", n.ID).Str("name", n.Name).Msg("installing napp")
 	setBusy(n.ID, true)
 	defer setBusy(n.ID, false)
@@ -44,8 +52,7 @@ func Install(n Napp) {
 	if err := fetchNappAssets(ctx, n, base, servers); err != nil {
 		log.Error().Err(err).Str("napp", n.ID).Msg("install failed")
 		os.RemoveAll(base)
-		SetFetchErr("install failed: " + err.Error())
-		return
+		return err
 	}
 
 	stateMu.Lock()
@@ -58,6 +65,7 @@ func Install(n Napp) {
 
 	refreshInstalled()
 	log.Info().Str("napp", n.ID).Str("name", n.Name).Msg("install complete")
+	return nil
 }
 
 // Uninstall removes a napp's files and forgets it. Installed-only by

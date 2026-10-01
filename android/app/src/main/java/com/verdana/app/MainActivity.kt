@@ -57,6 +57,24 @@ class MainActivity : ComponentActivity() {
         VerdanaHost.start(this)
 
         setContent { Launcher() }
+
+        // a recreated activity already handled the link it was started with
+        if (savedInstanceState == null) openLink(intent)
+    }
+
+    // singleTask: a link tapped while the launcher is running arrives here
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        openLink(intent)
+    }
+
+    // openLink opens the napp a nostr:naddr1… link names; the backend asks
+    // before installing one that isn't installed yet.
+    private fun openLink(intent: Intent?) {
+        if (intent?.action != Intent.ACTION_VIEW) return
+        val link = intent.dataString ?: return
+        Mobile.openAddress(link)
     }
 
     // ─── launcher actions (called from composables) ──────────────────
@@ -70,6 +88,7 @@ class MainActivity : ComponentActivity() {
     fun uninstall(id: String) = Mobile.uninstall(id)
     fun launch(id: String) = Mobile.launch(id)
     fun checkForUpdates() = Mobile.checkForUpdates()
+    fun lookupAddress(input: String) = Mobile.lookupAddress(input)
     fun toggleTheme() = VerdanaHost.toggleTheme()
 
     // bringWindow puts an open napp's task in front — the launcher cannot

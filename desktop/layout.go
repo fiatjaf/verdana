@@ -340,7 +340,8 @@ func layoutMain(
 	detailOpenBtn,
 	detailPrimaryBtn,
 	detailUpdateBtn,
-	detailAuthorBtn *widget.Clickable,
+	detailAuthorBtn,
+	detailCopyAddrBtn *widget.Clickable,
 	profileList *widget.List,
 	profileCardBtns,
 	profileOpenBtns,
@@ -370,11 +371,11 @@ func layoutMain(
 			}
 			if tab == 2 {
 				return layoutDiscoveryTab(gtx, th, discoveryList, relaysEd, filterEd, fetchBtn, actionBtns,
-					updateBtns, discoCardBtns, discoOpenBtns, discoAuthorBtns, vis, st.FetchErr, st.Fetching, st.Discovery, installedSet, busy)
+					updateBtns, discoCardBtns, discoOpenBtns, discoAuthorBtns, vis, st.FetchErr, st.Fetching, st.Discovery, st.Lookup, installedSet, busy)
 			}
 			if tab == 4 && extra != nil {
 				if extra.kind == "napp" {
-					return layoutNappDetail(gtx, th, extra, detailOpenBtn, detailPrimaryBtn, detailUpdateBtn, detailAuthorBtn, installedSet, busy, st)
+					return layoutNappDetail(gtx, th, extra, detailOpenBtn, detailPrimaryBtn, detailUpdateBtn, detailAuthorBtn, detailCopyAddrBtn, installedSet, busy, st)
 				}
 				return layoutProfileDetail(gtx, th, extra, profileList, profileCardBtns, profileOpenBtns, profileActionBtns, profileUpdateBtns, installedSet, busy)
 			}
@@ -834,14 +835,15 @@ func layoutDiscoveryTab(
 	fetchErr string,
 	fetching bool,
 	discovery []backend.Napp,
+	lookup *backend.AddressLookup,
 	installedSet,
 	busy map[string]bool,
 ) layout.Dimensions {
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		// the filter box comes first, narrowing the entries below by name,
-		// author, author name or description.
+		// author, author name or description, or naming one by its address.
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return editorBox(gtx, th, filterEd, "filter by name, author or description")
+			return editorBox(gtx, th, filterEd, "filter by name, author or description, or paste an naddr")
 		}),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
 		// then the relays editor
@@ -889,6 +891,14 @@ func layoutDiscoveryTab(
 				}
 				if len(discovery) > 0 {
 					msg = "Nothing matches the filter."
+				}
+				if lookup != nil {
+					switch {
+					case lookup.Pending:
+						msg = "Looking up that address\u2026"
+					case lookup.Err != "":
+						msg = "Couldn't open that address: " + lookup.Err + "."
+					}
 				}
 				l := material.Body2(th, msg)
 				l.Color = currentTheme().muted

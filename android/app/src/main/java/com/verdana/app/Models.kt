@@ -84,6 +84,16 @@ data class LauncherState(
     val busy: List<String>,
     val windows: List<WindowInfo>,
     val updateCheckRunning: Boolean = false,
+    val lookup: AddressLookup? = null,
+)
+
+// AddressLookup is the napp address typed into the discovery filter being
+// looked up on relays: pending, found (nappId, also in discovery) or failed.
+data class AddressLookup(
+    val query: String,
+    val pending: Boolean,
+    val nappId: String,
+    val err: String,
 )
 
 fun parseState(json: String): LauncherState {
@@ -140,6 +150,14 @@ fun parseState(json: String): LauncherState {
         discovery = napps("discovery"),
         busy = (0 until busyArr.length()).map { busyArr.getString(it) },
         updateCheckRunning = o.optBoolean("updateCheckRunning"),
+        lookup = o.optJSONObject("lookup")?.let { l ->
+            AddressLookup(
+                query = l.optString("query"),
+                pending = l.optBoolean("pending"),
+                nappId = l.optString("nappId"),
+                err = l.optString("err"),
+            )
+        },
         windows = (0 until windowsArr.length()).map { i ->
             val w = windowsArr.getJSONObject(i)
             WindowInfo(

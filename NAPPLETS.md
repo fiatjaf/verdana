@@ -30,6 +30,26 @@ WEB-NAPPLET events get every MUST in that spec, including refusing `requires`
 or `C` tags without `path` tags. Other kind 35129 events with neither shape
 are skipped. Kind `5129` snapshots are not read yet.
 
+## Opening by address
+
+Napps and napplets can be opened by their address. That is an `naddr` (bare,
+as a `nostr:` link, or inside a web link), or a `<kind>:<pubkey>:<d>`
+coordinate (`backend/address.go`).
+
+- **Discovery filter** (desktop and Android): an address pasted there is
+  looked up in the local store and on its relay hints, the author's write
+  relays and the launcher's relays. The newest valid manifest is listed as
+  the only result, with the usual Install and Open buttons. It stays in the
+  discovery list across refreshes.
+- **From outside:** `verdana naddr1…` (also forwarded to a running launcher)
+  and `nostr:naddr1…` links on Android. An installed napp or napplet is
+  launched at once. One that isn't installed is installed and launched only
+  after the user answers a launcher prompt; that answer is never remembered.
+- **Sharing:** the napp detail page shows the address (desktop "Copy address";
+  on Android, tap the row to copy it).
+
+Relay hints are only used if they are public `ws(s)` relays.
+
 ## How a napplet runs
 
 ```

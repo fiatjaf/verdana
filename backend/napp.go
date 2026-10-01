@@ -276,10 +276,15 @@ func (n Napp) AuthorShortName() string {
 }
 
 // MatchesQuery says whether the napp matches a case-insensitive substring in
-// its name, description, author pubkey or author name.
+// its name, description, author pubkey or author name, or is the napp a
+// napp address (naddr, nostr: link, coordinate) names.
 func (n Napp) MatchesQuery(q string) bool {
 	if q == "" {
 		return true
+	}
+	// an address matches the napp it names and nothing else
+	if ptr, err := ParseNappAddress(q); err == nil {
+		return n.matchesAddress(ptr)
 	}
 	return strings.Contains(strings.ToLower(n.Name), q) ||
 		strings.Contains(strings.ToLower(n.Description), q) ||
