@@ -592,7 +592,13 @@ private fun NappCard(
         NappIcon(bitmap, theme, 40)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(napp.name.ifBlank { napp.id }, fontWeight = FontWeight.Bold, color = theme.fg)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(napp.name.ifBlank { napp.id }, fontWeight = FontWeight.Bold, color = theme.fg)
+                if (napp.isNapplet) {
+                    Spacer(Modifier.width(6.dp))
+                    NappletBadge(theme)
+                }
+            }
             if (napp.description.isNotBlank()) {
                 Text(napp.description, color = theme.subtle, fontSize = 13.sp, maxLines = 2)
             }
@@ -668,9 +674,23 @@ private fun NappCard(
 }
 
 // iconHash mirrors backend.Napp.IconHash: the icon's blob sha256.
-private fun Napp.iconHash(): String = paths.firstOrNull { p ->
+private fun Napp.iconHash(): String = if (isNapplet) iconSha else paths.firstOrNull { p ->
     icon.isNotBlank() && p.path.trimStart('/') == icon.trimStart('/')
 }?.sha256 ?: ""
+
+// NappletBadge marks a sandboxed kind:35129 napplet in the lists.
+@Composable
+private fun NappletBadge(theme: Theme) {
+    Text(
+        "napplet",
+        color = theme.chipFg,
+        fontSize = 11.sp,
+        modifier = Modifier
+            .clip(RoundedCornerShape(5.dp))
+            .background(theme.chipBg)
+            .padding(horizontal = 4.dp, vertical = 1.dp),
+    )
+}
 
 private fun ByteArray.decodeBitmap(): ImageBitmap? =
     BitmapFactory.decodeByteArray(this, 0, size)?.asImageBitmap()

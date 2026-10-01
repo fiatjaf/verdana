@@ -25,6 +25,7 @@ func refreshInstalled() {
 	ls.sortDiscovery()
 	ls.mu.Unlock()
 	notifyState()
+	go broadcastIntentChanges()
 }
 
 // Install downloads a napp's files and records it as installed. Blocking:
@@ -159,7 +160,17 @@ func fetchNappAsset(ctx context.Context, servers []string, base string, p NappPa
 		// say which of the napp's files nobody could serve
 		return fmt.Errorf("%s: %w", p.Path, err)
 	}
-	dest := filepath.Join(base, filepath.FromSlash(strings.TrimPrefix(p.Path, "/")))
+	rel := strings.TrimPrefix(p.Path, "/")
+	if rel == "" {
+		// NIP-5D lets a napplet name its index "/"
+		rel = "index.html"
+	}
+	dest := filepath.Join(base, filepath.FromSlash(rel))
+	// manifest paths are author input: nothing may land outside the napp's
+	// own directory ("../" segments, absolute paths)
+	if r, err := filepath.Rel(base, dest); err != nil || r == ".." || strings.HasPrefix(r, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("%s: path escapes the napp directory", p.Path)
+	}
 	if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
 		return fmt.Errorf("%s: %w", p.Path, err)
 	}

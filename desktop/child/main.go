@@ -90,6 +90,12 @@ func main() {
 	w := webview.New(os.Getenv("WEBVIEW_DEBUG") == "true")
 	w.SetTitle(windowTitle(meta.Name, meta.Number))
 	w.SetSize(windowWidth(), windowHeight(), webview.HintNone)
+
+	if os.Getenv("VERDANA_NAPP_FORMAT") == "napplet" {
+		runNapplet(w)
+		return
+	}
+
 	_ = w.Bind("__bridge_rpc", rpcBound)
 	_ = w.Bind("__verdana_prompt_answer", promptAnswer)
 

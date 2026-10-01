@@ -22,7 +22,13 @@ data class Napp(
     val createdAt: Long = 0,
     val paths: List<NappPath>,
     val updateAvailable: Boolean = false,
-)
+    // "napplet" for a kind:35129 napplet, "" for a napp
+    val format: String = "",
+    // a napplet's icon is a bare blob hash, not one of its paths
+    val iconSha: String = "",
+) {
+    val isNapplet: Boolean get() = format == "napplet"
+}
 
 data class ProfileDetail(
     val pubkey: String,
@@ -111,6 +117,8 @@ fun parseState(json: String): LauncherState {
                     val p = pathsArr.getJSONObject(it)
                     NappPath(p.optString("path"), p.optString("sha256"))
                 },
+                format = n.optString("format"),
+                iconSha = n.optString("iconSha"),
             )
         }
     }
@@ -176,6 +184,8 @@ class WindowSpec(json: String) {
     val description: String
     val dir: String
     val requires: List<String>
+    // "napplet": the window loads the napplet host page, not the napp's files
+    val format: String
     val theme: String
     val themeVars: String
     val storage: String
@@ -190,10 +200,13 @@ class WindowSpec(json: String) {
         requires = (0 until (o.optJSONArray("requires")?.length() ?: 0)).map {
             o.optJSONArray("requires")!!.getString(it)
         }
+        format = o.optString("format")
         theme = o.optString("theme", "light")
         themeVars = o.optString("themeVars", "{}")
         storage = o.optString("storage", "{}").ifBlank { "{}" }
     }
+
+    val isNapplet: Boolean get() = format == "napplet"
 }
 
 fun parseProfile(json: String): ProfileDetail? {
@@ -244,6 +257,8 @@ fun parseNapps(json: String): List<Napp> {
                     val q = pathsArr.getJSONObject(it)
                     NappPath(q.optString("path"), q.optString("sha256"))
                 },
+                format = n.optString("format"),
+                iconSha = n.optString("iconSha"),
             )
         }
     } catch (_: Exception) { listOf() }

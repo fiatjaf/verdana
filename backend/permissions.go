@@ -30,6 +30,9 @@ const (
 	PermOpenLink Permission = "open_link"
 	PermSaveFile Permission = "save_file"
 	PermCopyText Permission = "copy_text"
+	// PermFetch is a napplet having the launcher download from the web for
+	// it (NAP-RESOURCE): napplets have no network of their own.
+	PermFetch Permission = "fetch"
 
 	// PermDispatch is the one permission no napp asks for out loud: it is
 	// which napp should handle an action, a question only a rule can settle

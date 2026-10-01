@@ -50,7 +50,7 @@ func FetchProfileDetail(pubkeyHex string) ProfileDetail {
 	}
 }
 
-// FetchAuthorNapps lists the kind:35130 napps an author published: from the
+// FetchAuthorNapps lists the napps and napplets (kind:35130/35129) an author published: from the
 // author's own write relays plus the launcher's discovery relays. Newest
 // version wins per d-tag, so an author that republished the same napp shows
 // up once. It blocks (with its own timeout), so call it off the render loop.
@@ -70,31 +70,35 @@ func FetchAuthorNapps(pubkeyHex string) []Napp {
 		return nil
 	}
 
-	byD := make(map[string]Napp)
+	byID := make(map[string]Napp)
 	collect := func(evt nostr.Event) {
-		n := nappFromEvent(evt)
-		if prev, ok := byD[n.D]; !ok || n.CreatedAt > prev.CreatedAt {
-			byD[n.D] = n
+		n, ok := nappFromEvent(evt)
+		if !ok {
+			return
+		}
+		// keyed by id, not d: a napp and a napplet may share a d-tag
+		if prev, ok := byID[n.ID]; !ok || n.CreatedAt > prev.CreatedAt {
+			byID[n.ID] = n
 		}
 	}
 
 	// whatever is already local renders instantly
 	for evt := range sys.Store.QueryEvents(nostr.Filter{
-		Kinds:   []nostr.Kind{35130},
+		Kinds:   napKinds,
 		Authors: []nostr.PubKey{pk},
 	}, 200) {
 		collect(evt)
 	}
 
 	for re := range sys.Pool.FetchMany(ctx, urls, nostr.Filter{
-		Kinds:   []nostr.Kind{35130},
+		Kinds:   napKinds,
 		Authors: []nostr.PubKey{pk},
 	}, nostr.SubscriptionOptions{Label: "verdana-author-napps"}) {
 		collect(re.Event)
 	}
 
-	out := make([]Napp, 0, len(byD))
-	for _, n := range byD {
+	out := make([]Napp, 0, len(byID))
+	for _, n := range byID {
 		out = append(out, n)
 	}
 	sort.Slice(out, func(i, j int) bool {

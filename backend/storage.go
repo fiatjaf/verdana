@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -92,6 +93,16 @@ func storageSnapshot(nappID string) map[string]string {
 	return out
 }
 
+// storageSeed is what a window's localStorage shim starts from: the napp's
+// snapshot, or nothing at all for a napplet, which has no localStorage (its
+// sandboxed frame has no origin to keep one) and goes through NAP-STORAGE.
+func storageSeed(napp Napp) string {
+	if napp.IsNapplet() {
+		return ""
+	}
+	return StorageSnapshotJSON(napp.ID)
+}
+
 // StorageSnapshotJSON is the snapshot as a JSON object string, for WindowSpec.
 func StorageSnapshotJSON(nappID string) string {
 	raw, err := json.Marshal(storageSnapshot(nappID))
@@ -137,6 +148,12 @@ func storagePersistLocked(nappID string, data map[string]string) {
 var errQuotaExceeded = errors.New("localStorage quota exceeded (5MB)")
 
 func storageSet(nappID, key, value string) error {
+	return storageSetQuota(nappID, key, value, localStorageQuota, errQuotaExceeded)
+}
+
+// storageSetQuota is storageSet under a quota of the caller's choosing: napps
+// get localStorage's 5MB, napplets NAP-STORAGE's smaller one.
+func storageSetQuota(nappID, key, value string, quota int, errQuota error) error {
 	s := storageFor(nappID)
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -145,13 +162,34 @@ func storageSet(nappID, key, value string) error {
 	if ok {
 		delta -= len(key) + len(old)
 	}
-	if s.size+delta > localStorageQuota {
-		return errQuotaExceeded
+	if s.size+delta > quota {
+		return errQuota
 	}
 	s.data[key] = value
 	s.size += delta
 	storagePersistLocked(nappID, s.data)
 	return nil
+}
+
+func storageGet(nappID, key string) (string, bool) {
+	s := storageFor(nappID)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	v, ok := s.data[key]
+	return v, ok
+}
+
+// storageKeys lists a store's keys, sorted so the answer is stable.
+func storageKeys(nappID string) []string {
+	s := storageFor(nappID)
+	s.mu.Lock()
+	keys := make([]string, 0, len(s.data))
+	for k := range s.data {
+		keys = append(keys, k)
+	}
+	s.mu.Unlock()
+	sort.Strings(keys)
+	return keys
 }
 
 func storageRemove(nappID, key string) bool {

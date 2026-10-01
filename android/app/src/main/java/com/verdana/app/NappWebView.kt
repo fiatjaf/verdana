@@ -113,15 +113,30 @@ class NappWebView(
         // seed (per nappId — the native one would be per per-instance
         // origin), the ui kit for the napps that ask for it, and the bridge
         val origin = NappOrigins.originFor(instance)
-        val init = "window.name = ${jsString(instance)};" +
-            "window.__nappDomains = ${jsStringList(spec.requires)};" +
-            storageInitScript(spec.storage) +
-            themeInitScript(spec.theme, spec.themeVars)
-        WebViewCompat.addDocumentStartJavaScript(
-            view,
-            "$init\n${Mobile.uiKit(jsStringList(spec.requires))}\n${Mobile.bridgeJS()}",
-            setOf(origin),
-        )
+        if (spec.isNapplet) {
+            // a napplet window: the launcher's host page and its script, no
+            // bridge.js, no storage seed. The napplet itself runs in an
+            // opaque-origin sandboxed iframe, which neither this script
+            // (scoped to origin) nor the __verdanaHost listener (scoped to
+            // origin, main frame only) ever reaches.
+            val init = "window.name = ${jsString(instance)};" +
+                themeInitScript(spec.theme, spec.themeVars)
+            WebViewCompat.addDocumentStartJavaScript(
+                view,
+                "$init\n${Mobile.nappletHostJS()}",
+                setOf(origin),
+            )
+        } else {
+            val init = "window.name = ${jsString(instance)};" +
+                "window.__nappDomains = ${jsStringList(spec.requires)};" +
+                storageInitScript(spec.storage) +
+                themeInitScript(spec.theme, spec.themeVars)
+            WebViewCompat.addDocumentStartJavaScript(
+                view,
+                "$init\n${Mobile.uiKit(jsStringList(spec.requires))}\n${Mobile.bridgeJS()}",
+                setOf(origin),
+            )
+        }
 
         view.loadUrl(origin + "/")
     }
@@ -189,6 +204,7 @@ class NappWebView(
     // serve maps a request path onto the napp's unpacked directory, with the
     // desktop's SPA fallback: extensionless paths get index.html.
     private fun serve(path: String): WebResourceResponse? {
+        if (spec.isNapplet) return serveNappletHost(path)
         val root = File(spec.dir)
         val clean = path.trimStart('/')
         var f = File(root, clean)
@@ -207,6 +223,23 @@ class NappWebView(
         } catch (_: IOException) {
             null
         }
+    }
+
+    // A napplet window serves the launcher's host page at / and nothing else:
+    // the napplet's bytes reach it over nap.boot, verified, as a srcdoc.
+    private fun serveNappletHost(path: String): WebResourceResponse? {
+        if (path != "/" && path.isNotEmpty()) return null
+        val page = Mobile.nappletHostHTML().toByteArray(Charsets.UTF_8)
+        return WebResourceResponse(
+            "text/html",
+            "utf-8",
+            200,
+            "OK",
+            // the srcdoc frame inherits this policy on top of its own, so it
+            // must stay loose on script/style/img; it only pins navigation
+            mapOf("Content-Security-Policy" to "navigate-to 'self'", "Cache-Control" to "no-store"),
+            page.inputStream(),
+        )
     }
 
     private fun isNappOrigin(url: Uri): Boolean =

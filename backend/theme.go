@@ -63,4 +63,5 @@ func broadcastTheme() {
 		ci.send(WireMsg{T: "theme", Method: name, Params: vars})
 	}
 	log.Debug().Str("theme", name).Int("napps", len(open)).Msg("pushed theme to napps")
+	broadcastNappletTheme()
 }

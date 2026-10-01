@@ -1264,7 +1264,18 @@ func renderNappCard(
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 							label := material.Body1(th, napp.Name)
 							label.Font.Weight = font.Bold
-							return label.Layout(gtx)
+							if !napp.IsNapplet() {
+								return label.Layout(gtx)
+							}
+							// napplets run sandboxed, through a different runtime:
+							// worth telling apart at a glance
+							return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+								layout.Rigid(label.Layout),
+								layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									return actionChip(gtx, th, "napplet")
+								}),
+							)
 						}),
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 							actions := make([]string, 0, len(napp.Actions))

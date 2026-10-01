@@ -342,6 +342,17 @@ func layoutNappDetail(
 		detailRow(th, "Servers", strings.Join(n.Servers, ", ")),
 		detailRow(th, "Icon", n.Icon),
 	)
+	if n.IsNapplet() {
+		children = append(children,
+			detailRow(th, "Format", nappletFormatLabel(n)),
+			detailRow(th, "Unsupported", strings.Join(n.MissingDomains(), ", ")),
+			detailRow(th, "Artifact", n.ArtifactHash),
+			detailRow(th, "Roles", strings.Join(n.Roles, ", ")),
+			detailRow(th, "Domains", strings.Join(n.RequiredDomains, ", ")),
+			detailRow(th, "Optional domains", strings.Join(n.OptionalDomains, ", ")),
+			detailRow(th, "Source", strings.Join(n.Sources, ", ")),
+		)
+	}
 	if len(n.Paths) > 0 {
 		paths := make([]string, 0, len(n.Paths))
 		for _, p := range n.Paths {
@@ -479,4 +490,13 @@ func layoutProfileDetail(
 			})
 		}),
 	)
+}
+
+// nappletFormatLabel says which napplet manifest an app was read from.
+func nappletFormatLabel(n backend.Napp) string {
+	schema := "NIP-5D manifest"
+	if n.NappletSchema == backend.SchemaWebNapplet {
+		schema = "web napplet"
+	}
+	return fmt.Sprintf("napplet (kind:%d, %s, sandboxed)", n.ManifestKind(), schema)
 }

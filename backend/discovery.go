@@ -31,7 +31,7 @@ func Discover() {
 
 	events, eose := sys.Pool.SubscribeManyNotifyEOSE(ctx, urls,
 		nostr.Filter{
-			Kinds: []nostr.Kind{35130},
+			Kinds: napKinds,
 		},
 		nostr.SubscriptionOptions{
 			Label:          "verdana-discovery",
@@ -48,7 +48,11 @@ func Discover() {
 	}()
 
 	for re := range events {
-		collected = append(collected, nappFromEvent(re.Event))
+		n, ok := nappFromEvent(re.Event)
+		if !ok {
+			continue
+		}
+		collected = append(collected, n)
 		if eosed.Load() {
 			setDiscovery(collected)
 		}
@@ -57,7 +61,8 @@ func Discover() {
 	log.Info().Err(context.Cause(ctx)).Msg("discovery subscription ended")
 }
 
-func nappFromEvent(evt nostr.Event) Napp {
+// nappFromNappEvent reads a kind:35130 napp manifest.
+func nappFromNappEvent(evt nostr.Event) Napp {
 	d := evt.Tags.GetD()
 	n := Napp{
 		D:         d,

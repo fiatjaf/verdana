@@ -4,10 +4,12 @@ go 1.26.2
 
 require (
 	fiatjaf.com/nostr v0.0.0-20260919022302-cf8167ebdb95
+	github.com/btcsuite/btcd/btcutil v1.1.5
 	github.com/dgraph-io/ristretto/v2 v2.3.0
 	github.com/puzpuzpuz/xsync/v3 v3.5.1
 	github.com/rs/zerolog v1.35.1
 	github.com/wizenheimer/blaze v0.0.0-20251014083344-98727d655839
+	golang.org/x/image v0.46.0
 	golang.org/x/mobile v0.0.0-20260908204917-8b95e45f8d3e
 )
 
@@ -20,7 +22,6 @@ require (
 	github.com/bits-and-blooms/bitset v1.17.0 // indirect
 	github.com/btcsuite/btcd v0.24.2 // indirect
 	github.com/btcsuite/btcd/btcec/v2 v2.3.4 // indirect
-	github.com/btcsuite/btcd/btcutil v1.1.5 // indirect
 	github.com/btcsuite/btcd/chaincfg/chainhash v1.1.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/coder/websocket v1.8.13 // indirect

@@ -42,6 +42,7 @@ func loginAmber(input string) {
 	userKeyer = AmberSigner{PubKey: pk, Package: pkg}
 	userPubkey = pk
 	sessionCancel = nil
+	go pushIdentityChanged()
 
 	stateMu.Lock()
 	if state.Login != input {
@@ -138,6 +139,7 @@ func Login(input string) {
 
 	userKeyer = k
 	userPubkey = pk
+	go pushIdentityChanged()
 
 	stateMu.Lock()
 	if state.Login != input {
@@ -177,6 +179,7 @@ func Logout() {
 	}
 	userKeyer = nil
 	userPubkey = nostr.PubKey{}
+	pushIdentityChanged()
 
 	stateMu.Lock()
 	state.Login = ""

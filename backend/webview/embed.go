@@ -1,6 +1,7 @@
 // Package webview carries the JavaScript and CSS that turn a webview into a
 // napp host: window.nostr, window.nostrdb and window.napp, as env.d.ts
-// describes them, and napp-ui.css, the kit napps opt into.
+// describes them, and napp-ui.css, the kit napps opt into. It also carries the
+// napplet host page and the @napplet/shim prelude napplets run with.
 //
 // It lives in its own package, with no dependencies, so both shells can embed
 // the very same files: the desktop's webview child process links it directly,
@@ -24,6 +25,21 @@ var bridgeJS string
 //go:embed napp-ui.css
 var uiCSS string
 
+//go:embed napplet-host.html
+var nappletHostHTML string
+
+//go:embed napplet-host.js
+var nappletHostJS string
+
+// The @napplet/shim browser prelude (see shim/README.md): what makes
+// window.napplet exist inside a napplet's sandboxed frame.
+//
+//go:embed shim/prelude.global.js
+var shimPrelude string
+
+// ShimVersion is the @napplet/shim release the prelude was copied from.
+const ShimVersion = "0.29.2"
+
 //go:embed napp-ui.js
 var uiJS string
 
@@ -44,6 +60,19 @@ var (
 // JS is bridge.js, to be injected before a napp's page runs (and again on
 // every navigation, which both shells do).
 func JS() string { return bridgeJS }
+
+// NappletHostHTML is the page a napplet window loads as its main frame: an
+// empty document the host script fills with the napplet's sandboxed iframe.
+func NappletHostHTML() string { return nappletHostHTML }
+
+// NappletHostJS is the host page's script, injected at document start in
+// place of bridge.js. It carries NAP envelopes between the napplet's frame
+// and the Go host, and gives the napplet nothing else.
+func NappletHostJS() string { return nappletHostJS }
+
+// ShimPrelude is the @napplet/shim prelude the launcher inlines into every
+// napplet's srcdoc.
+func ShimPrelude() string { return shimPrelude }
 
 var (
 	fontOnce sync.Once

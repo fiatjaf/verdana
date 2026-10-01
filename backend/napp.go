@@ -67,7 +67,8 @@ func (n Napp) WindowSize() (int, int) {
 	return DefaultWindowWidth, DefaultWindowHeight
 }
 
-// Napp is a napp as its kind:35130 event describes it.
+// Napp is a napp as its kind:35130 event describes it, or a napplet as its
+// kind:35129 does (Format "napplet", see napplet.go).
 type Napp struct {
 	ID          string           `json:"id"`
 	D           string           `json:"d"`
@@ -82,6 +83,20 @@ type Napp struct {
 	CreatedAt   nostr.Timestamp  `json:"created_at"`
 	Paths       []NappPath       `json:"paths"`
 	Servers     []string         `json:"servers"`
+
+	// Napplet fields (kind:35129). All omitempty: napps never set them, and a
+	// state.json from before napplets reads back unchanged.
+	Format          string              `json:"format,omitempty"`
+	NappletSchema   string              `json:"nappletSchema,omitempty"`
+	Kind            nostr.Kind          `json:"kind,omitempty"`
+	ArtifactHash    string              `json:"artifactHash,omitempty"`
+	IconSha         string              `json:"iconSha,omitempty"`
+	IconMime        string              `json:"iconMime,omitempty"`
+	Sources         []string            `json:"sources,omitempty"`
+	Roles           []string            `json:"roles,omitempty"`
+	Conventions     []NappletConvention `json:"conventions,omitempty"`
+	RequiredDomains []string            `json:"requiredDomains,omitempty"`
+	OptionalDomains []string            `json:"optionalDomains,omitempty"`
 
 	// UpdateAvailable is stamped by Snapshot(): a newer version of this napp
 	// was seen on the relays (kind:35130, same author+d-tag, newer
@@ -138,6 +153,9 @@ func (n Napp) iconAsset() (NappPath, bool) {
 // IconHash identifies a napp's icon: the blob hash, so a GUI can cache the
 // decoded image by it. Empty when the napp declares no icon.
 func (n Napp) IconHash() string {
+	if n.IsNapplet() {
+		return n.IconSha
+	}
 	if asset, ok := n.iconAsset(); ok {
 		return asset.Sha256
 	}
@@ -151,6 +169,9 @@ func (n Napp) IconBlob(ctx context.Context) ([]byte, error) {
 	if data, ok := devIconBlob(ctx, n); ok {
 		return data, nil
 	}
+	if n.IsNapplet() {
+		return n.nappletIconBlob(ctx)
+	}
 	asset, ok := n.iconAsset()
 	if !ok {
 		return nil, errNotFound("this napp has no icon")
@@ -160,6 +181,23 @@ func (n Napp) IconBlob(ctx context.Context) ([]byte, error) {
 		return data, nil
 	}
 	return downloadBlob(ctx, n.BlossomServers(ctx), asset.Sha256)
+}
+
+// nappletIconBlob fetches a napplet's icon by its hash (never installed: an
+// icon that can't be had must not stand in the way of the napplet) and only
+// hands it over once it decodes as the declared type.
+func (n Napp) nappletIconBlob(ctx context.Context) ([]byte, error) {
+	if n.IconSha == "" {
+		return nil, errNotFound("this napplet has no icon")
+	}
+	data, err := downloadBlob(ctx, n.BlossomServers(ctx), n.IconSha)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkNappletIcon(data, n.IconMime); err != nil {
+		return nil, err
+	}
+	return data, nil
 }
 
 // ─── blossom servers ─────────────────────────────────────────────

@@ -108,6 +108,11 @@ type WindowSpec struct {
 	// Requires are the domains the napp asked to reach (behavior.md).
 	Requires []string
 
+	// Format is "napplet" for a napplet window: the shell then loads the
+	// napplet host page (webview.NappletHostHTML) with only the host script,
+	// instead of serving Dir/URL with bridge.js. Empty for napps.
+	Format string
+
 	// Theme and ThemeVars are the launcher's current theme, so the napp
 	// paints right from its first frame instead of flashing.
 	Theme     string

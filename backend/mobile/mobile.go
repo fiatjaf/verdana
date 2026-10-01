@@ -68,6 +68,7 @@ func (h mobileHost) OpenWindow(spec backend.WindowSpec) (backend.Transport, erro
 		"dir":         spec.Dir,
 		"url":         spec.URL,
 		"requires":    spec.Requires,
+		"format":      spec.Format,
 		"theme":       spec.Theme,
 		"themeVars":   spec.ThemeVars,
 		"width":       spec.Width,
@@ -144,6 +145,14 @@ func Stop() {
 // BridgeJS is the script that has to run before a napp's page does, on every
 // navigation: it installs window.nostr, window.nostrdb and window.napp.
 func BridgeJS() string { return webview.JS() }
+
+// NappletHostHTML is the page a napplet window loads as its main frame.
+func NappletHostHTML() string { return webview.NappletHostHTML() }
+
+// NappletHostJS is the host page's script, injected in place of bridge.js in
+// a napplet window: it puts the napplet in its sandboxed iframe and carries
+// NAP envelopes to the backend.
+func NappletHostJS() string { return webview.NappletHostJS() }
 
 // UIKit is the script that puts the napp-ui kit in the page, for the napps
 // whose metadata.json asks for it with `requires: ["ui"]`, and "" for the
@@ -248,7 +257,7 @@ func Profile(pubkeyHex string) string {
 	return string(data)
 }
 
-// AuthorNapps lists the kind:35130 napps an author published as JSON: from
+// AuthorNapps lists the kind:35130/35129 napps and napplets an author published as JSON: from
 // the author's own write relays plus the launcher's discovery relays.
 // Blocks with its own timeout; call it off the main thread.
 func AuthorNapps(pubkeyHex string) string {

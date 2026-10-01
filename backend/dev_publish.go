@@ -100,9 +100,27 @@ func PublishDev(ctx context.Context, id string, servers, relays []string, protec
 		return 0, 0, err
 	}
 
+	// a napplet publishes its one file (and its icon), never the folder
+	uploads := napp.Paths
+	iconSha, iconMime := "", ""
+	if napp.IsNapplet() {
+		if napp.ArtifactHash == "" {
+			return 0, 0, errors.New("napplet folder has no index.html")
+		}
+		uploads = []NappPath{{Path: nappletEntry, Sha256: napp.ArtifactHash}}
+		if p, ok := napp.iconAsset(); ok {
+			if m := mime.TypeByExtension(filepath.Ext(p.Path)); nappletIconMimes[m] != "" {
+				uploads = append(uploads, p)
+				iconSha, iconMime = p.Sha256, m
+			} else {
+				step("icon %s is not png, jpeg or webp: publishing without it", p.Path)
+			}
+		}
+	}
+
 	okServers := make(map[string]bool)
-	step("uploading %d file(s) to %d blossom server(s)...", len(napp.Paths), len(servers))
-	for _, file := range napp.Paths {
+	step("uploading %d file(s) to %d blossom server(s)...", len(uploads), len(servers))
+	for _, file := range uploads {
 		path := filepath.Join(d.dir, filepath.FromSlash(strings.TrimPrefix(file.Path, "/")))
 		st, statErr := os.Stat(path)
 		size := int64(-1)
@@ -141,15 +159,19 @@ func PublishDev(ctx context.Context, id string, servers, relays []string, protec
 		}
 	}
 
-	tags := make(nostr.Tags, 0, len(napp.Paths)+len(napp.Actions)+len(napp.Requires)+8)
-	for _, file := range napp.Paths {
-		tags = append(tags, nostr.Tag{"path", file.Path, file.Sha256, mime.TypeByExtension(filepath.Ext(file.Path))})
-	}
 	serversForEvent := make([]string, 0, len(okServers))
 	for _, server := range servers {
 		if okServers[server] {
 			serversForEvent = append(serversForEvent, server)
 		}
+	}
+	if napp.IsNapplet() {
+		return publishDevNapplet(ctx, napp, serversForEvent, iconSha, iconMime, relays, protected, step)
+	}
+
+	tags := make(nostr.Tags, 0, len(napp.Paths)+len(napp.Actions)+len(napp.Requires)+8)
+	for _, file := range napp.Paths {
+		tags = append(tags, nostr.Tag{"path", file.Path, file.Sha256, mime.TypeByExtension(filepath.Ext(file.Path))})
 	}
 	for _, server := range serversForEvent {
 		tags = append(tags, nostr.Tag{"server", server})
@@ -184,6 +206,11 @@ func PublishDev(ctx context.Context, id string, servers, relays []string, protec
 		step("signing failed: %v", err)
 		return 0, 0, fmt.Errorf("signing manifest: %w", err)
 	}
+	return publishManifest(ctx, event, relays, step)
+}
+
+// publishManifest sends a signed manifest to the relays and keeps it locally.
+func publishManifest(ctx context.Context, event nostr.Event, relays []string, step func(string, ...any)) (int, int, error) {
 	step("signed event %s, publishing to %d relay(s)...", event.ID, len(relays))
 
 	results := 0
@@ -206,4 +233,56 @@ func PublishDev(ctx context.Context, id string, servers, relays []string, protec
 		invalidateList(event.Kind, event.PubKey)
 	}
 	return results, failed, nil
+}
+
+// publishDevNapplet signs and publishes a dev napplet's kind:35129 event
+// (naps WEB-NAPPLET.md): the artifact hash, the servers that took it, the
+// display metadata and the roles/conventions it handles. The event is checked
+// against the launcher's own validation before it goes out.
+func publishDevNapplet(
+	ctx context.Context,
+	napp Napp,
+	servers []string,
+	iconSha, iconMime string,
+	relays []string,
+	protected bool,
+	step func(string, ...any),
+) (int, int, error) {
+	content := strings.TrimSpace(napp.Description)
+	if content == "" {
+		content = napp.Name
+	}
+	tags := nostr.Tags{
+		{"d", napp.D},
+		{"x", napp.ArtifactHash},
+		{"title", napp.Name},
+	}
+	for _, server := range servers {
+		if origin, ok := httpsOrigin(nostr.Tag{"server", server}); ok {
+			tags = append(tags, nostr.Tag{"server", origin})
+		}
+	}
+	if iconSha != "" {
+		tags = append(tags, nostr.Tag{"icon", iconSha, iconMime})
+	}
+	for _, r := range napp.Roles {
+		tags = append(tags, nostr.Tag{"z", r})
+	}
+	for _, c := range napp.Conventions {
+		tags = append(tags, append(nostr.Tag{"i", c.ID}, c.Params...))
+	}
+	if protected {
+		tags = append(tags, nostr.Tag{"-"})
+	}
+
+	step("signing kind:35129 napplet event (%d tags)...", len(tags))
+	event := nostr.Event{Kind: KindNapplet, CreatedAt: nostr.Now(), Tags: tags, Content: content}
+	if err := userKeyer.SignEvent(ctx, &event); err != nil {
+		step("signing failed: %v", err)
+		return 0, 0, fmt.Errorf("signing manifest: %w", err)
+	}
+	if _, err := nappletFromEvent(event); err != nil {
+		return 0, 0, fmt.Errorf("the napplet event would be invalid: %w", err)
+	}
+	return publishManifest(ctx, event, relays, step)
 }
