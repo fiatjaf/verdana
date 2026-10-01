@@ -62,6 +62,11 @@ type Instance struct {
 	dispMu     sync.Mutex
 	dispSerial int
 	dispatches map[int]chan WireMsg
+
+	// auxiliary is true when the window was opened as a temporary helper
+	// (napp.action with auxiliary:true): it closes as soon as its handler
+	// answers a dispatch.
+	auxiliary bool
 }
 
 type actionRequest struct {
@@ -336,6 +341,11 @@ func WindowClosed(instance string) {
 		}
 	}
 	instancesMu.Unlock()
+	if ci.auxiliary {
+		// auxiliary windows are temporary helpers, not session windows:
+		// don't keep them listed for reopening.
+		windows.Delete(ci.instance)
+	}
 	log.Info().Str("instance", ci.instance).Str("napp", ci.napp.ID).Msg("napp window closed")
 	notifyState()
 }
@@ -712,6 +722,9 @@ func runNappAction(
 		if err != nil {
 			return nil, err
 		}
+		if opts.Auxiliary {
+			ci.auxiliary = true
+		}
 		return dispatchTo(ctx, callerID, name, ci, req)
 	}
 
@@ -757,6 +770,9 @@ func runNappAction(
 			ci, err := launch(ctx, n)
 			if err != nil {
 				return nil, err
+			}
+			if opts.Auxiliary {
+				ci.auxiliary = true
 			}
 			return dispatchTo(ctx, callerID, name, ci, req)
 		}
@@ -885,6 +901,10 @@ func dispatchToInstance(ctx context.Context, ci *Instance, req *actionRequest) (
 	case <-ci.gone:
 		return nil, errors.New("the napp window closed before answering")
 	case resp := <-ch:
+		if ci.auxiliary {
+			// an auxiliary window is done once its handler answers.
+			go ci.Close()
+		}
 		if resp.Error != "" {
 			return nil, errors.New(resp.Error)
 		}
