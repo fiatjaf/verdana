@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"fiatjaf.com/nostr"
 )
@@ -33,7 +34,8 @@ func Discover() {
 			Kinds: []nostr.Kind{35130},
 		},
 		nostr.SubscriptionOptions{
-			Label: "verdana-discovery",
+			Label:          "verdana-discovery",
+			MaxWaitForEOSE: time.Second * 20,
 		},
 	)
 
@@ -42,6 +44,7 @@ func Discover() {
 		log.Info().Int("count", len(collected)).Msg("fetch complete")
 		eosed.Store(true)
 		setDiscovery(collected)
+		setFetching(false)
 	}()
 
 	for re := range events {
