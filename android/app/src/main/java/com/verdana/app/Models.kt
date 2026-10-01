@@ -10,6 +10,7 @@ data class NappPath(val path: String, val sha256: String)
 
 data class Napp(
     val id: String,
+    val d: String = "",
     val name: String,
     val description: String,
     val icon: String,
@@ -17,8 +18,22 @@ data class Napp(
     val authorName: String,
     val actions: List<String>,
     val requires: List<String>,
+    val servers: List<String> = listOf(),
+    val createdAt: Long = 0,
     val paths: List<NappPath>,
     val updateAvailable: Boolean = false,
+)
+
+data class ProfileDetail(
+    val pubkey: String,
+    val npub: String,
+    val name: String,
+    val displayName: String,
+    val shortName: String,
+    val about: String,
+    val picture: String,
+    val nip05: String,
+    val website: String,
 )
 
 data class WindowInfo(val instance: String, val nappId: String, val name: String, val action: String)
@@ -74,6 +89,7 @@ fun parseState(json: String): LauncherState {
             val pathsArr = n.optJSONArray("paths") ?: JSONArray()
             Napp(
                 id = n.optString("id"),
+                d = n.optString("d"),
                 name = n.optString("name"),
                 description = n.optString("description"),
                 icon = n.optString("icon"),
@@ -85,6 +101,10 @@ fun parseState(json: String): LauncherState {
                 requires = (0 until (n.optJSONArray("requires")?.length() ?: 0)).map {
                     n.optJSONArray("requires")!!.getString(it)
                 },
+                servers = (0 until (n.optJSONArray("servers")?.length() ?: 0)).map {
+                    n.optJSONArray("servers")!!.getString(it)
+                },
+                createdAt = n.optLong("created_at"),
                 // backend carries newer event object here; presence is flag.
                 updateAvailable = n.has("updateAvailable") && !n.isNull("updateAvailable"),
                 paths = (0 until pathsArr.length()).map {
@@ -174,4 +194,57 @@ class WindowSpec(json: String) {
         themeVars = o.optString("themeVars", "{}")
         storage = o.optString("storage", "{}").ifBlank { "{}" }
     }
+}
+
+fun parseProfile(json: String): ProfileDetail? {
+    if (json.isBlank()) return null
+    return try {
+        val o = JSONObject(json)
+        ProfileDetail(
+            pubkey = o.optString("pubkey"),
+            npub = o.optString("npub"),
+            name = o.optString("name"),
+            displayName = o.optString("displayName"),
+            shortName = o.optString("shortName"),
+            about = o.optString("about"),
+            picture = o.optString("picture"),
+            nip05 = o.optString("nip05"),
+            website = o.optString("website"),
+        )
+    } catch (_: Exception) { null }
+}
+
+fun parseNapps(json: String): List<Napp> {
+    if (json.isBlank()) return listOf()
+    return try {
+        val arr = JSONArray(json)
+        (0 until arr.length()).map { i ->
+            val n = arr.getJSONObject(i)
+            val pathsArr = n.optJSONArray("paths") ?: JSONArray()
+            Napp(
+                id = n.optString("id"),
+                d = n.optString("d"),
+                name = n.optString("name"),
+                description = n.optString("description"),
+                icon = n.optString("icon"),
+                author = n.optString("author").trim('"'),
+                authorName = n.optString("authorName"),
+                actions = (0 until (n.optJSONArray("actions")?.length() ?: 0)).map {
+                    n.optJSONArray("actions")!!.getString(it)
+                },
+                requires = (0 until (n.optJSONArray("requires")?.length() ?: 0)).map {
+                    n.optJSONArray("requires")!!.getString(it)
+                },
+                servers = (0 until (n.optJSONArray("servers")?.length() ?: 0)).map {
+                    n.optJSONArray("servers")!!.getString(it)
+                },
+                createdAt = n.optLong("created_at"),
+                updateAvailable = n.has("updateAvailable") && !n.isNull("updateAvailable"),
+                paths = (0 until pathsArr.length()).map {
+                    val q = pathsArr.getJSONObject(it)
+                    NappPath(q.optString("path"), q.optString("sha256"))
+                },
+            )
+        }
+    } catch (_: Exception) { listOf() }
 }

@@ -156,6 +156,9 @@ func main() {
 
 func setTab(t int) {
 	ui.tab = t
+	if t != tabExtra {
+		clearExtraTab()
+	}
 	if gioWin != nil {
 		gioWin.Invalidate()
 	}
@@ -259,9 +262,24 @@ func gioMain() {
 		cardBtns            []widget.Clickable
 		uninstBtns          []widget.Clickable
 		installedUpdateBtns []widget.Clickable
+		installedOpenBtns   []widget.Clickable
+		installedAuthorBtns []widget.Clickable
 		actionBtns          []widget.Clickable
 		updateBtns          []widget.Clickable
+		discoCardBtns       []widget.Clickable
+		discoOpenBtns       []widget.Clickable
+		discoAuthorBtns     []widget.Clickable
 		checkUpdBtn         widget.Clickable
+		tabExtraBtn         widget.Clickable
+		detailOpenBtn       widget.Clickable
+		detailPrimaryBtn    widget.Clickable
+		detailUpdateBtn     widget.Clickable
+		detailAuthorBtn     widget.Clickable
+		profileList         widget.List
+		profileCardBtns     []widget.Clickable
+		profileOpenBtns     []widget.Clickable
+		profileActionBtns   []widget.Clickable
+		profileUpdateBtns   []widget.Clickable
 		promptBtns          promptButtons
 		optBtns             []widget.Clickable
 
@@ -282,6 +300,7 @@ func gioMain() {
 	discoveryList.Axis = layout.Vertical
 	devList.Axis = layout.Vertical
 	windowsList.Axis = layout.Vertical
+	profileList.Axis = layout.Vertical
 	relaysEd.SetText(strings.Join(backend.Relays(), "\n"))
 
 	var ops op.Ops
@@ -378,16 +397,19 @@ func gioMain() {
 					return layoutLogin(gtx, th, &loginEd, &loginBtn, st.LoginErr)
 				case backend.PhaseMain:
 					if tabWindowsBtn.Clicked(gtx) {
-						setTab(0)
+						setTab(tabWindows)
 					}
 					if tabNappsBtn.Clicked(gtx) {
-						setTab(1)
+						setTab(tabInstalled)
 					}
 					if tabDiscoBtn.Clicked(gtx) {
-						setTab(2)
+						setTab(tabDiscovery)
 					}
 					if devEnabled && tabDevBtn.Clicked(gtx) {
-						setTab(3)
+						setTab(tabDev)
+					}
+					if extraTabState != nil && tabExtraBtn.Clicked(gtx) {
+						setTab(tabExtra)
 					}
 					if themeBtn.Clicked(gtx) {
 						toggleTheme()
@@ -408,11 +430,26 @@ func gioMain() {
 					for len(installedUpdateBtns) < len(st.Installed) {
 						installedUpdateBtns = append(installedUpdateBtns, widget.Clickable{})
 					}
+					for len(installedOpenBtns) < len(st.Installed) {
+						installedOpenBtns = append(installedOpenBtns, widget.Clickable{})
+					}
+					for len(installedAuthorBtns) < len(st.Installed) {
+						installedAuthorBtns = append(installedAuthorBtns, widget.Clickable{})
+					}
 					for len(actionBtns) < len(st.Discovery) {
 						actionBtns = append(actionBtns, widget.Clickable{})
 					}
 					for len(updateBtns) < len(st.Discovery) {
 						updateBtns = append(updateBtns, widget.Clickable{})
+					}
+					for len(discoCardBtns) < len(st.Discovery) {
+						discoCardBtns = append(discoCardBtns, widget.Clickable{})
+					}
+					for len(discoOpenBtns) < len(st.Discovery) {
+						discoOpenBtns = append(discoOpenBtns, widget.Clickable{})
+					}
+					for len(discoAuthorBtns) < len(st.Discovery) {
+						discoAuthorBtns = append(discoAuthorBtns, widget.Clickable{})
 					}
 					for len(devOpenBtns) < len(st.Dev) {
 						devOpenBtns = append(devOpenBtns, widget.Clickable{})
@@ -491,15 +528,32 @@ func gioMain() {
 								}
 							}
 						}
-					} else if tab == 1 {
+					} else if tab == tabInstalled {
 						// buttons on top of the card's own click area go
 						// first: a click that hit a button must not also
-						// count as opening the napp.
+						// count as opening the napp page. The author row
+						// goes first of all: it opens a profile, not a napp.
 						acted := false
 						for _, i := range instVis {
-							if installedUpdateBtns[i].Clicked(gtx) {
-								go backend.Update(st.Installed[i].ID)
+							if installedAuthorBtns[i].Clicked(gtx) {
+								openProfileTab(st.Installed[i].Author.Hex())
 								acted = true
+							}
+						}
+						if !acted {
+							for _, i := range instVis {
+								if installedOpenBtns[i].Clicked(gtx) {
+									backend.Launch(st.Installed[i])
+									acted = true
+								}
+							}
+						}
+						if !acted {
+							for _, i := range instVis {
+								if installedUpdateBtns[i].Clicked(gtx) {
+									go backend.Update(st.Installed[i].ID)
+									acted = true
+								}
 							}
 						}
 						if !acted {
@@ -513,28 +567,142 @@ func gioMain() {
 						if !acted {
 							for _, i := range instVis {
 								if cardBtns[i].Clicked(gtx) {
-									backend.Launch(st.Installed[i])
+									openNappTab(st.Installed[i])
 								}
 							}
 						}
 						if checkUpdBtn.Clicked(gtx) && !st.UpdateCheckRunning {
 							go backend.CheckForUpdates()
 						}
-					} else if tab == 2 {
+					} else if tab == tabDiscovery {
+						acted := false
 						for _, i := range vis {
-							if actionBtns[i].Clicked(gtx) {
-								n := st.Discovery[i]
-								if busy[n.ID] {
-									continue
+							if discoAuthorBtns[i].Clicked(gtx) {
+								openProfileTab(st.Discovery[i].Author.Hex())
+								acted = true
+							}
+						}
+						if !acted {
+							for _, i := range vis {
+								if installedSet[st.Discovery[i].ID] && discoOpenBtns[i].Clicked(gtx) {
+									if n, ok := backend.InstalledNapp(st.Discovery[i].ID); ok {
+										backend.Launch(n)
+									} else {
+										backend.Launch(st.Discovery[i])
+									}
+									acted = true
 								}
-								if installedSet[n.ID] {
+							}
+						}
+						if !acted {
+							for _, i := range vis {
+								if actionBtns[i].Clicked(gtx) {
+									n := st.Discovery[i]
+									if busy[n.ID] {
+										continue
+									}
+									if installedSet[n.ID] {
+										go backend.Uninstall(n.ID)
+									} else {
+										go backend.Install(n)
+									}
+									acted = true
+								}
+								if updateBtns[i].Clicked(gtx) {
+									go backend.Install(st.Discovery[i])
+									acted = true
+								}
+							}
+						}
+						if !acted {
+							for _, i := range vis {
+								if discoCardBtns[i].Clicked(gtx) {
+									openNappTab(st.Discovery[i])
+								}
+							}
+						}
+					} else if tab == tabExtra && extraTabState != nil {
+						if extraTabState.kind == "profile" {
+							if cp := cachedProfile(extraTabState.pubkey); cp != nil && cp.ShortName != "" {
+								extraTabState.title = truncate(cp.ShortName, 18)
+							}
+						}
+						if extraTabState.kind == "napp" {
+							n := detailNapp(extraTabState)
+							if detailAuthorBtn.Clicked(gtx) && n.Author.Hex() != "" {
+								openProfileTab(n.Author.Hex())
+							} else if detailOpenBtn.Clicked(gtx) && installedSet[n.ID] {
+								if in, ok := backend.InstalledNapp(n.ID); ok {
+									backend.Launch(in)
+								} else {
+									backend.Launch(n)
+								}
+							} else if detailPrimaryBtn.Clicked(gtx) {
+								if busy[n.ID] {
+								} else if installedSet[n.ID] {
 									go backend.Uninstall(n.ID)
+								} else if dn, ok := backend.DiscoveredNapp(n.ID); ok {
+									go backend.Install(dn)
 								} else {
 									go backend.Install(n)
 								}
+							} else if detailUpdateBtn.Clicked(gtx) {
+								go backend.Update(n.ID)
 							}
-							if updateBtns[i].Clicked(gtx) {
-								go backend.Install(st.Discovery[i])
+						} else {
+							// profile tab: size buttons to its napps list
+							pan, _, _ := cachedAuthorNapps(extraTabState.pubkey)
+							for len(profileCardBtns) < len(pan) {
+								profileCardBtns = append(profileCardBtns, widget.Clickable{})
+								profileOpenBtns = append(profileOpenBtns, widget.Clickable{})
+								profileActionBtns = append(profileActionBtns, widget.Clickable{})
+								profileUpdateBtns = append(profileUpdateBtns, widget.Clickable{})
+							}
+							pacted := false
+							for i, pn := range pan {
+								if i >= len(profileOpenBtns) {
+									break
+								}
+								if installedSet[pn.ID] && profileOpenBtns[i].Clicked(gtx) {
+									if in, ok := backend.InstalledNapp(pn.ID); ok {
+										backend.Launch(in)
+									} else {
+										backend.Launch(pn)
+									}
+									pacted = true
+								}
+							}
+							if !pacted {
+								for i, pn := range pan {
+									if i >= len(profileActionBtns) {
+										break
+									}
+									if profileActionBtns[i].Clicked(gtx) {
+										if busy[pn.ID] {
+											continue
+										}
+										if installedSet[pn.ID] {
+											go backend.Uninstall(pn.ID)
+										} else {
+											go backend.Install(pn)
+										}
+										pacted = true
+									}
+									if i < len(profileUpdateBtns) && profileUpdateBtns[i].Clicked(gtx) {
+										go backend.Install(pn)
+										pacted = true
+									}
+								}
+							}
+							if !pacted {
+								for i, pn := range pan {
+									if i >= len(profileCardBtns) {
+										break
+									}
+									if profileCardBtns[i].Clicked(gtx) {
+										openNappTab(pn)
+									}
+								}
 							}
 						}
 					} else {
@@ -626,6 +794,23 @@ func gioMain() {
 						st,
 						installedSet,
 						busy,
+
+						extraTabState,
+						&tabExtraBtn,
+						installedOpenBtns,
+						installedAuthorBtns,
+						discoCardBtns,
+						discoOpenBtns,
+						discoAuthorBtns,
+						&detailOpenBtn,
+						&detailPrimaryBtn,
+						&detailUpdateBtn,
+						&detailAuthorBtn,
+						&profileList,
+						profileCardBtns,
+						profileOpenBtns,
+						profileActionBtns,
+						profileUpdateBtns,
 					)
 				default:
 					return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {

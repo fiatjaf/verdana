@@ -237,6 +237,28 @@ func Launch(id string) { backend.LaunchByID(id) }
 // leading dashes: {"surface":"#fff","text":"#000",…}.
 func SetTheme(name string, varsJSON string) { backend.SetTheme(name, varsJSON) }
 
+// Profile returns what the launcher knows about a pubkey as JSON:
+// pubkey, npub, name, displayName, shortName, about, picture, nip05,
+// website. Blocks with its own timeout; call it off the main thread.
+func Profile(pubkeyHex string) string {
+	data, err := json.Marshal(backend.FetchProfileDetail(pubkeyHex))
+	if err != nil {
+		return "{}"
+	}
+	return string(data)
+}
+
+// AuthorNapps lists the kind:35130 napps an author published as JSON: from
+// the author's own write relays plus the launcher's discovery relays.
+// Blocks with its own timeout; call it off the main thread.
+func AuthorNapps(pubkeyHex string) string {
+	data, err := json.Marshal(backend.FetchAuthorNapps(pubkeyHex))
+	if err != nil {
+		return "[]"
+	}
+	return string(data)
+}
+
 // NappIcon is the bytes of a napp's icon, from disk when it is installed and
 // from its author's blossom servers otherwise.
 func NappIcon(id string) ([]byte, error) {

@@ -209,21 +209,63 @@ fun LauncherScreen(activity: MainActivity, st: LauncherState) {
     var relaysEd by remember(st.relays.hashCode()) { mutableStateOf(st.relays.joinToString("\n")) }
     var discoveryFilter by remember { mutableStateOf("") }
     var installedFilter by remember { mutableStateOf("") }
+    // ephemeral detail tabs: vanish the moment any other tab is picked
+    var detailNapp by remember { mutableStateOf<Napp?>(null) }
+    var detailProfile by remember { mutableStateOf<String?>(null) }
+
+    fun pickTab(t: Int) {
+        tab = t
+        detailNapp = null
+        detailProfile = null
+    }
+
+    fun openNapp(n: Napp) {
+        detailNapp = n
+        detailProfile = null
+    }
+
+    fun openProfile(pubkeyHex: String) {
+        if (pubkeyHex.isBlank()) return
+        detailProfile = pubkeyHex
+        detailNapp = null
+    }
+
+    // keep the detail napp fresh (install/uninstall/update reflect immediately)
+    val freshDetail = detailNapp?.let { d ->
+        st.installed.firstOrNull { it.id == d.id }
+            ?: st.discovery.firstOrNull { it.id == d.id }
+            ?: d
+    }
 
     Column(Modifier.fillMaxSize().padding(16.dp)) {
-        // tabs
+        // tabs, with the ephemeral one at the end
         Row {
-            TabChip("Installed", tab == 0, theme) { tab = 0 }
+            TabChip("Installed", tab == 0 && detailNapp == null && detailProfile == null, theme) { pickTab(0) }
             Spacer(Modifier.width(8.dp))
-            TabChip("Discovery", tab == 1, theme) { tab = 1 }
+            TabChip("Discovery", tab == 1 && detailNapp == null && detailProfile == null, theme) { pickTab(1) }
+            if (freshDetail != null) {
+                Spacer(Modifier.width(8.dp))
+                TabChip(freshDetail.name.ifBlank { freshDetail.id }.take(18), true, theme) { }
+            } else if (detailProfile != null) {
+                Spacer(Modifier.width(8.dp))
+                TabChip("Profile", true, theme) { }
+            }
         }
 
         Spacer(Modifier.height(12.dp))
 
-        if (tab == 0) {
-            InstalledTab(activity, st, theme, installedFilter, { installedFilter = it })
-        } else {
-            DiscoveryTab(activity, st, theme, relaysEd, { relaysEd = it }, discoveryFilter, { discoveryFilter = it })
+        when {
+            freshDetail != null -> NappDetailScreen(activity, st, theme, freshDetail,
+                onBack = { detailNapp = null },
+                onAuthor = { openProfile(it) },
+                onOpenNapp = { openNapp(it) })
+            detailProfile != null -> AuthorProfileDetailScreen(activity, st, theme, detailProfile!!,
+                onBack = { detailProfile = null },
+                onOpenNapp = { openNapp(it) })
+            tab == 0 -> InstalledTab(activity, st, theme, installedFilter, { installedFilter = it },
+                onDetail = { openNapp(it) }, onAuthor = { openProfile(it) })
+            else -> DiscoveryTab(activity, st, theme, relaysEd, { relaysEd = it }, discoveryFilter, { discoveryFilter = it },
+                onDetail = { openNapp(it) }, onAuthor = { openProfile(it) })
         }
     }
 }
@@ -359,7 +401,8 @@ private fun TabChip(label: String, active: Boolean, theme: Theme, onClick: () ->
 }
 
 @Composable
-private fun InstalledTab(activity: MainActivity, st: LauncherState, theme: Theme, filter: String, setFilter: (String) -> Unit) {
+private fun InstalledTab(activity: MainActivity, st: LauncherState, theme: Theme, filter: String, setFilter: (String) -> Unit,
+    onDetail: (Napp) -> Unit, onAuthor: (String) -> Unit) {
     Column(Modifier.fillMaxSize()) {
         // the filter box, matching on name, description, author pubkey and
         // author name (cards stay keyed by id either way)
@@ -394,7 +437,10 @@ private fun InstalledTab(activity: MainActivity, st: LauncherState, theme: Theme
                 val busy = st.busy.contains(napp.id)
                 NappCard(
                     activity, napp, theme,
-                    onOpen = { activity.launch(napp.id) },
+                    onDetail = { onDetail(napp) },
+                    onAuthor = { onAuthor(napp.author) },
+                    onLaunch = { activity.launch(napp.id) },
+                    showOpen = true,
                     primaryLabel = if (busy) "Working…" else "Uninstall",
                     onPrimary = { activity.uninstall(napp.id) },
                     secondaryLabel = if (napp.updateAvailable) "Update" else null,
@@ -423,6 +469,8 @@ private fun DiscoveryTab(
     setRelaysEd: (String) -> Unit,
     filter: String,
     setFilter: (String) -> Unit,
+    onDetail: (Napp) -> Unit,
+    onAuthor: (String) -> Unit,
 ) {
     // the filter matches on name, description, author pubkey and author
     // name (see matchesQuery); applied to the snapshot's list, cards stay
@@ -484,6 +532,10 @@ private fun DiscoveryTab(
             val busy = st.busy.contains(napp.id)
             NappCard(
                 activity, napp, theme,
+                onDetail = { onDetail(napp) },
+                onAuthor = { onAuthor(napp.author) },
+                onLaunch = { activity.launch(napp.id) },
+                showOpen = installed,
                 primaryLabel = when {
                     busy -> "Working…"
                     installed -> "Uninstall"
@@ -506,10 +558,13 @@ private fun NappCard(
     onPrimary: () -> Unit,
     secondaryLabel: String? = null,
     onSecondary: (() -> Unit)? = null,
-    // onOpen makes the whole card tappable to open the napp (installed cards
-    // only, so there is no Open button at all); buttons inside keep eating
-    // their own taps.
-    onOpen: (() -> Unit)? = null,
+    // onDetail makes the whole card tappable to open the napp page; onAuthor
+    // is the only tap that leads to a profile instead. onLaunch + showOpen
+    // draw the Open button in its own color.
+    onDetail: (() -> Unit)? = null,
+    onAuthor: (() -> Unit)? = null,
+    onLaunch: (() -> Unit)? = null,
+    showOpen: Boolean = false,
 ) {
     // icons load off the main thread, keyed by blob hash like the desktop
     val hash = napp.iconHash()
@@ -530,7 +585,7 @@ private fun NappCard(
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
             .background(theme.card)
-            .clickable(enabled = onOpen != null) { onOpen?.invoke() }
+            .clickable(enabled = onDetail != null) { onDetail?.invoke() }
             .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -563,8 +618,34 @@ private fun NappCard(
                     }
                 }
             }
+            if (napp.author.isNotBlank()) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .padding(top = 6.dp)
+                        .clickable(enabled = onAuthor != null) { onAuthor?.invoke() },
+                ) {
+                    Text(
+                        napp.authorName.ifBlank { napp.author.take(16) + "…" }.take(40),
+                        color = theme.muted,
+                        fontSize = 11.sp,
+                        maxLines = 1,
+                    )
+                }
+            }
         }
         Spacer(Modifier.width(8.dp))
+        if (showOpen && onLaunch != null) {
+            Button(
+                onClick = onLaunch,
+                enabled = primaryLabel != "Working…",
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = theme.suggestBg, contentColor = theme.suggestFg),
+            ) {
+                Text("Open", fontSize = 13.sp)
+            }
+            Spacer(Modifier.width(6.dp))
+        }
         if (secondaryLabel != null && onSecondary != null) {
             Button(
                 onClick = onSecondary,
@@ -909,6 +990,167 @@ private fun PromptScopes(theme: Theme, onAnswer: (Boolean, String) -> Unit) {
                     ) {
                         Text(choice.label, fontSize = 13.sp, maxLines = 1)
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun NappDetailScreen(
+    activity: MainActivity,
+    st: LauncherState,
+    theme: Theme,
+    napp: Napp,
+    onBack: () -> Unit,
+    onAuthor: (String) -> Unit,
+    onOpenNapp: (Napp) -> Unit,
+) {
+    val installed = st.installed.any { it.id == napp.id }
+    val busy = st.busy.contains(napp.id)
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState()),
+    ) {
+        TextButton(onClick = onBack, contentPadding = PaddingValues(0.dp)) {
+            Text("← Back", color = theme.muted, fontSize = 13.sp)
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            val hash = napp.iconHash()
+            var bitmap by remember(napp.id, hash) { mutableStateOf(iconCache[hash]) }
+            LaunchedEffect(napp.id, hash) {
+                if (bitmap == null && hash.isNotBlank()) {
+                    activity.loadIcon(napp) { bytes ->
+                        val img = bytes?.decodeBitmap()
+                        if (img != null) iconCache[hash] = img
+                        bitmap = img
+                    }
+                }
+            }
+            NappIcon(bitmap, theme, 56)
+            Spacer(Modifier.width(12.dp))
+            Text(napp.name.ifBlank { napp.id }, fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.titleLarge, color = theme.fg, modifier = Modifier.weight(1f))
+        }
+        if (napp.description.isNotBlank()) {
+            Spacer(Modifier.height(8.dp))
+            Text(napp.description, color = theme.subtle, style = MaterialTheme.typography.bodyMedium)
+        }
+        if (napp.author.isNotBlank()) {
+            Spacer(Modifier.height(10.dp))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.clickable { onAuthor(napp.author) },
+            ) {
+                Text(napp.authorName.ifBlank { napp.author.take(16) + "…" },
+                    color = theme.muted, fontSize = 13.sp)
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (installed) {
+                Button(
+                    onClick = { activity.launch(napp.id) },
+                    colors = ButtonDefaults.buttonColors(containerColor = theme.suggestBg, contentColor = theme.suggestFg),
+                ) { Text("Open") }
+                Spacer(Modifier.width(8.dp))
+            }
+            Button(
+                onClick = { if (installed) activity.uninstall(napp.id) else activity.install(napp.id) },
+                enabled = !busy,
+                colors = if (installed) ButtonDefaults.buttonColors(containerColor = theme.chipBg, contentColor = theme.chipFg)
+                else ButtonDefaults.buttonColors(),
+            ) { Text(if (busy) "Working…" else if (installed) "Uninstall" else "Install") }
+            if (installed && napp.updateAvailable) {
+                Spacer(Modifier.width(8.dp))
+                Button(onClick = { activity.update(napp.id) }) { Text("Update") }
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        DetailRow("ID", napp.id, theme)
+        if (napp.d.isNotBlank()) DetailRow("d", napp.d, theme)
+        DetailRow("Author", napp.author, theme)
+        if (napp.actions.any { it.isNotBlank() }) DetailRow("Actions", napp.actions.filter { it.isNotBlank() }.joinToString(", "), theme)
+        if (napp.requires.isNotEmpty()) DetailRow("Requires", napp.requires.joinToString(", "), theme)
+        if (napp.servers.isNotEmpty()) DetailRow("Servers", napp.servers.joinToString(", "), theme)
+        if (napp.icon.isNotBlank()) DetailRow("Icon", napp.icon, theme)
+        if (napp.paths.isNotEmpty()) DetailRow("Files", napp.paths.joinToString(", ") { it.path }, theme)
+    }
+}
+
+@Composable
+private fun DetailRow(label: String, value: String, theme: Theme) {
+    if (value.isBlank()) return
+    Spacer(Modifier.height(4.dp))
+    Row {
+        Text("$label: ", color = theme.subtle, fontSize = 13.sp)
+        Text(value, color = theme.fg, fontSize = 13.sp, modifier = Modifier.weight(1f))
+    }
+}
+
+@Composable
+fun AuthorProfileDetailScreen(
+    activity: MainActivity,
+    st: LauncherState,
+    theme: Theme,
+    pubkeyHex: String,
+    onBack: () -> Unit,
+    onOpenNapp: (Napp) -> Unit,
+) {
+    var profile by remember(pubkeyHex) { mutableStateOf<ProfileDetail?>(null) }
+    var napps by remember(pubkeyHex) { mutableStateOf<List<Napp>?>(null) }
+    LaunchedEffect(pubkeyHex) {
+        activity.loadProfile(pubkeyHex) { profile = it }
+        activity.loadAuthorNapps(pubkeyHex) { napps = it }
+    }
+    Column(Modifier.fillMaxSize()) {
+        TextButton(onClick = onBack, contentPadding = PaddingValues(0.dp)) {
+            Text("← Back", color = theme.muted, fontSize = 13.sp)
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Avatar(profile?.picture ?: "", theme, 56)
+            Spacer(Modifier.width(12.dp))
+            Text(
+                (profile?.shortName?.ifBlank { null } ?: pubkeyHex),
+                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.titleLarge,
+                color = theme.fg,
+                modifier = Modifier.weight(1f),
+                maxLines = 2,
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        Column(Modifier.verticalScroll(rememberScrollState()).weight(1f, fill = false)) {
+            if (!profile?.name.isNullOrBlank()) DetailRow("Name", profile!!.name, theme)
+            if (!profile?.about.isNullOrBlank()) DetailRow("About", profile!!.about, theme)
+            if (!profile?.nip05.isNullOrBlank()) DetailRow("NIP-05", profile!!.nip05, theme)
+            if (!profile?.website.isNullOrBlank()) DetailRow("Website", profile!!.website, theme)
+            if (!profile?.npub.isNullOrBlank()) DetailRow("npub", profile!!.npub, theme)
+            DetailRow("Pubkey", pubkeyHex, theme)
+            Spacer(Modifier.height(12.dp))
+            Text("Published napps", color = theme.subtle, fontSize = 13.sp, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
+            Spacer(Modifier.height(6.dp))
+            when {
+                napps == null -> Text("Fetching napps…", color = theme.muted, fontSize = 13.sp)
+                napps!!.isEmpty() -> Text("No napps found on their relays.", color = theme.muted, fontSize = 13.sp)
+                else -> napps!!.forEach { n ->
+                    val installed = st.installed.any { it.id == n.id }
+                    val busy = st.busy.contains(n.id)
+                    NappCard(
+                        activity, n, theme,
+                        onDetail = { onOpenNapp(n) },
+                        onAuthor = null,
+                        onLaunch = { activity.launch(n.id) },
+                        showOpen = installed,
+                        primaryLabel = if (busy) "Working…" else if (installed) "Uninstall" else "Install",
+                        onPrimary = { if (installed) activity.uninstall(n.id) else activity.install(n.id) },
+                        secondaryLabel = if (installed && n.updateAvailable) "Update" else null,
+                        onSecondary = { activity.install(n.id) },
+                    )
+                    Spacer(Modifier.height(8.dp))
                 }
             }
         }

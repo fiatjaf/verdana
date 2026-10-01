@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"image"
 	"strings"
 	"verdana/backend"
@@ -330,6 +329,23 @@ func layoutMain(
 	st backend.State,
 	installedSet,
 	busy map[string]bool,
+
+	extra *extraTab,
+	extraBtn *widget.Clickable,
+	installedOpenBtns,
+	installedAuthorBtns,
+	discoCardBtns,
+	discoOpenBtns,
+	discoAuthorBtns []widget.Clickable,
+	detailOpenBtn,
+	detailPrimaryBtn,
+	detailUpdateBtn,
+	detailAuthorBtn *widget.Clickable,
+	profileList *widget.List,
+	profileCardBtns,
+	profileOpenBtns,
+	profileActionBtns,
+	profileUpdateBtns []widget.Clickable,
 ) layout.Dimensions {
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -337,7 +353,7 @@ func layoutMain(
 		}),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layoutTabs(gtx, th, tabWindowsBtn, tabNappsBtn, tabDiscoBtn, tabDevBtn, tab, len(st.Installed), len(st.Discovery))
+			return layoutTabs(gtx, th, tabWindowsBtn, tabNappsBtn, tabDiscoBtn, tabDevBtn, tab, len(st.Installed), len(st.Discovery), extra, extraBtn)
 		}),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
@@ -350,11 +366,17 @@ func layoutMain(
 					shortcutDelBtns, shortcutEditBtns, st)
 			}
 			if tab == 1 {
-				return layoutNappsTab(gtx, th, installedList, installedFilterEd, cardBtns, uninstBtns, installedUpdateBtns, checkUpdBtn, instVis, st)
+				return layoutNappsTab(gtx, th, installedList, installedFilterEd, cardBtns, uninstBtns, installedUpdateBtns, installedOpenBtns, installedAuthorBtns, checkUpdBtn, instVis, st)
 			}
 			if tab == 2 {
 				return layoutDiscoveryTab(gtx, th, discoveryList, relaysEd, filterEd, fetchBtn, actionBtns,
-					updateBtns, vis, st.FetchErr, st.Fetching, st.Discovery, installedSet, busy)
+					updateBtns, discoCardBtns, discoOpenBtns, discoAuthorBtns, vis, st.FetchErr, st.Fetching, st.Discovery, installedSet, busy)
+			}
+			if tab == 4 && extra != nil {
+				if extra.kind == "napp" {
+					return layoutNappDetail(gtx, th, extra, detailOpenBtn, detailPrimaryBtn, detailUpdateBtn, detailAuthorBtn, installedSet, busy, st)
+				}
+				return layoutProfileDetail(gtx, th, extra, profileList, profileCardBtns, profileOpenBtns, profileActionBtns, profileUpdateBtns, installedSet, busy)
 			}
 			return layoutDevTab(gtx, th, devList, devURLed, devPathEd, loadURLBtn, browseBtn, loadFolderBtn,
 				devOpenBtns, devUnloadBtns, devPublishBtns, st)
@@ -381,6 +403,8 @@ func layoutTabs(
 	tab,
 	nInstalled,
 	nDiscovery int,
+	extra *extraTab,
+	extraBtn *widget.Clickable,
 ) layout.Dimensions {
 	tabBtn := func(gtx layout.Context, btn *widget.Clickable, label string, active bool) layout.Dimensions {
 		pointer.CursorPointer.Add(gtx.Ops)
@@ -412,6 +436,16 @@ func layoutTabs(
 			layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				return tabBtn(gtx, devBtn, "Dev", tab == 3)
+			}),
+		)
+	}
+	// the ephemeral detail tab lives at the end and vanishes the moment
+	// any other tab is picked
+	if extra != nil && extraBtn != nil {
+		children = append(children,
+			layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return tabBtn(gtx, extraBtn, extra.title, tab == 4)
 			}),
 		)
 	}
@@ -715,6 +749,8 @@ func layoutNappsTab(
 	cardBtns,
 	uninstBtns []widget.Clickable,
 	installedUpdateBtns []widget.Clickable,
+	openBtns,
+	authorBtns []widget.Clickable,
 	checkUpdBtn *widget.Clickable,
 	vis []int,
 	st backend.State,
@@ -765,12 +801,18 @@ func layoutNappsTab(
 				if row < len(uninstBtns) {
 					uninstBtn = &uninstBtns[row]
 				}
-				// the card itself opens the napp: no open button
-				var updateBtn *widget.Clickable
+				// the card opens the napp page; Open launches it
+				var updateBtn, openBtn, authorBtn *widget.Clickable
 				if row < len(installedUpdateBtns) && st.Installed[row].UpdateAvailable != nil {
 					updateBtn = &installedUpdateBtns[row]
 				}
-				return renderNappCard(gtx, th, cardBtn, uninstBtn, updateBtn, "Uninstall", "Update", st.Installed[row])
+				if row < len(openBtns) {
+					openBtn = &openBtns[row]
+				}
+				if row < len(authorBtns) {
+					authorBtn = &authorBtns[row]
+				}
+				return renderNappCard(gtx, th, cardBtn, authorBtn, openBtn, uninstBtn, updateBtn, "Uninstall", "Update", st.Installed[row])
 			})
 		}),
 	)
@@ -785,6 +827,9 @@ func layoutDiscoveryTab(
 	fetchBtn *widget.Clickable,
 	actionBtns,
 	updateBtns []widget.Clickable,
+	cardBtns,
+	openBtns,
+	authorBtns []widget.Clickable,
 	vis []int,
 	fetchErr string,
 	fetching bool,
@@ -870,7 +915,17 @@ func layoutDiscoveryTab(
 				if installedSet[n.ID] && n.UpdateAvailable != nil {
 					updLabel = "Update"
 				}
-				return renderNappCard(gtx, th, nil, btn, updBtn, label, updLabel, n)
+				var cardBtn, openBtn, authorBtn *widget.Clickable
+				if row < len(cardBtns) {
+					cardBtn = &cardBtns[row]
+				}
+				if row < len(openBtns) && installedSet[n.ID] {
+					openBtn = &openBtns[row]
+				}
+				if row < len(authorBtns) {
+					authorBtn = &authorBtns[row]
+				}
+				return renderNappCard(gtx, th, cardBtn, authorBtn, openBtn, btn, updBtn, label, updLabel, n)
 			})
 		}),
 	)
@@ -979,7 +1034,7 @@ func layoutDevTab(
 				if i < len(publishBtns) && backend.DevSourceKind(st.Dev[i].ID) == "folder" {
 					publishBtn = &publishBtns[i]
 				}
-				return renderNappCard(gtx, th, openBtn, publishBtn, unloadBtn, "Publish", "Unload", st.Dev[i])
+				return renderNappCard(gtx, th, openBtn, nil, nil, publishBtn, unloadBtn, "Publish", "Unload", st.Dev[i])
 			})
 		}),
 	)
@@ -1161,21 +1216,36 @@ func editorBox(gtx layout.Context, th *material.Theme, ed *widget.Editor, hint s
 }
 
 // renderNappCard draws one napp row: icon, name, description, author and the
-// action buttons. When cardBtn is not nil the whole card is clickable (the
-// installed tab taps it to open the napp); buttons drawn on top of the card's
-// area keep working, so the frame handler must check which of them fired
-// before acting on the card itself.
+// action buttons. When cardBtn is not nil the whole card is clickable (it
+// opens the napp's page); authorBtn alone opens the author's profile page.
+// Buttons drawn on top of the card's area keep working, so the frame handler
+// must check which of them fired before acting on the card itself.
 func renderNappCard(
 	gtx layout.Context,
 	th *material.Theme,
 	cardBtn,
+	authorBtn,
+	openBtn,
 	btn,
 	secondBtn *widget.Clickable,
 	btnLabel,
 	secondLabel string,
 	napp backend.Napp,
 ) layout.Dimensions {
-	authorName, authorPic := napp.AuthorProfile(context.Background())
+	authorName, authorPic := "", ""
+	if napp.Author.Hex() != "" {
+		if p := cachedProfile(napp.Author.Hex()); p != nil && p.ShortName != "" {
+			authorName, authorPic = p.ShortName, p.Picture
+		} else {
+			authorName = napp.AuthorShortName()
+			if authorName == "" {
+				authorName = napp.Author.Hex()
+				if len(authorName) > 16 {
+					authorName = authorName[:16] + "…"
+				}
+			}
+		}
+	}
 	return layout.Inset{Bottom: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		sz := gtx.Constraints.Max
 		macro := op.Record(gtx.Ops)
@@ -1230,21 +1300,45 @@ func renderNappCard(
 							})
 						}),
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							if authorName == "" {
+								return layout.Dimensions{}
+							}
 							return layout.Inset{Top: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-								return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-									layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-										return avatar(gtx, authorPic, 18)
-									}),
-									layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
-									layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-										c := material.Caption(th, authorName)
-										c.Color = currentTheme().muted
-										return c.Layout(gtx)
-									}),
-								)
+								inner := func(gtx layout.Context) layout.Dimensions {
+									return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+											return avatar(gtx, authorPic, 18)
+										}),
+										layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
+										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+											c := material.Caption(th, authorName)
+											c.Color = currentTheme().muted
+											return c.Layout(gtx)
+										}),
+									)
+								}
+								if authorBtn == nil {
+									return inner(gtx)
+								}
+								pointer.CursorPointer.Add(gtx.Ops)
+								return authorBtn.Layout(gtx, inner)
 							})
 						}),
 					)
+				}),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					if openBtn == nil {
+						return layout.Dimensions{}
+					}
+					return layout.Inset{Left: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						pointer.CursorPointer.Add(gtx.Ops)
+						b := material.Button(th, openBtn, "Open")
+						b.Background = currentTheme().suggestBg
+						b.Color = currentTheme().suggestFg
+						b.TextSize = unit.Sp(13)
+						b.Inset = layout.UniformInset(unit.Dp(8))
+						return b.Layout(gtx)
+					})
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					if secondBtn != nil && secondLabel != "" {

@@ -91,6 +91,28 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    fun loadProfile(pubkeyHex: String, onReady: (ProfileDetail?) -> Unit) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            val p = try {
+                parseProfile(Mobile.profile(pubkeyHex))
+            } catch (e: Exception) {
+                null
+            }
+            withContext(Dispatchers.Main) { onReady(p) }
+        }
+    }
+
+    fun loadAuthorNapps(pubkeyHex: String, onReady: (List<Napp>) -> Unit) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            val list = try {
+                parseNapps(Mobile.authorNapps(pubkeyHex))
+            } catch (e: Exception) {
+                listOf()
+            }
+            withContext(Dispatchers.Main) { onReady(list) }
+        }
+    }
+
     // ─── the tree ────────────────────────────────────────────────────
 
     @androidx.compose.runtime.Composable
