@@ -257,7 +257,9 @@ func napIncChannelClose(c *napCall) {
 	}
 	delete(incChannels, ch.id)
 	incMu.Unlock()
-	ch.other(c.ci).napPush(map[string]any{"type": "inc.channel.closed", "channelId": ch.id, "reason": "closed by peer"})
+	closed := map[string]any{"type": "inc.channel.closed", "channelId": ch.id, "reason": "closed by peer"}
+	ch.a.napPush(closed)
+	ch.b.napPush(closed)
 }
 
 // incForget drops everything a window's session had in INC: its channels

@@ -80,6 +80,10 @@ type resourceResult struct {
 	mime string
 }
 
+type resourceFetch struct {
+	cancel context.CancelFunc
+}
+
 func napResourceInfo(c *napCall) {
 	c.reply(map[string]any{"info": map[string]any{
 		"schemes": []map[string]any{
@@ -94,29 +98,45 @@ func napResourceInfo(c *napCall) {
 	}})
 }
 
-// resourceTrack registers a request id for resource.cancel.
-func (c *napCall) resourceTrack() (context.Context, func()) {
+// resourceTrack registers a request id for resource.cancel. A live id has one
+// owner, so its completion cannot remove another request's registration.
+func (c *napCall) resourceTrack() (context.Context, func(), bool) {
 	ctx, cancel := context.WithCancel(c.ctx)
 	id := string(c.ID)
 	s := c.ci.nap
+	entry := &resourceFetch{cancel: cancel}
 	s.mu.Lock()
-	s.fetches[id] = cancel
-	s.mu.Unlock()
-	return ctx, func() {
-		s.mu.Lock()
-		delete(s.fetches, id)
+	if _, live := s.fetches[id]; live {
 		s.mu.Unlock()
 		cancel()
+		return ctx, func() {}, false
 	}
+	s.fetches[id] = entry
+	s.mu.Unlock()
+	var once sync.Once
+	return ctx, func() {
+		once.Do(func() {
+			s.mu.Lock()
+			if s.fetches[id] == entry {
+				delete(s.fetches, id)
+			}
+			s.mu.Unlock()
+			cancel()
+		})
+	}, true
 }
 
 func napResourceCancel(c *napCall) {
 	s := c.ci.nap
 	s.mu.Lock()
-	cancel := s.fetches[string(c.ID)]
+	id := string(c.ID)
+	entry := s.fetches[id]
+	if entry != nil {
+		delete(s.fetches, id)
+	}
 	s.mu.Unlock()
-	if cancel != nil {
-		cancel()
+	if entry != nil {
+		entry.cancel()
 	}
 }
 
@@ -135,7 +155,11 @@ func napResourceBytes(c *napCall) {
 		c.replyAs("resource.bytes.error", map[string]any{"error": "invalid-request"})
 		return
 	}
-	ctx, done := c.resourceTrack()
+	ctx, done, ok := c.resourceTrack()
+	if !ok {
+		c.replyAs("resource.bytes.error", map[string]any{"error": "duplicate-request"})
+		return
+	}
 	c.async(func(context.Context) {
 		defer done()
 		res, err := fetchResource(ctx, c, r.URL, r.Servers)
@@ -175,7 +199,11 @@ func napResourceBytesMany(c *napCall) {
 		return
 	}
 
-	ctx, done := c.resourceTrack()
+	ctx, done, ok := c.resourceTrack()
+	if !ok {
+		c.replyAs("resource.bytesMany.error", map[string]any{"error": "duplicate-request"})
+		return
+	}
 	c.async(func(context.Context) {
 		defer done()
 		items := make([]map[string]any, len(reqs))

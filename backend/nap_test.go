@@ -436,7 +436,10 @@ func TestNapReloadIsANewSession(t *testing.T) {
 	post(t, b, map[string]any{"type": "inc.subscribe", "id": "s", "topic": "t"})
 	recB.wait(t, "inc.subscribe.result", 1)
 
-	// b reloads: its old subscription must not survive
+	// b reloads: nap.reset drops its old session before the new document is ready.
+	if _, err := napRPC(b, "nap.reset", ""); err != nil {
+		t.Fatal(err)
+	}
 	ready(t, b, recB, 2)
 	post(t, a, map[string]any{"type": "inc.emit", "topic": "t", "payload": 1})
 	post(t, a, map[string]any{"type": "storage.keys", "id": "sync"})
@@ -444,6 +447,39 @@ func TestNapReloadIsANewSession(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 	if got := recB.find("inc.event"); len(got) != 0 {
 		t.Fatalf("subscription survived a reload: %v", got)
+	}
+}
+
+func TestNapDuplicateReadyIsIdempotent(t *testing.T) {
+	setupNapTest(t)
+	ci, rec := openNapplet(t, "duplicate-ready")
+	ready(t, ci, rec, 1)
+
+	post(t, ci, map[string]any{"type": "inc.subscribe", "id": "topic", "topic": "keep"})
+	rec.wait(t, "inc.subscribe.result", 1)
+
+	ci.nap.mu.Lock()
+	gen := ci.nap.gen
+	ctx := ci.nap.ctx
+	ci.nap.grants[PermFetch] = true
+	ci.nap.mu.Unlock()
+
+	post(t, ci, map[string]any{"type": "shell.ready"})
+	// This call confirms the duplicate ready has been dispatched without
+	// depending on an output that an idempotent ready must not produce.
+	post(t, ci, map[string]any{"type": "storage.keys", "id": "after-ready"})
+	rec.wait(t, "storage.keys.result", 1)
+
+	if got := rec.find("shell.init"); len(got) != 1 {
+		t.Fatalf("shell.init sent %d times: %v", len(got), got)
+	}
+	ci.nap.mu.Lock()
+	defer ci.nap.mu.Unlock()
+	if ci.nap.gen != gen || ci.nap.ctx != ctx || !ci.nap.established {
+		t.Fatalf("duplicate ready changed session: gen=%d (want %d), established=%v", ci.nap.gen, gen, ci.nap.established)
+	}
+	if !ci.nap.topics["keep"] || !ci.nap.grants[PermFetch] {
+		t.Fatalf("duplicate ready cleared session state: topics=%v grants=%v", ci.nap.topics, ci.nap.grants)
 	}
 }
 
@@ -498,6 +534,41 @@ func TestNapInc(t *testing.T) {
 	post(t, a, map[string]any{"type": "inc.channel.open", "id": "c2", "target": "nobody"})
 	if got := recA.wait(t, "inc.channel.open.result", 2); got["error"] == nil || got["channelId"] != nil {
 		t.Errorf("open to nobody: %v", got)
+	}
+}
+
+func TestNapChannelCloseNotifiesBothEndpointsOnce(t *testing.T) {
+	setupNapTest(t)
+	a, recA := openNapplet(t, "closer")
+	b, recB := openNapplet(t, "peer")
+	ready(t, a, recA, 1)
+	ready(t, b, recB, 1)
+
+	post(t, a, map[string]any{"type": "inc.channel.open", "id": "open", "target": "peer"})
+	opened := recA.wait(t, "inc.channel.open.result", 1)
+	id, _ := opened["channelId"].(string)
+	if id == "" {
+		t.Fatalf("channel was not opened: %v", opened)
+	}
+	recB.wait(t, "inc.channel.opened", 1)
+
+	post(t, a, map[string]any{"type": "inc.channel.close", "channelId": id})
+	for name, rec := range map[string]*recTransport{"closer": recA, "peer": recB} {
+		closed := rec.wait(t, "inc.channel.closed", 1)
+		if closed["channelId"] != id || closed["reason"] != "closed by peer" {
+			t.Errorf("%s terminal notification: %v", name, closed)
+		}
+	}
+
+	// Once removed, a repeated close must not deliver another terminal event.
+	post(t, a, map[string]any{"type": "inc.channel.close", "channelId": id})
+	post(t, a, map[string]any{"type": "storage.keys", "id": "after-close"})
+	recA.wait(t, "storage.keys.result", 1)
+	if got := recA.find("inc.channel.closed"); len(got) != 1 {
+		t.Errorf("closer received %d terminal notifications: %v", len(got), got)
+	}
+	if got := recB.find("inc.channel.closed"); len(got) != 1 {
+		t.Errorf("peer received %d terminal notifications: %v", len(got), got)
 	}
 }
 
@@ -788,6 +859,63 @@ func TestResourceFetchBlocksLoopback(t *testing.T) {
 	}
 	if _, err := napExplicitRelay(context.Background(), "https://relay.example.com"); err == nil {
 		t.Error("non-websocket relay allowed")
+	}
+}
+
+func TestNapResourceTrackKeepsRequestIDOwnership(t *testing.T) {
+	setupNapTest(t)
+	ci, rec := openNapplet(t, "resource-tracker")
+	ready(t, ci, rec, 1)
+	call := func() *napCall {
+		return &napCall{ci: ci, gen: ci.nap.gen, ctx: ci.nap.ctx, ID: json.RawMessage(`"request"`)}
+	}
+
+	first := call()
+	firstCtx, firstDone, ok := first.resourceTrack()
+	if !ok {
+		t.Fatal("first request was rejected")
+	}
+	duplicate := call()
+	duplicate.Type = "resource.bytes"
+	duplicate.raw = json.RawMessage(`{"url":"data:text/plain,duplicate"}`)
+	napResourceBytes(duplicate)
+	if got := rec.wait(t, "resource.bytes.error", 1); got["error"] != "duplicate-request" {
+		t.Fatalf("duplicate request was not rejected: %v", got)
+	}
+
+	// Cancellation releases A's id immediately, so B may reuse it before A's
+	// deferred completion runs. A must not delete B's registration.
+	napResourceCancel(call())
+	select {
+	case <-firstCtx.Done():
+	default:
+		t.Fatal("live request was not cancelled")
+	}
+
+	secondCtx, secondDone, ok := call().resourceTrack()
+	if !ok {
+		t.Fatal("request id was not reusable after cancellation")
+	}
+	// A's first deferred completion is stale and must not remove B.
+	firstDone()
+	ci.nap.mu.Lock()
+	_, tracked := ci.nap.fetches[`"request"`]
+	ci.nap.mu.Unlock()
+	if !tracked {
+		t.Fatal("old completion removed the newer request registration")
+	}
+	napResourceCancel(call())
+	select {
+	case <-secondCtx.Done():
+	default:
+		t.Fatal("new request was not cancelled")
+	}
+	secondDone()
+	ci.nap.mu.Lock()
+	_, tracked = ci.nap.fetches[`"request"`]
+	ci.nap.mu.Unlock()
+	if tracked {
+		t.Fatal("completed request remained registered")
 	}
 }
 

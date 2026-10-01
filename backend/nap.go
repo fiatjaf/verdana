@@ -46,9 +46,8 @@ type napSession struct {
 	established bool
 	ready       chan struct{}
 
-	// gen counts sessions in this window: a napplet that reloads itself (a
-	// second shell.ready) starts a new one, and a late answer for the old
-	// one must not reach the new document.
+	// gen counts sessions in this window. nap.reset starts a new one, and a
+	// late answer for the old one must not reach the new document.
 	gen    int
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -59,7 +58,7 @@ type napSession struct {
 	// handler but unsubscribes once per topic)
 	topics map[string]bool
 	// open resource requests by id, for resource.cancel
-	fetches map[string]context.CancelFunc
+	fetches map[string]*resourceFetch
 	// uploads are scoped to one document/session. A reload cancels active
 	// network work and makes its upload ids unreachable to the new document.
 	uploads map[string]*napUploadStatus
@@ -92,14 +91,14 @@ func (s *napSession) resetLocked() {
 	for _, cancel := range s.subs {
 		cancel()
 	}
-	for _, cancel := range s.fetches {
-		cancel()
+	for _, fetch := range s.fetches {
+		fetch.cancel()
 	}
 	s.gen++
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	s.subs = make(map[string]context.CancelFunc)
 	s.topics = make(map[string]bool)
-	s.fetches = make(map[string]context.CancelFunc)
+	s.fetches = make(map[string]*resourceFetch)
 	for _, upload := range s.uploads {
 		if upload.cancel != nil {
 			upload.cancel()
@@ -314,14 +313,14 @@ func (ci *Instance) napDispatch(c napCall) {
 }
 
 // napReady handles shell.ready: the session starts and the napplet learns
-// which domains it has. A repeated shell.ready comes from a new document in
-// the same frame (the activation script sends exactly one per load), so it
-// is a new session and nothing of the old one carries over.
+// which domains it has. shell.ready is idempotent; a document reload must
+// first arrive as nap.reset, which tears down the preceding session.
 func (ci *Instance) napReady() {
 	s := ci.nap
 	s.mu.Lock()
 	if s.established {
-		ci.napTeardownLocked("napplet reloaded")
+		s.mu.Unlock()
+		return
 	}
 	s.established = true
 	close(s.ready)
