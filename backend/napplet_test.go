@@ -269,7 +269,8 @@ func TestNIP5DNappletsFromRelays(t *testing.T) {
 			t.Errorf("does not handle %s: %v", a, n.Actions)
 		}
 	}
-	if !slices.Contains(n.RequiredDomains, "outbox") || !slices.Equal(n.MissingDomains(), []string{"outbox"}) {
+	// Noris needs outbox, which the launcher has
+	if !slices.Contains(n.RequiredDomains, "outbox") || len(n.MissingDomains()) != 0 {
 		t.Errorf("requires: %v missing %v", n.RequiredDomains, n.MissingDomains())
 	}
 

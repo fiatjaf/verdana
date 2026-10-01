@@ -33,7 +33,7 @@ import (
 // never the napplet's R/O tags (WEB-NAPPLET.md forbids gating on those).
 var napDomains = []string{
 	"relay", "identity", "storage", "resource", "common",
-	"theme", "inc", "intent", "link", "upload",
+	"theme", "inc", "intent", "link", "upload", "outbox",
 }
 
 // napSession is what one napplet window has going: the subscriptions and

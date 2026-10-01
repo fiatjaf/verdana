@@ -508,6 +508,19 @@ func napSignAndPublish(ctx context.Context, c *napCall, t napTemplate, recipient
 		return nostr.Event{}, errors.New("no relays to publish to")
 	}
 
+	evt, res, err := napApprovePublish(ctx, c, evt, to, encryption, targets)
+	if err != nil {
+		return evt, err
+	}
+	if n, _ := res["published"].(int); n == 0 {
+		return evt, errors.New("publish-failed")
+	}
+	return evt, nil
+}
+
+// napApprovePublish asks once, then encrypts (when encryption is set), signs
+// and publishes evt to targets, reporting per relay as publishSigned does.
+func napApprovePublish(ctx context.Context, c *napCall, evt nostr.Event, to nostr.PubKey, encryption string, targets []string) (nostr.Event, map[string]any, error) {
 	title := "sign and publish an event"
 	detail := fmt.Sprintf("Kind %d to %d relay(s): %s", evt.Kind, len(targets),
 		preview(strings.Join(stripSchemes(targets), ", "), 160))
@@ -517,7 +530,7 @@ func napSignAndPublish(ctx context.Context, c *napCall, t napTemplate, recipient
 			evt.Kind, encryption, nip19.EncodeNpub(to), len(targets))
 	}
 	if !askApproval(c.ci, PermPublish, title, detail, preview(evt.Content, 200)) {
-		return nostr.Event{}, errors.New("user-denied")
+		return nostr.Event{}, nil, errors.New("user-denied")
 	}
 
 	sctx, cancel := context.WithTimeout(ctx, 60*time.Second)
@@ -533,19 +546,15 @@ func napSignAndPublish(ctx context.Context, c *napCall, t napTemplate, recipient
 			ciphertext, err = userKeyer.Encrypt(sctx, evt.Content, to)
 		}
 		if err != nil {
-			return nostr.Event{}, keyerErr(err)
+			return nostr.Event{}, nil, keyerErr(err)
 		}
 		evt.Content = ciphertext
 	}
 	if err := userKeyer.SignEvent(sctx, &evt); err != nil {
-		return nostr.Event{}, keyerErr(err)
+		return nostr.Event{}, nil, keyerErr(err)
 	}
 
 	pctx, pcancel := context.WithTimeout(ctx, 10*time.Second)
 	defer pcancel()
-	res := publishSigned(pctx, evt, targets)
-	if n, _ := res["published"].(int); n == 0 {
-		return evt, errors.New("publish-failed")
-	}
-	return evt, nil
+	return evt, publishSigned(pctx, evt, targets), nil
 }
