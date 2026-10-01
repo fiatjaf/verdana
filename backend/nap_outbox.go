@@ -122,7 +122,7 @@ func napOutboxGetEvent(c *napCall) {
 		f := nostr.Filter{IDs: []nostr.ID{id}}
 		for evt := range sys.Store.QueryEvents(f, 1) {
 			if evt.ID == id && validEvent(evt) {
-				c.reply(map[string]any{"result": outboxResult(napDecrypt(ctx, c, evt), nil)})
+				c.reply(map[string]any{"result": outboxResult(evt, nil)})
 				return
 			}
 		}
@@ -144,7 +144,7 @@ func napOutboxGetEvent(c *napCall) {
 					continue
 				}
 				sys.Publisher.Publish(ctx, re.Event)
-				c.reply(map[string]any{"result": outboxResult(napDecrypt(ctx, c, re.Event), []string{re.Relay.URL})})
+				c.reply(map[string]any{"result": outboxResult(re.Event, []string{re.Relay.URL})})
 				return
 			}
 		}
@@ -271,7 +271,7 @@ func napOutboxQuery(c *napCall) {
 		}
 		events := make([]any, 0, len(order))
 		for _, f := range order {
-			events = append(events, outboxResult(napDecrypt(ctx, c, f.evt), f.relays))
+			events = append(events, outboxResult(f.evt, f.relays))
 		}
 		res := map[string]any{"events": events}
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
@@ -367,7 +367,7 @@ func napOutboxPump(ctx context.Context, c *napCall, subID string, filters []nost
 		seen[evt.ID] = true
 		pending = append(pending, map[string]any{
 			"type": "outbox.event", "subId": subID,
-			"result": outboxResult(napDecrypt(ctx, c, evt), relays),
+			"result": outboxResult(evt, relays),
 		})
 		if len(pending) >= 64 {
 			flush()

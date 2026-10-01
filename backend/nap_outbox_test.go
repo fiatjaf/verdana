@@ -2,11 +2,13 @@ package backend
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"slices"
 	"testing"
 
 	"fiatjaf.com/nostr"
+	"fiatjaf.com/nostr/keyer"
 )
 
 // fakeLists is a relayListFunc over fixed NIP-65 lists.
@@ -314,5 +316,46 @@ func TestNapOutboxQueryLimitAndOrder(t *testing.T) {
 	}
 	if !slices.Equal(contents, []string{"new", "mid"}) {
 		t.Errorf("query: %v (%v)", contents, got)
+	}
+}
+
+// A napplet gets events exactly as they were signed: the user's DMs reach it
+// as ciphertext through both relay and outbox, never decrypted, since the
+// decrypted copy would fail its own id and signature check.
+func TestNapDeliversDMsAsSigned(t *testing.T) {
+	setupNapTest(t)
+	withSystem(t)
+	userSK, peerSK := nostr.Generate(), nostr.Generate()
+	prevKeyer, prevPK := userKeyer, userPubkey
+	userKeyer, userPubkey = keyer.NewPlainKeySigner(userSK), userSK.Public()
+	t.Cleanup(func() { userKeyer, userPubkey = prevKeyer, prevPK })
+
+	ct, err := keyer.NewPlainKeySigner(peerSK).Nip04Encrypt(context.Background(), "hello there", userSK.Public())
+	if err != nil {
+		t.Fatal(err)
+	}
+	dm := nostr.Event{Kind: 4, Content: ct, CreatedAt: nostr.Now(), Tags: nostr.Tags{{"p", userSK.Public().Hex()}}}
+	if err := dm.Sign(peerSK); err != nil {
+		t.Fatal(err)
+	}
+	if err := sys.Store.SaveEvent(dm); err != nil {
+		t.Fatal(err)
+	}
+	ci, rec := openNapplet(t, "dms")
+	ready(t, ci, rec, 1)
+
+	filters := []any{map[string]any{"kinds": []int{4}}}
+	post(t, ci, map[string]any{"type": "relay.query", "id": "r", "filters": filters})
+	post(t, ci, map[string]any{"type": "outbox.query", "id": "o", "filters": filters})
+	post(t, ci, map[string]any{"type": "outbox.getEvent", "id": "g", "eventId": dm.ID.Hex()})
+	got := []map[string]any{
+		rec.wait(t, "relay.query.result", 1)["events"].([]any)[0].(map[string]any),
+		rec.wait(t, "outbox.query.result", 1)["events"].([]any)[0].(map[string]any),
+		rec.wait(t, "outbox.getEvent.result", 1)["result"].(map[string]any),
+	}
+	for i, res := range got {
+		if ev := res["event"].(map[string]any); ev["content"] != ct || ev["sig"] != hex.EncodeToString(dm.Sig[:]) {
+			t.Errorf("delivery %d changed the event: %v", i, ev)
+		}
 	}
 }

@@ -17,7 +17,9 @@ import (
 // filters and unsigned templates; the launcher picks relays (the outbox
 // model, as for napp feeds), signs with the user's key behind a prompt, and
 // streams events back. A napplet never sees a key, a socket or a relay it
-// wasn't told about.
+// wasn't told about. Events reach it exactly as signed: encrypted content
+// stays encrypted, since a decrypted copy would no longer match its id
+// and signature.
 
 func init() {
 	handleNap(map[string]napHandler{
@@ -119,58 +121,6 @@ func relayEventResult(evt nostr.Event) map[string]any {
 	return map[string]any{"event": evt}
 }
 
-// napDecrypt hands the user's encrypted direct messages (kind 4, NIP-04)
-// over in clear text, as NAP-RELAY asks of the shell: a napplet never holds
-// a key, so it could not read them otherwise. Only messages to or from the
-// user qualify, and only once the user allowed this napplet to read them
-// (asked once per session). Anything else, or a failure, goes out as is.
-// The stored event keeps its ciphertext; only the delivered copy changes.
-func napDecrypt(ctx context.Context, c *napCall, evt nostr.Event) nostr.Event {
-	if evt.Kind != 4 {
-		return evt
-	}
-	user, ok := currentUser()
-	if !ok {
-		return evt
-	}
-	var counterpart nostr.PubKey
-	if evt.PubKey == user {
-		p := evt.Tags.Find("p")
-		if p == nil || len(p) < 2 {
-			return evt
-		}
-		pk, err := nostr.PubKeyFromHex(p[1])
-		if err != nil {
-			return evt
-		}
-		counterpart = pk
-	} else {
-		addressed := false
-		for tag := range evt.Tags.FindAll("p") {
-			if len(tag) >= 2 && tag[1] == user.Hex() {
-				addressed = true
-				break
-			}
-		}
-		if !addressed {
-			return evt
-		}
-		counterpart = evt.PubKey
-	}
-	if !c.sessionGrant(PermDecrypt, "read your encrypted direct messages",
-		"Messages to and from you are decrypted with your key before the napplet sees them.") {
-		return evt
-	}
-	dctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	plain, err := userKeyer.Nip04Decrypt(dctx, evt.Content, counterpart)
-	if err != nil {
-		return evt
-	}
-	evt.Content = plain
-	return evt
-}
-
 // ─── subscribe / close ───────────────────────────────────────────
 
 func napRelaySubscribe(c *napCall) {
@@ -250,7 +200,6 @@ func napRelayPump(ctx context.Context, c *napCall, subID string, filters []nostr
 			return
 		}
 		seen[evt.ID] = true
-		evt = napDecrypt(ctx, c, evt)
 		pending = append(pending, map[string]any{"type": "relay.event", "subId": subID, "result": relayEventResult(evt)})
 		if len(pending) >= 64 {
 			flush()
@@ -380,7 +329,7 @@ func napRelayQuery(c *napCall) {
 		add := func(evt nostr.Event) {
 			if !seen[evt.ID] && len(out) < napMaxLimit {
 				seen[evt.ID] = true
-				out = append(out, relayEventResult(napDecrypt(ctx, c, evt)))
+				out = append(out, relayEventResult(evt))
 			}
 		}
 		for _, f := range filters {

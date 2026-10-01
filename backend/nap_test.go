@@ -685,44 +685,6 @@ func errorsAs(err error, target any) bool { return errors.As(err, target) }
 
 func b64(b []byte) string { return base64.StdEncoding.EncodeToString(b) }
 
-func TestNapDecryptOnlyTheUsersDMs(t *testing.T) {
-	setupNapTest(t)
-	userSK, peerSK := nostr.Generate(), nostr.Generate()
-	user, peer := userSK.Public(), peerSK.Public()
-	prevKeyer, prevPK := userKeyer, userPubkey
-	userKeyer, userPubkey = keyer.NewPlainKeySigner(userSK), user
-	t.Cleanup(func() { userKeyer, userPubkey = prevKeyer, prevPK })
-
-	peerKeyer := keyer.NewPlainKeySigner(peerSK)
-	ctx := context.Background()
-	ct, err := peerKeyer.Nip04Encrypt(ctx, "hello there", user)
-	if err != nil {
-		t.Fatal(err)
-	}
-	dm := nostr.Event{Kind: 4, PubKey: peer, Content: ct, Tags: nostr.Tags{{"p", user.Hex()}}}
-	notMine := nostr.Event{Kind: 4, PubKey: peer, Content: ct, Tags: nostr.Tags{{"p", peer.Hex()}}}
-
-	ci, rec := openNapplet(t, "dms")
-	ready(t, ci, rec, 1)
-	c := &napCall{ci: ci, gen: ci.nap.gen, ctx: ci.nap.ctx}
-
-	// not allowed yet (the user said no for this session)
-	ci.nap.grants[PermDecrypt] = false
-	if got := napDecrypt(ctx, c, dm); got.Content != ct {
-		t.Fatal("decrypted without permission")
-	}
-	ci.nap.grants[PermDecrypt] = true
-	if got := napDecrypt(ctx, c, dm); got.Content != "hello there" {
-		t.Fatalf("not decrypted: %q", got.Content)
-	}
-	if got := napDecrypt(ctx, c, notMine); got.Content != ct {
-		t.Fatal("decrypted a message that isn't the user's")
-	}
-	if dm.Content != ct {
-		t.Fatal("the original event was modified")
-	}
-}
-
 func TestNappletDocumentChecksTheHash(t *testing.T) {
 	setupNapTest(t)
 	html := []byte("<!doctype html><p>napplet</p>")

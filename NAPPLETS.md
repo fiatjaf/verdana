@@ -90,7 +90,7 @@ rpc for it.
 | Domain | Where | Notes |
 |---|---|---|
 | `shell` | `nap.go` | `shell.ready` → `shell.init {capabilities:{domains}}`; a second `shell.ready` (a reload) starts a new session |
-| `relay` | `nap_relay.go` | subscribe/close/query use the outbox model. publish/publishEncrypted show **one** prompt, then encrypt, sign and publish. The user's NIP-04 DMs are decrypted before delivery (asked once per session) |
+| `relay` | `nap_relay.go` | subscribe/close/query use the outbox model. publish/publishEncrypted show **one** prompt, then encrypt, sign and publish. Events are delivered exactly as signed: encrypted DMs stay ciphertext, as the napplet spec requires |
 | `identity` | `nap_identity.go` | read-only; `identity.changed` on login/logout |
 | `storage` | `nap_basic.go` | 512 KB, shared or per-window scope. Keyed by the napplet's **address**, not its artifact hash, so data survives updates (a deliberate deviation from NAP-STORAGE) |
 | `theme` | `nap_basic.go` | launcher `surface/text/accent` → `background/text/primary`; `theme.changed` on switch |
@@ -99,10 +99,10 @@ rpc for it.
 | `inc` | `nap_inc.go` | topics (exact match, never echoed back to the sender) and channels; the sender is always stamped by the launcher |
 | `intent` | `nap_intent.go` | `napplet:<archetype>/<action>` is routed through the launcher's action system (picker, rules, cold launch). Napplets receive it as an `inc.event` once they listen on the topic. Napps can handle intents by declaring the same action string |
 | `resource` | `nap_resource.go` | `data:`, `https:`, `blossom:sha256:`, `nostr:`. Public addresses only (checked at dial time on every hop), 10 MiB, 30 s, MIME sniffed, no SVG or HTML. Web fetches are asked once per session |
-| `outbox` | `nap_outbox.go`, `outbox.go` | NAP-OUTBOX (draft, naps PR #32). Reads are split per relay: each author is asked on their own NIP-65 write relays, `#p` people on their inboxes, hints and fallback relays get the rest. Results are deduplicated, verified and carry `sidecar.relayHints`. A subscription never sends an eose, and ends with `outbox.closed` when no relay is left. `publish` signs once and fans out to the user's write relays (`toOutbox`, default true), every `toInboxes` person's read relays and validated `relays`. A recipient with no inbox fails the publish before the prompt. `resolveRelays` uses NIP-65 markers: `write` is where people post, `read` is their inbox. `query({stream})` is not supported yet |
+| `outbox` | `nap_outbox.go`, `outbox.go` | NAP-OUTBOX (draft, naps PR #32). Reads are split per relay: each author is asked on their own NIP-65 write relays, `#p` people on their inboxes, hints and fallback relays get the rest. Results are deduplicated, verified, delivered as signed (never decrypted) and carry `sidecar.relayHints`. A subscription never sends an eose, and ends with `outbox.closed` when no relay is left. `publish` signs once and fans out to the user's write relays (`toOutbox`, default true), every `toInboxes` person's read relays and validated `relays`. A recipient with no inbox fails the publish before the prompt. `resolveRelays` uses NIP-65 markers: `write` is where people post, `read` is their inbox. `query({stream})` is not supported yet |
 
 Not implemented yet: `notify`, `keys`, `config`, `media`, `upload`,
-`lists`, `dm`, `count`, and decrypting NIP-17/59 gift wraps.
+`lists`, `dm` and `count`.
 
 ## Security notes
 
