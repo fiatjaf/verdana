@@ -4,19 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"net/url"
 	"slices"
 	"sort"
 	"strings"
 )
 
-// NAP-INTENT on top of the launcher's action routing. An intent is the
-// action napplet:<archetype>/<action>: napplets declare it through their z
-// and i tags (Napp.Actions), napps can declare the same string among their
-// own actions, and the existing picker, rules and "launch it if it isn't
-// open" all apply unchanged. A napplet handler receives the intent as an
-// inc.event on that topic (dispatchToNapplet); a napp handler receives it as
-// a napp action.
+// NAP-INTENT uses the launcher's handler selection and window routing, while
+// keeping acceptance and delivery separate. The stable convention identity is
+// the routed action; napplet targets receive an intent.deliver push.
 
 func init() {
 	handleNap(map[string]napHandler{
@@ -38,44 +33,23 @@ func napIntentInvoke(c *napCall) {
 	var r struct {
 		Request intentRequest `json:"request"`
 	}
-	_ = c.decode(&r)
+	if err := c.decode(&r); err != nil {
+		c.reply(map[string]any{"result": map[string]any{"ok": false, "error": "invalid convention"}})
+		return
+	}
 	req := r.Request
-	if req.Action == "" {
-		req.Action = "open"
-	}
-	result := map[string]any{
-		"ok": false, "archetype": req.Archetype, "action": req.Action, "handled": false,
-	}
+	result := map[string]any{"ok": false}
 	fail := func(msg string) {
 		result["error"] = msg
 		c.reply(map[string]any{"result": result})
 	}
 
-	if !domainToken.MatchString(req.Archetype) {
-		fail("unknown archetype")
+	archetype, action, ok := conventionParts(req.Convention)
+	if !ok || archetype != req.Archetype || action != req.Action {
+		fail("invalid convention")
 		return
 	}
-	if strings.ContainsAny(req.Action, "/?#") {
-		fail("unsupported action")
-		return
-	}
-	topic := "napplet:" + req.Archetype + "/" + req.Action
-	payload := req.Payload
-	if req.Convention != "" {
-		conv, query, err := splitConvention(req.Convention)
-		if err != nil || conv != topic {
-			fail("unsupported convention")
-			return
-		}
-		if query != nil {
-			if len(payload) > 0 && string(payload) != "null" {
-				fail("invoke failed")
-				return
-			}
-			payload = query
-		}
-		result["convention"] = conv
-	}
+	topic := req.Convention
 
 	opts := actionOptions{}
 	switch h := req.Handler; {
@@ -83,77 +57,53 @@ func napIntentInvoke(c *napCall) {
 	case h == "choose":
 		opts.Choose = true
 	default:
-		target, ok := handlerByAddress(h)
+		target, ok := handlerByDTag(h)
 		if !ok {
 			fail("no handler")
 			return
 		}
 		opts.NappID = target.ID
 	}
+	accepted := false
+	opts.Accept = func(target *Instance) {
+		accepted = true
+		result = map[string]any{
+			"ok": true, "archetype": archetype, "action": action,
+			"convention": req.Convention, "handler": target.napp.D,
+		}
+		c.reply(map[string]any{"result": result})
+	}
 
 	c.async(func(ctx context.Context) {
-		ctx, report := withDispatchReport(ctx)
-		_, err := runNappAction(ctx, c.ci, topic, payload, opts)
-		if target := report.target(); target != nil {
-			result["handler"] = target.napp.Address()
-			result["windowId"] = target.instance
+		_, err := runNappAction(ctx, c.ci, topic, req.Payload, opts)
+		if accepted {
+			return
 		}
 		switch {
-		case err == nil:
-			result["ok"], result["handled"] = true, true
 		case errors.Is(err, errNoHandler):
 			result["error"] = "no handler"
-		case strings.Contains(err.Error(), "cancelled"):
+		case err != nil && strings.Contains(err.Error(), "cancelled"):
 			result["error"] = "user cancelled"
 		default:
-			result["error"] = "invoke failed"
+			result["error"] = "invoke rejected"
 		}
 		c.reply(map[string]any{"result": result})
 	})
 }
 
-// splitConvention reads napplet:<role>/<intent>[?query] into the queryless
-// topic and the query as a payload of string fields, the transposition
-// NAP-INC defines for convention topics.
-func splitConvention(raw string) (string, json.RawMessage, error) {
-	if strings.Contains(raw, "#") {
-		return "", nil, errors.New("fragment in convention")
+func conventionParts(convention string) (string, string, bool) {
+	rest, ok := strings.CutPrefix(convention, "napplet:")
+	archetype, action, found := strings.Cut(rest, "/")
+	if !ok || !found || !domainToken.MatchString(archetype) || action == "" ||
+		strings.ContainsAny(action, "/?#") {
+		return "", "", false
 	}
-	base, query, hasQuery := strings.Cut(raw, "?")
-	if _, err := parseConvention([]string{"i", base}); err != nil {
-		return "", nil, err
-	}
-	if !hasQuery {
-		return base, nil, nil
-	}
-	fields := map[string]string{}
-	for _, pair := range strings.Split(query, "&") {
-		if pair == "" {
-			continue
-		}
-		k, v, ok := strings.Cut(pair, "=")
-		if !ok {
-			return "", nil, errors.New("query pair without =")
-		}
-		key, err1 := url.PathUnescape(k)
-		val, err2 := url.PathUnescape(v)
-		if err1 != nil || err2 != nil {
-			return "", nil, errors.New("bad escape in query")
-		}
-		if _, dup := fields[key]; dup {
-			return "", nil, errors.New("repeated query parameter")
-		}
-		fields[key] = val
-	}
-	raw2, err := json.Marshal(fields)
-	return base, raw2, err
+	return archetype, action, true
 }
 
-// handlerByAddress finds the installed or dev napp/napplet a NAP-INTENT
-// handler address (35129:<pubkey>:<d>, or a 35130 napp) names.
-func handlerByAddress(addr string) (Napp, bool) {
+func handlerByDTag(dTag string) (Napp, bool) {
 	for _, n := range intentPool() {
-		if n.Address() == addr {
+		if n.D == dTag {
 			return n, true
 		}
 	}
@@ -187,15 +137,20 @@ func napIntentHandlers(c *napCall) {
 
 // intentActionsFor lists what a napp accepts for an archetype: the actions
 // (the last path segment) and the convention ids.
-func intentActionsFor(n Napp, archetype string) (actions, conventions []string) {
+func intentActionsFor(n Napp, archetype string) (actions, conventions []string, contracts []map[string]any) {
 	prefix := "napplet:" + archetype + "/"
-	for _, a := range n.Actions {
-		if rest, ok := strings.CutPrefix(a, prefix); ok && rest != "" {
+	for _, contract := range n.Conventions {
+		if rest, ok := strings.CutPrefix(contract.ID, prefix); ok && rest != "" {
 			actions = appendUniqueString(actions, rest)
-			conventions = appendUniqueString(conventions, a)
+			conventions = appendUniqueString(conventions, contract.ID)
+			item := map[string]any{"convention": contract.ID}
+			if len(contract.EventKinds) > 0 {
+				item["eventKinds"] = contract.EventKinds
+			}
+			contracts = append(contracts, item)
 		}
 	}
-	return actions, conventions
+	return actions, conventions, contracts
 }
 
 func intentAvailability(archetype string) map[string]any {
@@ -207,16 +162,16 @@ func intentAvailability(archetype string) map[string]any {
 	}
 	hasDefault := false
 	for _, n := range intentPool() {
-		actions, conventions := intentActionsFor(n, archetype)
+		actions, conventions, contracts := intentActionsFor(n, archetype)
 		if len(actions) == 0 {
 			continue
 		}
 		cand := map[string]any{
 			"dTag":        n.D,
-			"address":     n.Address(),
 			"title":       n.Label(),
 			"actions":     actions,
 			"conventions": conventions,
+			"contracts":   contracts,
 		}
 		if defaultID != "" && n.ID == defaultID {
 			cand["isDefault"] = true
@@ -236,8 +191,8 @@ func intentAvailability(archetype string) map[string]any {
 func intentArchetypes() []string {
 	seen := []string{}
 	for _, n := range intentPool() {
-		for _, a := range n.Actions {
-			rest, ok := strings.CutPrefix(a, "napplet:")
+		for _, contract := range n.Conventions {
+			rest, ok := strings.CutPrefix(contract.ID, "napplet:")
 			if !ok {
 				continue
 			}

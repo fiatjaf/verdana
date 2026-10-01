@@ -44,6 +44,7 @@ type napSession struct {
 	// established flips on shell.ready. Before it, every envelope is dropped
 	// (NAP-SHELL): the activation script sends it ahead of any napplet code.
 	established bool
+	ready       chan struct{}
 
 	// gen counts sessions in this window: a napplet that reloads itself (a
 	// second shell.ready) starts a new one, and a late answer for the old
@@ -82,6 +83,9 @@ func newNapSession() *napSession {
 // resetLocked tears the session's state down and starts a fresh generation.
 // The caller holds s.mu (or owns s exclusively).
 func (s *napSession) resetLocked() {
+	if s.ready != nil && !s.established {
+		close(s.ready)
+	}
 	if s.cancel != nil {
 		s.cancel()
 	}
@@ -104,6 +108,7 @@ func (s *napSession) resetLocked() {
 	s.uploads = make(map[string]*napUploadStatus)
 	s.grants = make(map[Permission]bool)
 	s.established = false
+	s.ready = make(chan struct{})
 }
 
 // napCall is one envelope from the napplet.
@@ -319,6 +324,7 @@ func (ci *Instance) napReady() {
 		ci.napTeardownLocked("napplet reloaded")
 	}
 	s.established = true
+	close(s.ready)
 	gen := s.gen
 	s.mu.Unlock()
 

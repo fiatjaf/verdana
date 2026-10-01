@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"fiatjaf.com/nostr"
@@ -61,11 +62,13 @@ var napKinds = []nostr.Kind{KindNapp, KindNapplet, KindRootNapplet}
 // is one per author (15129).
 func addressable(k nostr.Kind) bool { return k >= 30000 && k < 40000 }
 
-// NappletConvention is one "i" tag: a convention identity the napplet accepts
-// (napplet:<role>/<intent>) and the query parameter names it takes.
+// NappletConvention is a stable convention identity a napplet accepts. Params
+// supports the older WEB-NAPPLET i-tag schema; EventKinds is NAP-INTENT's
+// optional discovery metadata from NIP-5A archetype tags.
 type NappletConvention struct {
-	ID     string   `json:"id"`
-	Params []string `json:"params,omitempty"`
+	ID         string   `json:"id"`
+	Params     []string `json:"params,omitempty"`
+	EventKinds []uint64 `json:"eventKinds,omitempty"`
 }
 
 // IsNapplet says whether this is a napplet rather than a napp.
@@ -347,6 +350,27 @@ func parseConvention(tag nostr.Tag) (NappletConvention, error) {
 			return NappletConvention{}, fmt.Errorf("convention %s: bad parameter %q", id, p)
 		}
 		c.Params = append(c.Params, p)
+	}
+	return c, nil
+}
+
+// parseArchetypeContract reads the NAP-INTENT NIP-5A contract form:
+// ["archetype", <role>, <convention>, "kind:<number>", ...].
+func parseArchetypeContract(tag nostr.Tag) (NappletConvention, error) {
+	if len(tag) < 3 || tag[0] != "archetype" {
+		return NappletConvention{}, errors.New("malformed archetype contract")
+	}
+	c, err := parseConvention(nostr.Tag{"i", tag[2]})
+	if err != nil || conventionRole(c.ID) != tag[1] {
+		return NappletConvention{}, fmt.Errorf("archetype %q has invalid convention %q", tag[1], tag[2])
+	}
+	for _, raw := range tag[3:] {
+		value, ok := strings.CutPrefix(raw, "kind:")
+		kind, parseErr := strconv.ParseUint(value, 10, 64)
+		if !ok || parseErr != nil || slices.Contains(c.EventKinds, kind) {
+			return NappletConvention{}, fmt.Errorf("convention %s: bad event kind %q", c.ID, raw)
+		}
+		c.EventKinds = append(c.EventKinds, kind)
 	}
 	return c, nil
 }

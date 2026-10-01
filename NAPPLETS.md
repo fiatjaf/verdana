@@ -21,7 +21,7 @@ Two napplet manifest shapes are in use, and both are read. The presence of
 | Files | NIP-5A `path` tags; only `/index.html` runs | one blob, hash in `x` |
 | `x` | NIP-5A aggregate of the `path` tags. It is recomputed and must match when present | sha256 of the HTML |
 | Text | `title`, `description` (content is often empty) | `title`, content (required) |
-| Routing | `archetype <role> <convention>` | `z`, `i` |
+| Routing | `archetype <role> <convention> [kind:<number> ...]` | `z`, `i` (legacy WEB-NAPPLET schema) |
 | Domains | `requires`: unsupported ones are flagged in the detail view | `R`/`O`: display only, never a warning |
 
 Validation of the NIP-5D shape is lenient for display tags and strict for the
@@ -97,7 +97,7 @@ rpc for it.
 | `link` | `nap_basic.go` | http(s) only, behind the open-link prompt |
 | `common` | `nap_common.go` | follow/unfollow (kind 3), react (7), report (1984), getProfile, follows, encode/decodeNip19 (never `nsec`) |
 | `inc` | `nap_inc.go` | topics (exact match, never echoed back to the sender) and channels; the sender is always stamped by the launcher |
-| `intent` | `nap_intent.go` | `napplet:<archetype>/<action>` is routed through the launcher's action system (picker, rules, cold launch). Napplets receive it as an `inc.event` once they listen on the topic. Napps can handle intents by declaring the same action string |
+| `intent` | `nap_intent.go` | A convention URI is normalized by the shim, then routed through the launcher's picker, rules, and cold launch. Acceptance transfers delivery responsibility to the runtime. Napplets receive buffered `intent.deliver` events independently of the source lifecycle |
 | `resource` | `nap_resource.go` | `data:`, `https:`, `blossom:sha256:`, `nostr:`. Public addresses only (checked at dial time on every hop), 10 MiB, 30 s, MIME sniffed, no SVG or HTML. Web fetches are asked once per session |
 
 Not implemented yet: `notify`, `keys`, `config`, `media`, `outbox`, `upload`,

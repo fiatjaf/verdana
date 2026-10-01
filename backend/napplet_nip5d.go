@@ -102,8 +102,8 @@ func nip5dFromEvent(evt nostr.Event) (Napp, error) {
 				n.Roles = append(n.Roles, role)
 			}
 			if tag[0] == "archetype" && len(tag) >= 3 {
-				c, err := parseConvention(nostr.Tag{"i", tag[2]})
-				if err == nil && conventionRole(c.ID) == role {
+				c, err := parseArchetypeContract(tag)
+				if err == nil {
 					n.Conventions = appendConvention(n.Conventions, c)
 				}
 			}
@@ -148,9 +148,6 @@ func nip5dFromEvent(evt nostr.Event) (Napp, error) {
 
 	// conventions only count for a role the napplet declared
 	n.Conventions = filterConventions(n.Conventions, roles)
-	for _, r := range n.Roles {
-		n.Actions = append(n.Actions, "napplet:"+r+"/open")
-	}
 	for _, c := range n.Conventions {
 		n.Actions = appendUniqueString(n.Actions, c.ID)
 	}
