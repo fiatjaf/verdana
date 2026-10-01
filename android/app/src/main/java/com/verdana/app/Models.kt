@@ -158,6 +158,7 @@ class WindowSpec(json: String) {
     val requires: List<String>
     val theme: String
     val themeVars: String
+    val storage: String
 
     init {
         val o = JSONObject(json)
@@ -171,5 +172,6 @@ class WindowSpec(json: String) {
         }
         theme = o.optString("theme", "light")
         themeVars = o.optString("themeVars", "{}")
+        storage = o.optString("storage", "{}").ifBlank { "{}" }
     }
 }

@@ -97,8 +97,12 @@ func main() {
 	// survives same-origin navigations — so a reload keeps the instance id.
 	// window.__nappTheme is where bridge.js picks the launcher's theme up on
 	// every (re)load, so a napp that reloads itself stays in sync.
+	// window.__nappStorage seeds the localStorage shim: the file is the
+	// per-nappId JSON store the backend persists (native localStorage would
+	// be a fresh empty origin on every launch, random port each time).
 	w.Init("window.name = " + jsString(meta.Instance) + ";" +
 		"window.__nappDomains = " + jsStringSlice(meta.Requires) + ";" +
+		storageInitScript(os.Getenv("VERDANA_NAPP_STORAGE_FILE")) +
 		themeInitScript(meta.Theme, meta.ThemeVars))
 	// the napp-ui kit, for the napps that ask for it with requires: ["ui"]
 	if kit := nappbridge.UIKitScript(meta.Requires); kit != "" {
@@ -168,6 +172,21 @@ func windowTitle(name, number string) string {
 		return name
 	}
 	return name + " - window #" + number
+}
+
+// storageInitScript seeds window.__nappStorage, which the bridge's
+// localStorage shim runs synchronously from. The file is the backend's
+// per-nappId JSON store; missing/corrupt means start empty.
+func storageInitScript(path string) string {
+	raw, err := os.ReadFile(path)
+	if err != nil || len(strings.TrimSpace(string(raw))) == 0 {
+		return "window.__nappStorage = {};"
+	}
+	var probe map[string]string
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return "window.__nappStorage = {};"
+	}
+	return "window.__nappStorage = " + string(raw) + ";"
 }
 
 // themeInitScript sets window.__nappTheme, which bridge.js applies as soon as

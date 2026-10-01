@@ -671,6 +671,45 @@ func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 			}
 			return copyTextForNapp(p.Text)
 
+		// ─── localStorage ────────────────────────────────────
+		// The webviews can't use their native localStorage: on desktop
+		// every window is a fresh origin (127.0.0.1 with a random port),
+		// on Android every window is its own origin (per-instance host).
+		// So bridge.js shadows window.localStorage with a synchronous
+		// shim seeded from window.__nappStorage, and every mutation comes
+		// back here to be merged into the per-nappId JSON file.
+		case "napp.storageSet":
+			var p struct {
+				Key   string `json:"key"`
+				Value string `json:"value"`
+			}
+			if err := json.Unmarshal([]byte(params), &p); err != nil {
+				return nil, err
+			}
+			if err := storageSet(ci.napp.ID, p.Key, p.Value); err != nil {
+				return nil, err
+			}
+			broadcastStorage(ci.napp.ID, ci.instance, "set", p.Key, p.Value)
+			return nil, nil
+
+		case "napp.storageRemove":
+			var p struct {
+				Key string `json:"key"`
+			}
+			if err := json.Unmarshal([]byte(params), &p); err != nil {
+				return nil, err
+			}
+			if storageRemove(ci.napp.ID, p.Key) {
+				broadcastStorage(ci.napp.ID, ci.instance, "remove", p.Key, "")
+			}
+			return nil, nil
+
+		case "napp.storageClear":
+			if storageClear(ci.napp.ID) {
+				broadcastStorage(ci.napp.ID, ci.instance, "clear", "", "")
+			}
+			return nil, nil
+
 		// ─── publishing ──────────────────────────────────────────
 		case "napp.publish":
 			var p struct {

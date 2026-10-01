@@ -109,11 +109,13 @@ class NappWebView(
         }
 
         // everything the page needs before any of its scripts run, on every
-        // navigation: identity (window.name), domains, theme, the ui kit for
-        // the napps that ask for it, and the bridge
+        // navigation: identity (window.name), domains, theme, the localStorage
+        // seed (per nappId — the native one would be per per-instance
+        // origin), the ui kit for the napps that ask for it, and the bridge
         val origin = NappOrigins.originFor(instance)
         val init = "window.name = ${jsString(instance)};" +
             "window.__nappDomains = ${jsStringList(spec.requires)};" +
+            storageInitScript(spec.storage) +
             themeInitScript(spec.theme, spec.themeVars)
         WebViewCompat.addDocumentStartJavaScript(
             view,
@@ -245,5 +247,16 @@ class NappWebView(
         val n = name.ifBlank { "light" }
         val vars = varsJSON.ifBlank { "{}" }
         return "window.__nappTheme = {name:" + jsString(n) + ",vars:" + vars + "};"
+    }
+
+    private fun storageInitScript(snapshotJSON: String): String {
+        val snapshot = snapshotJSON.ifBlank { "{}" }
+        return try {
+            // validate it is a JSON object; fall back to empty otherwise
+            val o = org.json.JSONObject(snapshot)
+            "window.__nappStorage = ${o};"
+        } catch (_: Exception) {
+            "window.__nappStorage = {};"
+        }
     }
 }

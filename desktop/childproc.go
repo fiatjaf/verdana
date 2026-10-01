@@ -40,6 +40,7 @@ func startChild(spec backend.WindowSpec) (backend.Transport, error) {
 		"VERDANA_NAPP_URL="+spec.URL,
 		"VERDANA_NAPP_NAME="+spec.Name,
 		"VERDANA_NAPP_DESC="+spec.Description,
+		"VERDANA_NAPP_STORAGE_FILE="+backend.StorageFile(spec.NappID),
 		"VERDANA_INSTANCE_ID="+spec.Instance,
 		"VERDANA_WINDOW_NUMBER="+strconv.Itoa(spec.Number),
 		"VERDANA_WINDOW_WIDTH="+strconv.Itoa(spec.Width),

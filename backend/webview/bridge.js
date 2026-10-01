@@ -1,4 +1,266 @@
 ;(() => {
+  // Custom localStorage helpers (install runs after rpc is defined below).
+  const QUOTA = 5 * 1024 * 1024
+  const quotaError = () => {
+    const err = new Error("localStorage quota exceeded (5MB)")
+    err.name = "QuotaExceededError"
+    return err
+  }
+  const byteLen = s => {
+    try {
+      return new TextEncoder().encode(s).length
+    } catch {
+      return String(s).length
+    }
+  }
+  function installCustomStorage(rpcFn) {
+  try {
+    const seed = window.__nappStorage && typeof window.__nappStorage === "object" ? window.__nappStorage : {}
+    const store = new Map()
+    let size = 0
+    for (const k of Object.keys(seed)) {
+      const key = String(k)
+      const val = String(seed[k])
+      if (size + byteLen(key) + byteLen(val) > QUOTA) break
+      if (!store.has(key)) {
+        size += byteLen(key) + byteLen(val)
+        store.set(key, val)
+      }
+    }
+
+    const storage = {
+      get length() {
+        return store.size
+      },
+      key(i) {
+        i = Number(i)
+        if (!Number.isInteger(i) || i < 0 || i >= store.size) return null
+        let n = 0
+        for (const k of store.keys()) {
+          if (n++ === i) return k
+        }
+        return null
+      },
+      getItem(k) {
+        k = String(k)
+        return store.has(k) ? store.get(k) : null
+      },
+      setItem(k, v) {
+        k = String(k)
+        v = String(v)
+        const old = store.has(k) ? store.get(k) : null
+        let delta = byteLen(k) + byteLen(v)
+        if (old !== null) delta -= byteLen(k) + byteLen(old)
+        if (size + delta > QUOTA) throw quotaError()
+        const isNew = !store.has(k)
+        store.set(k, v)
+        size += delta
+        // named-property reads (localStorage.foo) go through the proxy
+        // below, which reflects this same object
+        if (isNew) {
+          try {
+            Object.defineProperty(storage, k, {
+              configurable: true,
+              enumerable: true,
+              get: () => (store.has(k) ? store.get(k) : undefined),
+              set: nv => storage.setItem(k, nv)
+            })
+          } catch {}
+        }
+        rpcFn("napp.storageSet", { key: k, value: v }).catch(() => {})
+      },
+      removeItem(k) {
+        k = String(k)
+        if (!store.has(k)) return
+        size -= byteLen(k) + byteLen(store.get(k))
+        store.delete(k)
+        try {
+          delete storage[k]
+        } catch {}
+        rpcFn("napp.storageRemove", { key: k }).catch(() => {})
+      },
+      clear() {
+        if (store.size === 0) return
+        for (const k of Array.from(store.keys())) {
+          try {
+            delete storage[k]
+          } catch {}
+        }
+        store.clear()
+        size = 0
+        rpcFn("napp.storageClear", {}).catch(() => {})
+      }
+    }
+    // localStorage.foo / localStorage["foo"]: reads hit the store,
+    // writes go through setItem (so they persist + enforce quota)
+    const proxied = new Proxy(storage, {
+      get(t, p, r) {
+        if (typeof p === "string" && !(p in t) && store.has(p)) return store.get(p)
+        return Reflect.get(t, p, r)
+      },
+      set(t, p, v, r) {
+        if (typeof p === "string" && !(p in t)) {
+          t.setItem(p, v)
+          return true
+        }
+        return Reflect.set(t, p, v, r)
+      },
+      deleteProperty(t, p) {
+        if (typeof p === "string" && store.has(p)) {
+          t.removeItem(p)
+          return true
+        }
+        return Reflect.deleteProperty(t, p)
+      },
+      has(t, p) {
+        if (typeof p === "string" && store.has(p)) return true
+        return Reflect.has(t, p)
+      },
+      ownKeys(t) {
+        return Reflect.ownKeys(t).concat(Array.from(store.keys()).filter(k => !(k in t)))
+      },
+      getOwnPropertyDescriptor(t, p) {
+        if (typeof p === "string" && store.has(p) && !(p in t)) {
+          return { configurable: true, enumerable: true, value: store.get(p), writable: true }
+        }
+        return Reflect.getOwnPropertyDescriptor(t, p)
+      }
+    })
+    // seed the named properties for keys present at load
+    for (const k of store.keys()) {
+      try {
+        Object.defineProperty(storage, k, {
+          configurable: true,
+          enumerable: true,
+          get: () => (store.has(k) ? store.get(k) : undefined),
+          set: nv => storage.setItem(k, nv)
+        })
+      } catch {}
+    }
+    const fireStorageEvent = (op, k, oldV, newV) => {
+      let evt = null
+      const init = {
+        key: op === "clear" ? null : k,
+        oldValue: oldV === undefined ? null : oldV,
+        newValue: newV === undefined ? null : newV,
+        url: String((typeof location !== "undefined" && location.href) || ""),
+        storageArea: window.localStorage
+      }
+      try {
+        evt = new StorageEvent("storage", init)
+      } catch {
+        try {
+          evt = document.createEvent("StorageEvent")
+          if (evt && evt.initStorageEvent) {
+            evt.initStorageEvent(
+              "storage", false, false,
+              init.key, init.oldValue, init.newValue, init.url, init.storageArea
+            )
+          } else {
+            evt = null
+          }
+        } catch {
+          evt = null
+        }
+      }
+      if (evt) {
+        try {
+          window.dispatchEvent(evt)
+        } catch {}
+      }
+    }
+    // Host → napp hook: apply a mutation another window of the same napp
+    // made. Same store surgery as the methods above, but no rpc echo (the
+    // backend already has it), plus the storage event browsers fire in
+    // every other document sharing the store.
+    window.__bridge_storage_apply = function (op, k, v) {
+      try {
+        if (op === "set") {
+          k = String(k)
+          v = String(v)
+          const had = store.has(k)
+          const old = had ? store.get(k) : null
+          if (had && old === v) {
+            fireStorageEvent(op, k, old, v)
+            return
+          }
+          let delta = byteLen(k) + byteLen(v)
+          if (had) delta -= byteLen(k) + byteLen(old)
+          // quota is enforced on the write path; a synced op always lands
+          // so siblings converge with the backend instead of forking
+          if (!had) {
+            try {
+              Object.defineProperty(storage, k, {
+                configurable: true,
+                enumerable: true,
+                get: () => (store.has(k) ? store.get(k) : undefined),
+                set: nv => storage.setItem(k, nv)
+              })
+            } catch {}
+          }
+          store.set(k, v)
+          size += delta
+          try {
+            if (window.__nappStorage && typeof window.__nappStorage === "object") {
+              window.__nappStorage[k] = v
+            }
+          } catch {}
+          fireStorageEvent(op, k, old, v)
+        } else if (op === "remove") {
+          k = String(k)
+          if (!store.has(k)) return
+          const old = store.get(k)
+          size -= byteLen(k) + byteLen(old)
+          store.delete(k)
+          try {
+            delete storage[k]
+          } catch {}
+          try {
+            if (window.__nappStorage && typeof window.__nappStorage === "object") {
+              delete window.__nappStorage[k]
+            }
+          } catch {}
+          fireStorageEvent(op, k, old, null)
+        } else if (op === "clear") {
+          if (store.size === 0) return
+          for (const key of Array.from(store.keys())) {
+            try {
+              delete storage[key]
+            } catch {}
+          }
+          store.clear()
+          size = 0
+          try {
+            window.__nappStorage = {}
+          } catch {}
+          fireStorageEvent(op, null, null, null)
+        }
+      } catch {}
+    }
+    try {
+      Object.defineProperty(window, "localStorage", {
+        value: proxied,
+        configurable: true,
+        enumerable: true,
+        writable: false
+      })
+    } catch {
+      // non-configurable native (some webviews): patch its methods in
+      // place so napp code still lands on our store
+      try {
+        const native = window.localStorage
+        native.clear()
+        for (const k of store.keys()) native.setItem(k, store.get(k))
+        native.key = storage.key.bind(storage)
+        native.getItem = storage.getItem.bind(storage)
+        native.setItem = storage.setItem.bind(storage)
+        native.removeItem = storage.removeItem.bind(storage)
+        native.clear = storage.clear.bind(storage)
+      } catch {}
+    }
+  } catch {}
+  }
+
   // This runs inside every napp's webview and is the whole of what a napp can
   // see of the launcher: window.nostr, window.nostrdb and window.napp, as
   // described in env.d.ts. Everything that needs the network, the user's key
@@ -59,6 +321,13 @@
         port.postMessage(JSON.stringify({ t: "rpc", id, method, params: encode(params) }))
       })
   })()
+
+  // The webviews can't use their native localStorage: on desktop every
+  // window is a fresh origin, on Android every window is its own
+  // per-instance origin. The host seeds window.__nappStorage with the
+  // napp's JSON file at document-start; the shim above runs synchronously
+  // from it and mutations merge back through the napp.storage* rpcs.
+  installCustomStorage(rpc)
 
   // ── host → napp hooks ───────────────────────────────────────────
   window.__bridge_feed_callback = function (callbackId, eventsJSON, synced) {

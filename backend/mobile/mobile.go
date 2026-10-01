@@ -72,6 +72,7 @@ func (h mobileHost) OpenWindow(spec backend.WindowSpec) (backend.Transport, erro
 		"themeVars":   spec.ThemeVars,
 		"width":       spec.Width,
 		"height":      spec.Height,
+		"storage":     spec.StorageJSON,
 	})
 	if err != nil {
 		return nil, err

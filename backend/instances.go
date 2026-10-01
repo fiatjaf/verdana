@@ -490,6 +490,7 @@ func launchWithInstance(ctx context.Context, napp Napp, requestedInstance string
 		ThemeVars:   themeVars,
 		Width:       winW,
 		Height:      winH,
+		StorageJSON: StorageSnapshotJSON(napp.ID),
 	})
 	if err != nil {
 		WindowClosed(ci.instance)

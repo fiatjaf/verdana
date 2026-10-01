@@ -112,6 +112,11 @@ type WindowSpec struct {
 	// paints right from its first frame instead of flashing.
 	Theme     string
 	ThemeVars string
+
+	// StorageJSON is the napp's localStorage snapshot as a JSON object
+	// string, injected at document-start so the bridge's synchronous shim
+	// starts from it. Writes go back through the napp.storage* rpcs.
+	StorageJSON string
 }
 
 // noopHost stands in when a caller (a test, a one-off tool) has no GUI.
