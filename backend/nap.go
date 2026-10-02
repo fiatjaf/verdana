@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	"verdana/backend/webview"
@@ -34,6 +35,7 @@ import (
 var napDomains = []string{
 	"relay", "identity", "storage", "resource", "common",
 	"theme", "inc", "intent", "link", "upload", "outbox", "media",
+	"config",
 }
 
 // napSession is what one napplet window has going: the subscriptions and
@@ -72,6 +74,11 @@ type napSession struct {
 	// old document never names a session in a new one.
 	media    map[string]*mediaSession
 	mediaSeq int
+	// configSubscribed is config.subscribe having been sent: the window
+	// gets config.values pushes. configOpenedAt rate-limits
+	// config.openSettings, across reloads too.
+	configSubscribed bool
+	configOpenedAt   time.Time
 
 	// queue serializes envelopes; started lazily by the first one
 	queue chan napCall
@@ -115,6 +122,7 @@ func (s *napSession) resetLocked() {
 		ms.stop()
 	}
 	s.media = make(map[string]*mediaSession)
+	s.configSubscribed = false
 	s.established = false
 	s.ready = make(chan struct{})
 }
@@ -236,6 +244,10 @@ func napRPC(ci *Instance, method, params string) (any, error) {
 	case "nap.reset":
 		ci.napReset()
 		return nil, nil
+	case "nap.openSettings":
+		// the gear in the host page's chrome, never the napplet: its frame
+		// cannot reach these rpcs
+		return nil, openSettings(ci.napp.ID, "")
 	}
 	return nil, fmt.Errorf("unsupported method: %s", method)
 }

@@ -343,6 +343,7 @@ func layoutMain(
 	detailUpdateBtn,
 	detailAuthorBtn,
 	detailCopyAddrBtn *widget.Clickable,
+	detailSettingsBtn *widget.Clickable,
 	profileList *widget.List,
 	profileCardBtns,
 	profileOpenBtns,
@@ -376,7 +377,7 @@ func layoutMain(
 			}
 			if tab == 4 && extra != nil {
 				if extra.kind == "napp" {
-					return layoutNappDetail(gtx, th, extra, detailOpenBtn, detailPrimaryBtn, detailUpdateBtn, detailAuthorBtn, detailCopyAddrBtn, installedSet, busy, st)
+					return layoutNappDetail(gtx, th, extra, detailOpenBtn, detailPrimaryBtn, detailUpdateBtn, detailAuthorBtn, detailCopyAddrBtn, detailSettingsBtn, installedSet, busy, st)
 				}
 				return layoutProfileDetail(gtx, th, extra, profileList, profileCardBtns, profileOpenBtns, profileActionBtns, profileUpdateBtns, installedSet, busy)
 			}

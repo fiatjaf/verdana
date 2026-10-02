@@ -9,7 +9,7 @@ import "sync"
 // change.
 
 var (
-	themeMu   sync.Mutex
+	themeMu   sync.RWMutex
 	themeName = "light"
 	themeVars = "{}"
 )
@@ -17,6 +17,8 @@ var (
 // Theme is the current theme name and its CSS custom properties as JSON (the
 // `--surface`/`--text`/… tokens behavior.md documents, without the dashes).
 func Theme() (string, string) {
+	themeMu.RLock()
+	defer themeMu.RUnlock()
 	return themeName, themeVars
 }
 
@@ -37,8 +39,10 @@ func SetTheme(name, varsJSON string) {
 		varsJSON = "{}"
 	}
 
+	themeMu.Lock()
 	changed := themeName != name || themeVars != varsJSON
 	themeName, themeVars = name, varsJSON
+	themeMu.Unlock()
 	if !changed {
 		return
 	}
@@ -64,4 +68,5 @@ func broadcastTheme() {
 	}
 	log.Debug().Str("theme", name).Int("napps", len(open)).Msg("pushed theme to napps")
 	broadcastNappletTheme()
+	broadcastSettingsTheme(name, vars)
 }
