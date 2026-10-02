@@ -10,12 +10,14 @@
   current per-request Blossom server-hint wire shape.
 - NAP-COMMON writes do not time out while waiting for user approval.
 - NAP-INC rejects empty query strings and query parameters without names.
+- NAP-SHELL exposes the mandatory `window.napplet.shell` API and consumes the
+  launcher's `shell.init` capability environment.
 
 The launcher inlines it into every napplet's srcdoc and activates it with
 `NappletShimPrelude.install({domains})`, so `window.napplet.*` exists before
 the napplet's own scripts run.
 
-sha256: `777393736d2d3035d82b339de55863c0db8d6afeb3b93ad6ff999ec85a5b498e`
+sha256: `fc87677948a6ac50fabb86f41fb23b012f6502b2eef88aab3d0ff4819fb0f8a7`
 
 The Go NAP handlers (`backend/nap*.go`) are written against this build's wire
 shapes. To upgrade, replace the file, update the version and hash here, and

@@ -4378,9 +4378,64 @@ var NappletShimPrelude = (() => {
     }
   }
 
+  // NAP-SHELL is mandatory and is installed independently of the optional
+  // domains. Keep the environment private so a napplet cannot forge support.
+  var shellEnvironment = null;
+  var shellReadyWaiters = /* @__PURE__ */ new Set();
+  var shellReadyHandlers = /* @__PURE__ */ new Set();
+  function handleShellMessage(msg) {
+    if (msg.type !== "shell.init" || shellEnvironment) return;
+    const domains2 = msg.capabilities && Array.isArray(msg.capabilities.domains) ? msg.capabilities.domains.filter((domain) => typeof domain === "string") : [];
+    const services = Array.isArray(msg.services) ? msg.services.filter((service) => typeof service === "string") : [];
+    shellEnvironment = Object.freeze({
+      capabilities: Object.freeze({ domains: Object.freeze(domains2.slice()) }),
+      services: Object.freeze(services.slice())
+    });
+    for (const resolve of shellReadyWaiters) resolve(shellEnvironment);
+    shellReadyWaiters.clear();
+    for (const handler of shellReadyHandlers) handler(shellEnvironment);
+    shellReadyHandlers.clear();
+  }
+  function createShellGlobal() {
+    const shell = {
+      supports(domain) {
+        return !!shellEnvironment && typeof domain === "string" && shellEnvironment.capabilities.domains.includes(domain);
+      },
+      ready() {
+        if (shellEnvironment) return Promise.resolve(shellEnvironment);
+        return new Promise((resolve) => shellReadyWaiters.add(resolve));
+      },
+      onReady(handler) {
+        if (typeof handler !== "function") throw new TypeError("shell.onReady requires a function");
+        let closed = false;
+        if (shellEnvironment) {
+          queueMicrotask(() => {
+            if (!closed) handler(shellEnvironment);
+          });
+        } else {
+          shellReadyHandlers.add(handler);
+        }
+        return {
+          close() {
+            if (closed) return;
+            closed = true;
+            shellReadyHandlers.delete(handler);
+          }
+        };
+      }
+    };
+    Object.defineProperty(shell, "services", {
+      enumerable: true,
+      get() {
+        return shellEnvironment ? shellEnvironment.services : Object.freeze([]);
+      }
+    });
+    return shell;
+  }
+
   // src/runtime-globals.ts
   function createNappletGlobal(domains) {
-    const napplet = {};
+    const napplet = { shell: createShellGlobal() };
     installCoreDomains(domains, napplet);
     installServiceDomains(domains, napplet);
     return napplet;
@@ -4391,6 +4446,7 @@ var NappletShimPrelude = (() => {
   var installedDomainShims = /* @__PURE__ */ new Set();
   var messageListenerInstalled = false;
   var DOMAIN_ROUTERS = [
+    ["shell.", handleShellMessage],
     ["keys.", handleKeysMessage],
     ["media.", handleMediaMessage],
     ["notify.", handleNotifyMessage],

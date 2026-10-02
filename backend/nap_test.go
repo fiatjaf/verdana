@@ -255,6 +255,42 @@ func TestNapSessionHandshake(t *testing.T) {
 	}
 }
 
+func TestNapTheme(t *testing.T) {
+	setupNapTest(t)
+	ci, rec := openNapplet(t, "themed")
+	ready(t, ci, rec, 1)
+
+	themeMu.Lock()
+	oldName, oldVars := themeName, themeVars
+	themeName = "dark"
+	themeVars = `{"surface":"#010203","text":"#f1f2f3","accent":"#456789"}`
+	themeMu.Unlock()
+	t.Cleanup(func() {
+		themeMu.Lock()
+		themeName, themeVars = oldName, oldVars
+		themeMu.Unlock()
+	})
+
+	post(t, ci, map[string]any{"type": "theme.get", "id": "theme-1"})
+	result := rec.wait(t, "theme.get.result", 1)
+	if result["id"] != "theme-1" {
+		t.Fatalf("correlation id = %v", result["id"])
+	}
+	colors := result["theme"].(map[string]any)["colors"].(map[string]any)
+	if colors["background"] != "#010203" || colors["text"] != "#f1f2f3" || colors["primary"] != "#456789" {
+		t.Fatalf("theme colors = %v", colors)
+	}
+
+	broadcastNappletTheme()
+	changed := rec.wait(t, "theme.changed", 1)
+	if _, exists := changed["id"]; exists {
+		t.Fatalf("theme.changed unexpectedly has id: %v", changed)
+	}
+	if changed["theme"] == nil {
+		t.Fatalf("theme.changed has no theme: %v", changed)
+	}
+}
+
 // ─── uploads ────────────────────────────────────────────────────
 
 func setupNapUploadTest(t *testing.T, ci *Instance) {
