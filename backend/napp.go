@@ -155,9 +155,10 @@ func (n Napp) IconBlob(ctx context.Context) ([]byte, error) {
 	if !ok {
 		return nil, errNotFound("this napp has no icon")
 	}
-	local := filepath.Join(nappBaseDir(n.ID), filepath.FromSlash(strings.TrimPrefix(asset.Path, "/")))
-	if data, err := os.ReadFile(local); err == nil {
-		return data, nil
+	if rel := filepath.FromSlash(strings.TrimPrefix(asset.Path, "/")); filepath.IsLocal(rel) {
+		if data, err := os.ReadFile(filepath.Join(nappBaseDir(n.ID), rel)); err == nil {
+			return data, nil
+		}
 	}
 	return downloadBlob(ctx, n.BlossomServers(ctx), asset.Sha256)
 }

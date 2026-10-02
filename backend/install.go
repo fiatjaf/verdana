@@ -159,7 +159,13 @@ func fetchNappAsset(ctx context.Context, servers []string, base string, p NappPa
 		// say which of the napp's files nobody could serve
 		return fmt.Errorf("%s: %w", p.Path, err)
 	}
-	dest := filepath.Join(base, filepath.FromSlash(strings.TrimPrefix(p.Path, "/")))
+	rel := filepath.FromSlash(strings.TrimPrefix(p.Path, "/"))
+	if !filepath.IsLocal(rel) {
+		// the path comes from the napp's event: never let it write outside
+		// the napp's own directory
+		return fmt.Errorf("%s: path escapes the napp directory", p.Path)
+	}
+	dest := filepath.Join(base, rel)
 	if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
 		return fmt.Errorf("%s: %w", p.Path, err)
 	}

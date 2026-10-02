@@ -12,8 +12,10 @@
 package backend
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"fiatjaf.com/nostr/sdk"
@@ -98,8 +100,24 @@ func DataDir() string { return dataDir }
 // Logger is the backend's logger, so a GUI can log into the same stream.
 func Logger() zerolog.Logger { return log }
 
+// nappBaseDir is where a napp's files live. The id carries the author's d-tag,
+// which may hold separators or "..": those are escaped so a napp can never
+// point its directory (and with it installs and uninstalls) outside napps/.
 func nappBaseDir(id string) string {
-	return filepath.Join(dataDir, "napps", id)
+	var b strings.Builder
+	for i := 0; i < len(id); i++ {
+		switch c := id[i]; {
+		case c == '/' || c == '\\' || c == ':' || c == '%' || c < 0x20:
+			fmt.Fprintf(&b, "%%%02X", c)
+		default:
+			b.WriteByte(c)
+		}
+	}
+	name := b.String()
+	if !filepath.IsLocal(name) {
+		name = "_" + name
+	}
+	return filepath.Join(dataDir, "napps", name)
 }
 
 // NappBaseDir is where a napp's files are unpacked.
