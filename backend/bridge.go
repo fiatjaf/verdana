@@ -169,6 +169,11 @@ func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 			if err := json.Unmarshal([]byte(params), &p); err != nil {
 				return false, err
 			}
+			// the store is shared with the launcher and every napp: only
+			// real events go in, or a napp could plant lists in anyone's name
+			if !p.Event.CheckID() || !p.Event.VerifySignature() {
+				return false, errors.New("invalid event id or signature")
+			}
 			if err := sys.Store.SaveEvent(p.Event); err != nil {
 				return false, err
 			}
@@ -810,6 +815,11 @@ func publishTargets(ctx context.Context, evt nostr.Event, requested []string) []
 func publishEvent(ci *Instance, evt nostr.Event, requested []string) (any, error) {
 	if sys == nil {
 		return nil, errors.New("system not ready")
+	}
+	// stored locally (and trusted by every list lookup) before relays get to
+	// reject it: a forged event must not get that far
+	if !evt.CheckID() || !evt.VerifySignature() {
+		return nil, errors.New("invalid event id or signature")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
