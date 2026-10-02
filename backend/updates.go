@@ -147,7 +147,7 @@ func applyUpdate(current, newer Napp) {
 	if len(servers) == 0 {
 		servers = newer.BlossomServers(ctx)
 	}
-	if err := fetchNappAssets(ctx, newer, base, servers); err != nil {
+	if err := replaceNappFiles(ctx, newer, base, servers); err != nil {
 		log.Error().Err(err).Str("napp", current.ID).Msg("update failed")
 		SetFetchErr("update failed: " + err.Error())
 		return
