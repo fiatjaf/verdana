@@ -464,10 +464,14 @@
       autostart.checked = !!l.autostart
       appearance.append(
         el(
-          "label",
-          { class: "field" },
-          el("span", {}, "Launch at login"),
-          el("span", {}, autostart, " Start Verdana in the background"),
+          "div",
+          { class: "field check" },
+          el(
+            "label",
+            {},
+            autostart,
+            el("span", {}, "Launch at login", el("span", { class: "hint" }, "Start Verdana in the background.")),
+          ),
         ),
       )
     }
