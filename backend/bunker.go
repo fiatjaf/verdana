@@ -88,7 +88,7 @@ func newBunkerSigner(ctx context.Context, pool *nostr.Pool, clientKey nostr.Secr
 	ready := make(chan struct{})
 	readyOnce := sync.OnceFunc(func() { close(ready) })
 	for _, url := range relays {
-		go b.listen(ctx, nostr.NormalizeURL(url), readyOnce)
+		go listenNostrConnect(ctx, pool, nostr.NormalizeURL(url), b.clientPub, b.handle, readyOnce)
 	}
 
 	select {
@@ -100,23 +100,24 @@ func newBunkerSigner(ctx context.Context, pool *nostr.Pool, clientKey nostr.Secr
 	return b, nil
 }
 
-// listen keeps a response subscription open on one relay until ctx ends,
-// reconnecting with backoff when the relay drops it.
-func (b *bunkerSigner) listen(ctx context.Context, url string, ready func()) {
+// listenNostrConnect keeps a subscription for the NIP-46 events addressed to
+// clientPub open on one relay until ctx ends, reconnecting with backoff when
+// the relay drops it. ready is called on every EOSE.
+func listenNostrConnect(ctx context.Context, pool *nostr.Pool, url string, clientPub nostr.PubKey, onEvent func(nostr.Event), ready func()) {
 	filter := nostr.Filter{
 		Kinds:     []nostr.Kind{nostr.KindNostrConnect},
-		Tags:      nostr.TagMap{"p": []string{b.clientPub.Hex()}},
+		Tags:      nostr.TagMap{"p": []string{clientPub.Hex()}},
 		LimitZero: true,
 	}
 	backoff := time.Second
 	for ctx.Err() == nil {
-		relay, err := b.pool.EnsureRelay(url)
+		relay, err := pool.EnsureRelay(url)
 		if err == nil {
 			var sub *nostr.Subscription
 			sub, err = relay.Subscribe(ctx, filter, nostr.SubscriptionOptions{Label: "verdana-bunker"})
 			if err == nil {
 				backoff = time.Second
-				b.read(ctx, sub, ready)
+				readNostrConnect(ctx, sub, onEvent, ready)
 			}
 		}
 		if err != nil {
@@ -132,8 +133,8 @@ func (b *bunkerSigner) listen(ctx context.Context, url string, ready func()) {
 	}
 }
 
-// read handles one subscription's events until it ends.
-func (b *bunkerSigner) read(ctx context.Context, sub *nostr.Subscription, ready func()) {
+// readNostrConnect handles one subscription's events until it ends.
+func readNostrConnect(ctx context.Context, sub *nostr.Subscription, onEvent func(nostr.Event), ready func()) {
 	defer sub.Unsub()
 	for {
 		select {
@@ -148,7 +149,7 @@ func (b *bunkerSigner) read(ctx context.Context, sub *nostr.Subscription, ready 
 			if !ok {
 				return
 			}
-			b.handle(evt)
+			onEvent(evt)
 		}
 	}
 }

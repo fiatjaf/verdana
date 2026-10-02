@@ -87,6 +87,10 @@ data class LauncherState(
     val windows: List<WindowInfo>,
     val updateCheckRunning: Boolean = false,
     val lookup: AddressLookup? = null,
+    // nostrConnectUri is the nostrconnect:// uri the login screen shows as a
+    // QR code for a NIP-46 signer, nostrConnectRelay the relay it names.
+    val nostrConnectUri: String = "",
+    val nostrConnectRelay: String = "",
 )
 
 // AddressLookup is the napp address typed into the discovery filter being
@@ -157,6 +161,8 @@ fun parseState(json: String): LauncherState {
         discovery = napps("discovery"),
         busy = (0 until busyArr.length()).map { busyArr.getString(it) },
         updateCheckRunning = o.optBoolean("updateCheckRunning"),
+        nostrConnectUri = o.optString("nostrConnectUri"),
+        nostrConnectRelay = o.optString("nostrConnectRelay"),
         lookup = o.optJSONObject("lookup")?.let { l ->
             AddressLookup(
                 query = l.optString("query"),

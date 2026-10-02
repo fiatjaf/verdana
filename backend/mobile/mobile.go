@@ -301,6 +301,20 @@ func AnswerPrompt(id int, ok bool, index int, scope string) {
 // state's phase and loginErr for the outcome.
 func Login(input string) { go backend.Login(input) }
 
+// SetNostrConnectRelay changes the relay the login screen's nostrconnect QR
+// code points signers to, and puts up a new code for it.
+func SetNostrConnectRelay(relay string) { go backend.SetNostrConnectRelay(relay) }
+
+// NostrConnectQR is the QR code for a nostrconnect uri as a PNG, or nil when
+// the uri doesn't fit in one.
+func NostrConnectQR(uri string) []byte {
+	png, err := backend.QRCodePNG(uri, 8)
+	if err != nil {
+		return nil
+	}
+	return png
+}
+
 // Logout forgets the key and closes every napp.
 func Logout() { backend.Logout() }
 

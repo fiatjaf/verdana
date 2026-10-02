@@ -46,6 +46,10 @@ type AppState struct {
 	// Theme is the user's preference: "system", "light" or "dark". The
 	// resolved light/dark theme and its colors live in theme.go.
 	Theme string `json:"theme"`
+
+	// NostrConnectRelay is the relay the login screen's nostrconnect QR
+	// code sends signers to (see nostrconnect.go).
+	NostrConnectRelay string `json:"nostrconnect_relay"`
 }
 
 var (
@@ -73,6 +77,9 @@ func loadState() {
 			"relay.nostrapps.com",
 			"relay.nostrapps.com/public",
 		}
+	}
+	if state.NostrConnectRelay == "" {
+		state.NostrConnectRelay = defaultNostrConnectRelay
 	}
 	if state.InstalledNapps == nil {
 		state.InstalledNapps = make(map[string]Napp)

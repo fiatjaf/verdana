@@ -227,47 +227,6 @@ func layoutPrompt(
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
 }
 
-func layoutLogin(
-	gtx layout.Context,
-	th *material.Theme,
-	ed *widget.Editor,
-	btn *widget.Clickable,
-	loginErr string,
-) layout.Dimensions {
-	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			t := material.H5(th, "Log in to Verdana")
-			t.Font.Weight = font.Bold
-			return t.Layout(gtx)
-		}),
-		layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			l := emph(material.Body2(th, "Paste your nsec or a bunker:// URL"))
-			l.Color = currentTheme().subtle
-			return l.Layout(gtx)
-		}),
-		layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return editorBox(gtx, th, ed, "nsec1... or bunker://...")
-		}),
-		layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			pointer.CursorPointer.Add(gtx.Ops)
-			return material.Button(th, btn, "Log in").Layout(gtx)
-		}),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			if loginErr == "" {
-				return layout.Dimensions{}
-			}
-			return layout.Inset{Top: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				l := material.Body2(th, loginErr)
-				l.Color = currentTheme().danger
-				return l.Layout(gtx)
-			})
-		}),
-	)
-}
-
 func layoutMain(
 	gtx layout.Context,
 	th *material.Theme,

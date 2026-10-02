@@ -62,6 +62,7 @@ require (
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
 	golang.org/x/tools v0.50.0 // indirect
+	rsc.io/qr v0.2.0 // indirect
 )
 
 replace github.com/PowerDNS/lmdb-go => github.com/fiatjaf/lmdb-go v0.0.0-20241216175215-ce7e8c333ddb

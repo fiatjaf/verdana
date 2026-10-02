@@ -312,8 +312,6 @@ func gioMain() {
 	defer setManagerWindow(nil)
 
 	var (
-		loginEd               widget.Editor
-		loginBtn              widget.Clickable
 		fetchBtn              widget.Clickable
 		tabNappsBtn           widget.Clickable
 		tabDiscoBtn           widget.Clickable
@@ -372,7 +370,7 @@ func gioMain() {
 		shortcutDelBtns   []widget.Clickable
 		shortcutEditBtns  []widget.Clickable
 	)
-	loginEd.SingleLine = true
+	loginScr := newLoginScreen()
 	filterEd.SingleLine = true
 	installedFilterEd.SingleLine = true
 	devURLed.SingleLine = true
@@ -477,13 +475,7 @@ func gioMain() {
 
 				switch st.Phase {
 				case backend.PhaseLogin:
-					if loginBtn.Clicked(gtx) {
-						input := strings.TrimSpace(loginEd.Text())
-						if input != "" {
-							go backend.Login(input)
-						}
-					}
-					return layoutLogin(gtx, th, &loginEd, &loginBtn, st.LoginErr)
+					return loginScr.layout(gtx, th, st)
 				case backend.PhaseMain:
 					if tabWindowsBtn.Clicked(gtx) {
 						setTab(tabWindows)

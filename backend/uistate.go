@@ -31,6 +31,12 @@ type State struct {
 	// LoginErr is why the last login attempt failed, if it did.
 	LoginErr string `json:"loginErr"`
 
+	// NostrConnectURI is the nostrconnect:// uri the login screen shows as
+	// a QR code for a NIP-46 signer to scan, "" outside the login phase.
+	// NostrConnectRelay is the relay it names, for the relay field under it.
+	NostrConnectURI   string `json:"nostrConnectUri"`
+	NostrConnectRelay string `json:"nostrConnectRelay"`
+
 	// ProfileName and ProfilePicture describe the logged-in user.
 	ProfileName    string `json:"profileName"`
 	ProfilePicture string `json:"profilePicture"`
@@ -193,6 +199,8 @@ func Snapshot() State {
 	ls.mu.Unlock()
 
 	s.Relays = Relays()
+	s.NostrConnectURI = nostrConnectURI()
+	s.NostrConnectRelay = NostrConnectRelay()
 	s.Windows = OpenWindows()
 	s.ManagedWindows = ManagedWindows()
 	s.Shortcuts = shortcuts()
@@ -231,8 +239,14 @@ func notifyState() {
 }
 
 // setPhase moves the launcher to a phase and wakes whoever is waiting for it
-// to change. ls.mu must be held.
+// to change. Entering the login phase puts up a fresh nostrconnect uri,
+// leaving it withdraws it. ls.mu must be held.
 func setPhaseLocked(phase string) {
+	if phase == PhaseLogin && ls.phase != PhaseLogin {
+		startNostrConnectLocked()
+	} else if phase != PhaseLogin && ls.phase == PhaseLogin {
+		stopNostrConnect()
+	}
 	ls.phase = phase
 	if ls.changed != nil {
 		close(ls.changed)

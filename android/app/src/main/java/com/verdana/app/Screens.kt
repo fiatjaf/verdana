@@ -19,6 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -156,6 +157,15 @@ fun LoadingScreen() {
 fun LoginScreen(activity: MainActivity, st: LauncherState) {
     val theme = themeByName(st.theme)
     var input by remember { mutableStateOf("") }
+    // the relay field follows the backend's relay, unless the user is typing
+    var relay by remember(st.nostrConnectRelay) { mutableStateOf(st.nostrConnectRelay) }
+    var signerErr by remember(st.nostrConnectUri) { mutableStateOf("") }
+    val qr = remember(st.nostrConnectUri) {
+        if (st.nostrConnectUri.isBlank()) null
+        else Mobile.nostrConnectQR(st.nostrConnectUri)?.let {
+            BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap()
+        }
+    }
 
     Column(
         Modifier
@@ -167,11 +177,75 @@ fun LoginScreen(activity: MainActivity, st: LauncherState) {
         Text("Log in to Verdana", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = theme.fg)
         Spacer(Modifier.height(6.dp))
         Text(
-            "Paste your nsec or a bunker:// URL",
+            "Scan with your signer app, or open one on this phone",
             style = MaterialTheme.typography.bodyMedium,
             color = theme.subtle,
         )
         Spacer(Modifier.height(16.dp))
+        // white whatever the theme: scanners want dark modules on light
+        Box(
+            Modifier
+                .align(Alignment.CenterHorizontally)
+                .size(240.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color.White),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (qr != null) {
+                Image(
+                    bitmap = qr,
+                    contentDescription = "nostrconnect QR code",
+                    modifier = Modifier.fillMaxSize(),
+                    filterQuality = FilterQuality.None,
+                )
+            } else {
+                CircularProgressIndicator()
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        Button(
+            onClick = {
+                signerErr = if (activity.openSigner(st.nostrConnectUri)) "" else "No signer app found on this phone"
+            },
+            enabled = st.nostrConnectUri.isNotBlank(),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("Open signer app")
+        }
+        if (signerErr.isNotBlank()) {
+            Spacer(Modifier.height(8.dp))
+            Text(signerErr, color = theme.danger, style = MaterialTheme.typography.bodySmall)
+        }
+        Spacer(Modifier.height(12.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                value = relay,
+                onValueChange = { relay = it },
+                modifier = Modifier.weight(1f),
+                label = { Text("Relay") },
+                placeholder = { Text("wss://…", color = theme.inputHint) },
+                singleLine = true,
+                colors = outlinedColors(theme),
+            )
+            Spacer(Modifier.width(8.dp))
+            OutlinedButton(onClick = { activity.setNostrConnectRelay(relay.trim()) }) {
+                Text("Change")
+            }
+        }
+        if (st.loginErr.isNotBlank()) {
+            Spacer(Modifier.height(12.dp))
+            Text(st.loginErr, color = theme.danger, style = MaterialTheme.typography.bodySmall)
+        }
+
+        Spacer(Modifier.height(28.dp))
+        Text("Other options", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = theme.fg)
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "Paste your nsec or a bunker:// URL",
+            style = MaterialTheme.typography.bodyMedium,
+            color = theme.subtle,
+        )
+        Spacer(Modifier.height(12.dp))
         OutlinedTextField(
             value = input,
             onValueChange = { input = it },
@@ -184,20 +258,14 @@ fun LoginScreen(activity: MainActivity, st: LauncherState) {
         Button(onClick = { activity.login(input.trim()) }, modifier = Modifier.fillMaxWidth()) {
             Text("Log in")
         }
-        Spacer(Modifier.height(8.dp))
-        Text("— or —", style = MaterialTheme.typography.bodyMedium, color = theme.subtle)
-        Spacer(Modifier.height(16.dp))
         if (Amber.installed(activity)) {
+            Spacer(Modifier.height(16.dp))
             var amberErr by remember { mutableStateOf("") }
             AmberLogin(activity, theme) { amberErr = it }
             if (amberErr.isNotBlank()) {
                 Spacer(Modifier.height(8.dp))
                 Text(amberErr, color = theme.danger, style = MaterialTheme.typography.bodySmall)
             }
-        }
-        if (st.loginErr.isNotBlank()) {
-            Spacer(Modifier.height(12.dp))
-            Text(st.loginErr, color = theme.danger, style = MaterialTheme.typography.bodySmall)
         }
     }
 }

@@ -78,6 +78,7 @@ func login(input string, resume bool) {
 	}
 
 	log.Info().Msg("starting login")
+	stopNostrConnect()
 	setPhase(PhaseLoading)
 
 	// A new login ends any previous session first.

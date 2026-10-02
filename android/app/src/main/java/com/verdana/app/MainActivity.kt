@@ -80,6 +80,17 @@ class MainActivity : ComponentActivity() {
     // ─── launcher actions (called from composables) ──────────────────
 
     fun login(input: String) = Mobile.login(input)
+    fun setNostrConnectRelay(relay: String) = Mobile.setNostrConnectRelay(relay)
+
+    // openSigner hands the nostrconnect:// uri to a signer app on this phone
+    // (Amber and the like register the scheme). False when none is installed.
+    fun openSigner(uri: String): Boolean =
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(uri)))
+            true
+        } catch (e: android.content.ActivityNotFoundException) {
+            false
+        }
     fun logout() = Mobile.logout()
     fun fetchNapps() = Mobile.fetch()
     fun install(id: String) = Mobile.install(id)
