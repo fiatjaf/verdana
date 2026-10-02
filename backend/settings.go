@@ -239,6 +239,7 @@ type settingsLoad struct {
 type launcherSettings struct {
 	Relays         []string `json:"relays"`
 	BlossomServers []string `json:"blossomServers"`
+	ThemeMode      string   `json:"themeMode"`
 }
 
 func settingsRPC(w *settingsWindow, method, params string) (any, error) {
@@ -279,6 +280,9 @@ func settingsRPC(w *settingsWindow, method, params string) (any, error) {
 		if req.BlossomServers != nil {
 			SetBlossomServers(req.BlossomServers)
 		}
+		if req.ThemeMode != "" {
+			SetThemeMode(req.ThemeMode)
+		}
 		return settingsLoadFor(w), nil
 	case "settings.forgetPermission":
 		var req struct {
@@ -299,7 +303,7 @@ func settingsRPC(w *settingsWindow, method, params string) (any, error) {
 func settingsLoadFor(w *settingsWindow) settingsLoad {
 	out := settingsLoad{
 		Set: []string{}, Secrets: []string{}, Permissions: []PermissionRule{},
-		Launcher: launcherSettings{Relays: Relays(), BlossomServers: BlossomServers()},
+		Launcher: launcherSettings{Relays: Relays(), BlossomServers: BlossomServers(), ThemeMode: ThemeMode()},
 	}
 	if w.nappID == launcherSettingsID {
 		out.Name = "Verdana"

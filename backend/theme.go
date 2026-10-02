@@ -4,14 +4,20 @@ import "sync"
 
 // The launcher has one theme at a time and every napp tracks it. The colors
 // themselves belong to whoever draws the launcher (a Gio palette, a Compose
-// color scheme); the backend only carries the name and the CSS tokens that go
-// to napps, persists the choice, and makes sure every window hears about a
-// change.
+// color scheme); the backend carries the effective name and CSS tokens that
+// go to napps, persists the separate system/light/dark preference, and makes
+// sure every window hears about an effective change.
 
 var (
 	themeMu   sync.RWMutex
 	themeName = "light"
 	themeVars = "{}"
+)
+
+const (
+	ThemeSystem = "system"
+	ThemeLight  = "light"
+	ThemeDark   = "dark"
 )
 
 // Theme is the current theme name and its CSS custom properties as JSON (the
@@ -28,12 +34,42 @@ func ThemeName() string {
 	return name
 }
 
-// SetTheme records the theme the launcher is drawing with, persists it and
-// pushes it into every open napp. The GUI calls it once at startup (with the
-// tokens for the theme it restored) and again on every switch.
+// ThemeMode is the user's persisted preference. It is separate from Theme,
+// which is always the effective light or dark palette currently being drawn.
+func ThemeMode() string {
+	stateMu.Lock()
+	defer stateMu.Unlock()
+	if state.Theme == ThemeLight || state.Theme == ThemeDark {
+		return state.Theme
+	}
+	return ThemeSystem
+}
+
+// SetThemeMode persists the user's preference. The platform UI resolves
+// system mode and calls SetTheme with the resulting palette.
+func SetThemeMode(mode string) {
+	if mode != ThemeLight && mode != ThemeDark {
+		mode = ThemeSystem
+	}
+	stateMu.Lock()
+	changed := state.Theme != mode
+	state.Theme = mode
+	if changed {
+		saveState()
+	}
+	stateMu.Unlock()
+	if changed {
+		log.Info().Str("mode", mode).Msg("theme mode changed")
+		notifyState()
+	}
+}
+
+// SetTheme records the effective theme the launcher is drawing with and
+// pushes it into every open napp. Preference persistence belongs to
+// SetThemeMode so an OS appearance change cannot overwrite "system".
 func SetTheme(name, varsJSON string) {
-	if name != "dark" {
-		name = "light"
+	if name != ThemeDark {
+		name = ThemeLight
 	}
 	if varsJSON == "" {
 		varsJSON = "{}"
@@ -46,13 +82,6 @@ func SetTheme(name, varsJSON string) {
 	if !changed {
 		return
 	}
-
-	stateMu.Lock()
-	if state.Theme != name {
-		state.Theme = name
-		saveState()
-	}
-	stateMu.Unlock()
 
 	log.Info().Str("theme", name).Msg("theme changed")
 	notifyState()

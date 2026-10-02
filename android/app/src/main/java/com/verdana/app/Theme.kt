@@ -4,8 +4,12 @@ package com.verdana.app
 // same palette the Gio desktop uses (see theme.go there), expressed as Compose
 // colors; the CSS tokens napps get are derived from the same values.
 
+import android.content.Context
+import android.os.Build
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.ui.graphics.Color
 
@@ -88,7 +92,45 @@ val darkTheme = Theme(
     suggestFg = Color(0xFFB6E3C1),
 )
 
-fun themeByName(name: String): Theme = if (name == "dark") darkTheme else lightTheme
+private var resolvedTheme: Theme = lightTheme
+
+fun themeByName(name: String): Theme = if (resolvedTheme.name == name) {
+    resolvedTheme
+} else if (name == "dark") {
+    darkTheme
+} else {
+    lightTheme
+}
+
+fun resolveTheme(context: Context, name: String, system: Boolean): Theme {
+    val base = if (name == "dark") darkTheme else lightTheme
+    if (!system || Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+        resolvedTheme = base
+        return base
+    }
+    val scheme = if (name == "dark") dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+    return base.copy(
+        bg = scheme.background,
+        fg = scheme.onBackground,
+        accent = scheme.primary,
+        accentText = scheme.onPrimary,
+        card = scheme.surfaceVariant,
+        chipBg = scheme.secondaryContainer,
+        chipFg = scheme.onSecondaryContainer,
+        border = scheme.outline,
+        codeBg = scheme.surfaceVariant,
+        codeFg = scheme.onSurfaceVariant,
+        subtle = scheme.onSurfaceVariant,
+        muted = scheme.outline,
+        danger = scheme.error,
+        imageBg = scheme.surfaceVariant,
+        inputHint = scheme.outline,
+        devBg = scheme.tertiaryContainer,
+        devFg = scheme.onTertiaryContainer,
+        suggestBg = scheme.secondaryContainer,
+        suggestFg = scheme.onSecondaryContainer,
+    ).also { resolvedTheme = it }
+}
 
 // varsJSON is the CSS custom properties (without the leading `--`) that every
 // napp receives on :root — the same tokens behavior.md documents.

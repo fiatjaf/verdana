@@ -1179,9 +1179,12 @@ func layoutProfile(
 			}
 			pointer.CursorPointer.Add(gtx.Ops)
 			p := currentTheme()
-			label := "\u263e Dark"
-			if p.name == "dark" {
+			label := "\u2699 System"
+			switch backend.ThemeMode() {
+			case backend.ThemeSystem:
 				label = "\u2600 Light"
+			case backend.ThemeLight:
+				label = "\u263e Dark"
 			}
 			b := material.Button(th, themeBtn, label)
 			b.Background = p.chipBg

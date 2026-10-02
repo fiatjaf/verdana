@@ -168,8 +168,10 @@ func main() {
 		go runBundleToken(startupToken)
 	}
 
-	// the palette the user last chose, and its CSS tokens for napps
-	applyStoredTheme()
+	// Resolve the user's system/light/dark preference and keep system mode in
+	// sync with OS appearance changes for the lifetime of the launcher.
+	stopTheme := startThemeController()
+	defer stopTheme()
 
 	// startup tab: installed if any napps, else discovery
 	if len(backend.Snapshot().Installed) > 0 {
@@ -373,6 +375,9 @@ func gioMain() {
 		switch e := w.Event(); e := e.(type) {
 		case app.FrameEvent:
 			gtx := app.NewContext(&ops, e)
+			if backend.ThemeMode() != appliedThemeMode() {
+				applyThemeMode()
+			}
 
 			// the palette is re-read every frame, so a theme switch (which can
 			// come from any goroutine) never touches th concurrently

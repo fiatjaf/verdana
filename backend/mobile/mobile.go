@@ -364,6 +364,13 @@ func Launch(id string) { backend.LaunchByID(id) }
 // leading dashes: {"surface":"#fff","text":"#000",…}.
 func SetTheme(name string, varsJSON string) { backend.SetTheme(name, varsJSON) }
 
+// ThemeMode is the user's system/light/dark preference.
+func ThemeMode() string { return backend.ThemeMode() }
+
+// SetThemeMode stores the user's system/light/dark preference. The Android
+// host resolves system mode against the current Configuration.
+func SetThemeMode(mode string) { backend.SetThemeMode(mode) }
+
 // Profile returns what the launcher knows about a pubkey as JSON:
 // pubkey, npub, name, displayName, shortName, about, picture, nip05,
 // website. Blocks with its own timeout; call it off the main thread.

@@ -327,7 +327,12 @@ fun ProfileScreen(activity: MainActivity, st: LauncherState, onBack: () -> Unit)
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Theme", color = theme.fg, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
             TextButton(onClick = { activity.toggleTheme() }) {
-                Text(if (theme.name == "dark") "Light" else "Dark", color = theme.chipFg, fontSize = 13.sp)
+                val next = when (st.themeMode) {
+                    "system" -> "Light"
+                    "light" -> "Dark"
+                    else -> "System"
+                }
+                Text(next, color = theme.chipFg, fontSize = 13.sp)
             }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
