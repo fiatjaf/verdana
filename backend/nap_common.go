@@ -146,6 +146,10 @@ func napCommonFollows(c *napCall) {
 		c.commonFail("not-signed-in")
 		return
 	}
+	if sys == nil {
+		c.commonFail("relay-timeout")
+		return
+	}
 	c.async(func(ctx context.Context) {
 		ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 		defer cancel()

@@ -29,10 +29,10 @@ func init() {
 }
 
 const (
-	// outboxDefaultTimeout is how long a read waits when the napplet didn't
-	// say; outboxMaxTimeout stays under the shim's own 30s request timeout
+	// outboxDefaultTimeout is how long a read waits on relays when the
+	// napplet didn't say; outboxMaxTimeout bounds what it may ask for
 	outboxDefaultTimeout = 8 * time.Second
-	outboxMaxTimeout     = 25 * time.Second
+	outboxMaxTimeout     = 2 * time.Minute
 	// outboxMaxHints bounds the relay hints a read accepts
 	outboxMaxHints = 8
 )

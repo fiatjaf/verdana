@@ -46,12 +46,14 @@ func init() {
 	})
 }
 
+// napNotifyPermission answers as notify.permission.result, the type the shim
+// settles notify.permission.request on (not the usual <type>.result).
 func napNotifyPermission(c *napCall) {
 	var req struct {
 		Channel string `json:"channel"`
 	}
 	if c.decode(&req) != nil {
-		c.reply(map[string]any{"granted": false})
+		c.replyAs("notify.permission.result", map[string]any{"granted": false})
 		return
 	}
 	c.async(func(context.Context) {
@@ -63,7 +65,7 @@ func napNotifyPermission(c *napCall) {
 		if granted {
 			granted = host.RequestNotificationPermission()
 		}
-		c.reply(map[string]any{"granted": granted})
+		c.replyAs("notify.permission.result", map[string]any{"granted": granted})
 	})
 }
 

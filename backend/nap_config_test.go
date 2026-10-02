@@ -145,6 +145,10 @@ func TestNapConfigGetAndSubscribe(t *testing.T) {
 			t.Fatalf("want no-schema: %v", e)
 		}
 	}
+	// the get's error carries its id, so the shim can settle it
+	if errs := rec.find("config.schemaError"); errs[0]["id"] != "g0" {
+		t.Fatalf("get's no-schema has no id: %v", errs)
+	}
 	if got := rec.find("config.values"); len(got) != 0 {
 		t.Fatalf("values without a schema: %v", got)
 	}

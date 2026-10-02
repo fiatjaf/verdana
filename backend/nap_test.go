@@ -10,6 +10,7 @@ import (
 	"errors"
 	"image"
 	"image/png"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -291,18 +292,41 @@ func TestNapTheme(t *testing.T) {
 	}
 }
 
+// A handler that panics still answers: the shim has no deadline of its own,
+// so an unanswered request would leave the napplet waiting for good.
+func TestNapPanickingHandlerStillReplies(t *testing.T) {
+	setupNapTest(t)
+	napHandlers["test.boom"] = func(*napCall) { panic("boom") }
+	napHandlers["test.asyncBoom"] = func(c *napCall) { c.async(func(context.Context) { panic("boom") }) }
+	t.Cleanup(func() {
+		delete(napHandlers, "test.boom")
+		delete(napHandlers, "test.asyncBoom")
+	})
+	ci, rec := openNapplet(t, "boom")
+	ready(t, ci, rec, 1)
+
+	post(t, ci, map[string]any{"type": "test.boom", "id": "b1"})
+	if got := rec.wait(t, "test.boom.result", 1); got["id"] != "b1" || got["error"] == nil {
+		t.Fatalf("sync panic: %v", got)
+	}
+	post(t, ci, map[string]any{"type": "test.asyncBoom", "id": "b2"})
+	if got := rec.wait(t, "test.asyncBoom.result", 1); got["id"] != "b2" || got["error"] == nil {
+		t.Fatalf("async panic: %v", got)
+	}
+}
+
 // ─── uploads ────────────────────────────────────────────────────
 
 func setupNapUploadTest(t *testing.T, ci *Instance) {
 	t.Helper()
 	previousKeyer, previousPubkey := userKeyer, userPubkey
-	previousServers, previousUpload := napUploadServers, napUploadToServer
+	previousServers, previousUpload, previousAuth := napUploadServers, napUploadToServer, napUploadAuth
 	userSK := nostr.Generate()
 	userKeyer, userPubkey = keyer.NewPlainKeySigner(userSK), userSK.Public()
 	setSessionRule(RuleKey{Napp: ci.napp.ID, Permission: PermUpload}, Rule{Decision: DecisionAllow})
 	t.Cleanup(func() {
 		userKeyer, userPubkey = previousKeyer, previousPubkey
-		napUploadServers, napUploadToServer = previousServers, previousUpload
+		napUploadServers, napUploadToServer, napUploadAuth = previousServers, previousUpload, previousAuth
 		clearSessionRule(RuleKey{Napp: ci.napp.ID, Permission: PermUpload})
 	})
 }
@@ -332,7 +356,7 @@ func TestNapUploadBlossomReplicatesAndReportsStatus(t *testing.T) {
 		return []string{"https://one.example/", "bad", "https://two.example"}
 	}
 	var attempted []string
-	napUploadToServer = func(_ context.Context, server string, got []byte, mimeType string, _ nostr.Keyer) (*blossom.BlobDescriptor, error) {
+	napUploadToServer = func(_ context.Context, server string, got []byte, mimeType string, _ string) (*blossom.BlobDescriptor, error) {
 		attempted = append(attempted, server)
 		if !bytes.Equal(got, data) || mimeType != "text/plain" {
 			t.Fatalf("upload bytes/mime: %q %q", got, mimeType)
@@ -394,7 +418,7 @@ func TestNapUploadRejectsBadRequestsAndUnverifiedResults(t *testing.T) {
 
 	data := []byte("exact bytes")
 	napUploadServers = func(context.Context, nostr.PubKey) []string { return []string{"https://bad.example"} }
-	napUploadToServer = func(_ context.Context, server string, got []byte, mimeType string, _ nostr.Keyer) (*blossom.BlobDescriptor, error) {
+	napUploadToServer = func(_ context.Context, server string, got []byte, mimeType string, _ string) (*blossom.BlobDescriptor, error) {
 		return &blossom.BlobDescriptor{URL: server + "/wrong", SHA256: strings.Repeat("0", 64), Size: len(got)}, nil
 	}
 	post(t, ci, uploadEnvelope("bad-descriptor", data))
@@ -416,7 +440,7 @@ func TestNapUploadAnswersBeforeApproval(t *testing.T) {
 	ready(t, ci, rec, 1)
 
 	napUploadServers = func(context.Context, nostr.PubKey) []string { return []string{"https://one.example"} }
-	napUploadToServer = func(context.Context, string, []byte, string, nostr.Keyer) (*blossom.BlobDescriptor, error) {
+	napUploadToServer = func(context.Context, string, []byte, string, string) (*blossom.BlobDescriptor, error) {
 		t.Error("uploaded without approval")
 		return nil, errors.New("not approved")
 	}
@@ -425,7 +449,13 @@ func TestNapUploadAnswersBeforeApproval(t *testing.T) {
 	if result["status"] != "pending" || result["uploadId"] == "" {
 		t.Fatalf("result before approval: %v", result)
 	}
-	p := CurrentPrompt()
+	// the result goes out before the prompt is queued
+	var p *Prompt
+	for deadline := time.Now().Add(2 * time.Second); p == nil && time.Now().Before(deadline); {
+		if p = CurrentPrompt(); p == nil {
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
 	if p == nil {
 		t.Fatal("no approval prompt")
 	}
@@ -436,26 +466,89 @@ func TestNapUploadAnswersBeforeApproval(t *testing.T) {
 	}
 }
 
-func TestUploadSignerReportsSigningFailure(t *testing.T) {
-	signed := false
+// One signature goes to every server, and the signer gets no deadline: a
+// remote signer may wait on the user for minutes.
+func TestNapUploadSignsOnceWithoutDeadline(t *testing.T) {
+	setupNapTest(t)
+	ci, rec := openNapplet(t, "upload-sign")
+	setupNapUploadTest(t, ci)
+	ready(t, ci, rec, 1)
+
+	data := []byte("signed once")
+	sum := sha256.Sum256(data)
+	hash := hex.EncodeToString(sum[:])
+	var auths []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		signed = r.Header.Get("Authorization") != ""
-		w.WriteHeader(http.StatusUnauthorized)
+		body, _ := io.ReadAll(r.Body)
+		if r.Method != http.MethodPut || r.URL.Path != "/upload" || !bytes.Equal(body, data) {
+			t.Errorf("request: %s %s %q", r.Method, r.URL.Path, body)
+		}
+		auths = append(auths, r.Header.Get("Authorization"))
+		json.NewEncoder(w).Encode(blossom.BlobDescriptor{
+			URL: "http://" + r.Host + "/" + hash, SHA256: hash, Size: len(data), Type: "text/plain",
+		})
 	}))
 	defer srv.Close()
-	_, err := napUploadToServer(context.Background(), srv.URL, []byte("x"), "text/plain", failingSigner{})
-	if err == nil || !strings.Contains(err.Error(), "bunker offline") {
-		t.Fatalf("error hides the signer's: %v", err)
+	other := strings.Replace(srv.URL, "127.0.0.1", "localhost", 1)
+	napUploadServers = func(context.Context, nostr.PubKey) []string { return []string{srv.URL, other} }
+	signs := 0
+	signer := userKeyer
+	userKeyer = deadlineCheckingSigner{t: t, Keyer: signer, signs: &signs}
+
+	post(t, ci, uploadEnvelope("signed", data))
+	rec.wait(t, "upload.upload.result", 1)
+	complete := rec.wait(t, "upload.status.changed", 2)["status"].(map[string]any)
+	if complete["status"] != "complete" || len(complete["fallbackUrls"].([]any)) != 1 {
+		t.Fatalf("status: %v", complete)
 	}
-	if signed {
-		t.Fatal("sent an Authorization header with no signature")
+	if signs != 1 || len(auths) != 2 || auths[0] != auths[1] || !strings.HasPrefix(auths[0], "Nostr ") {
+		t.Fatalf("signed %d times, sent %v", signs, auths)
+	}
+	raw, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(auths[0], "Nostr "))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var evt nostr.Event
+	if err := json.Unmarshal(raw, &evt); err != nil || evt.Kind != 24242 || !evt.VerifySignature() ||
+		evt.Tags.Find("x")[1] != hash || evt.Tags.Find("t")[1] != "upload" {
+		t.Fatalf("authorization event: %v %v", evt, err)
 	}
 }
 
-type failingSigner struct{ nostr.Keyer }
+func TestNapUploadReportsSigningFailure(t *testing.T) {
+	setupNapTest(t)
+	ci, rec := openNapplet(t, "upload-unsigned")
+	setupNapUploadTest(t, ci)
+	ready(t, ci, rec, 1)
 
-func (failingSigner) SignEvent(context.Context, *nostr.Event) error {
-	return errors.New("bunker offline")
+	napUploadServers = func(context.Context, nostr.PubKey) []string { return []string{"https://one.example"} }
+	napUploadAuth = func(context.Context, nostr.Keyer, string) (string, error) {
+		return "", errors.New("bunker offline")
+	}
+	napUploadToServer = func(context.Context, string, []byte, string, string) (*blossom.BlobDescriptor, error) {
+		t.Error("uploaded with no authorization")
+		return nil, errors.New("unsigned")
+	}
+	post(t, ci, uploadEnvelope("unsigned", []byte("x")))
+	rec.wait(t, "upload.upload.result", 1)
+	failed := rec.wait(t, "upload.status.changed", 2)["status"].(map[string]any)
+	if failed["status"] != "failed" || failed["error"] != "signing failed" {
+		t.Fatalf("status: %v", failed)
+	}
+}
+
+type deadlineCheckingSigner struct {
+	nostr.Keyer
+	t     *testing.T
+	signs *int
+}
+
+func (s deadlineCheckingSigner) SignEvent(ctx context.Context, evt *nostr.Event) error {
+	if _, ok := ctx.Deadline(); ok {
+		s.t.Error("signing has a deadline")
+	}
+	*s.signs++
+	return s.Keyer.SignEvent(ctx, evt)
 }
 
 func TestNapUploadIsCancelledOnReload(t *testing.T) {
@@ -465,14 +558,16 @@ func TestNapUploadIsCancelledOnReload(t *testing.T) {
 	ready(t, ci, rec, 1)
 
 	napUploadServers = func(context.Context, nostr.PubKey) []string { return []string{"https://slow.example"} }
-	cancelled := make(chan struct{})
-	napUploadToServer = func(ctx context.Context, _ string, _ []byte, _ string, _ nostr.Keyer) (*blossom.BlobDescriptor, error) {
+	started, cancelled := make(chan struct{}), make(chan struct{})
+	napUploadToServer = func(ctx context.Context, _ string, _ []byte, _ string, _ string) (*blossom.BlobDescriptor, error) {
+		close(started)
 		<-ctx.Done()
 		close(cancelled)
 		return nil, ctx.Err()
 	}
 	post(t, ci, uploadEnvelope("slow", []byte("wait")))
 	rec.wait(t, "upload.upload.result", 1)
+	<-started
 	if _, err := napRPC(ci, "nap.reset", ""); err != nil {
 		t.Fatal(err)
 	}

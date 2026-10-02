@@ -8,7 +8,10 @@
   API.
 - NAP-RESOURCE accepts legacy string entries in `bytesMany` while emitting the
   current per-request Blossom server-hint wire shape.
-- NAP-COMMON writes do not time out while waiting for user approval.
+- Requests carry no shim-side deadline (`napRequestTimer`): the shell answers
+  every request, even one waiting on the user's approval or a remote signer
+  (a reload discards the document along with its pending requests). A
+  `timeoutMs` the napplet passes itself is still honored.
 - NAP-INC rejects empty query strings and query parameters without names.
 - NAP-NOTIFY remembers the shell's latest control list so an `onControls`
   subscriber registered after `shell.init` still receives initial capabilities.
@@ -19,7 +22,7 @@ The launcher inlines it into every napplet's srcdoc and activates it with
 `NappletShimPrelude.install({domains})`, so `window.napplet.*` exists before
 the napplet's own scripts run.
 
-sha256: `d3ed3b0db7d02df6f1b628f3e03f3456f93f27f71e06c69b9bd57da60cc37e3c`
+sha256: `6d98d7ba5fb6b0c66550f1e43bf3a4e97880f9907a697bcbe6d58bf89759ed18`
 
 The Go NAP handlers (`backend/nap*.go`) are written against this build's wire
 shapes. To upgrade, replace the file, update the version and hash here, and

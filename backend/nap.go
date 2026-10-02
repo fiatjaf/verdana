@@ -197,6 +197,26 @@ func (c *napCall) replyAs(typ string, fields map[string]any) {
 	c.ci.napPushGen(c.gen, c.envelope(typ, fields))
 }
 
+// fail answers a request whose handler broke. The shim sets no deadline of
+// its own, so a request nobody answers would leave the napplet waiting for
+// good. A second answer after a real one is harmless: the shim has already
+// settled that id.
+func (c *napCall) fail() {
+	if len(c.ID) == 0 {
+		return
+	}
+	switch c.Type {
+	case "config.get":
+		c.replyAs("config.schemaError", map[string]any{"code": "internal-error", "error": "internal error"})
+	case "notify.permission.request":
+		c.replyAs("notify.permission.result", map[string]any{"granted": false})
+	case "resource.bytes", "resource.bytesMany", "relay.publish":
+		c.replyAs(c.Type+".error", map[string]any{"ok": false, "error": "internal-error"})
+	default:
+		c.reply(map[string]any{"ok": false, "error": "internal error"})
+	}
+}
+
 // async runs fn off the queue, on the session's context: a reset or a closed
 // window cancels it, and whatever it replies after that is dropped.
 func (c *napCall) async(fn func(ctx context.Context)) {
@@ -204,6 +224,7 @@ func (c *napCall) async(fn func(ctx context.Context)) {
 		defer func() {
 			if r := recover(); r != nil {
 				log.Error().Interface("panic", r).Str("type", c.Type).Msg("NAP handler panicked")
+				c.fail()
 			}
 		}()
 		fn(c.ctx)
@@ -344,6 +365,7 @@ func (ci *Instance) napDispatch(c napCall) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Error().Interface("panic", r).Str("type", c.Type).Msg("NAP handler panicked")
+			c.fail()
 		}
 	}()
 	h(&c)

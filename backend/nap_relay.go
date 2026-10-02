@@ -497,24 +497,24 @@ func napApprovePublish(ctx context.Context, c *napCall, evt nostr.Event, to nost
 		return nostr.Event{}, nil, errors.New("user-denied")
 	}
 
-	sctx, cancel := context.WithTimeout(ctx, 60*time.Second)
-	defer cancel()
+	// no deadline on the signer: a remote signer may wait on the user to
+	// approve the encryption and the signature in turn
 	if encryption != "" {
 		var (
 			ciphertext string
 			err        error
 		)
 		if encryption == "nip04" {
-			ciphertext, err = userKeyer.Nip04Encrypt(sctx, evt.Content, to)
+			ciphertext, err = userKeyer.Nip04Encrypt(ctx, evt.Content, to)
 		} else {
-			ciphertext, err = userKeyer.Encrypt(sctx, evt.Content, to)
+			ciphertext, err = userKeyer.Encrypt(ctx, evt.Content, to)
 		}
 		if err != nil {
 			return nostr.Event{}, nil, keyerErr(err)
 		}
 		evt.Content = ciphertext
 	}
-	if err := userKeyer.SignEvent(sctx, &evt); err != nil {
+	if err := userKeyer.SignEvent(ctx, &evt); err != nil {
 		return nostr.Event{}, nil, keyerErr(err)
 	}
 

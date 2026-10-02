@@ -172,13 +172,13 @@ func TestNotifyPermissionCombinesVerdanaAndPlatformApproval(t *testing.T) {
 	t.Cleanup(func() { clearSessionRule(key) })
 
 	post(t, ci, map[string]any{"type": "notify.permission.request", "id": "permission"})
-	if got := rec.wait(t, "notify.permission.request.result", 1)["granted"]; got != true {
+	if got := rec.wait(t, "notify.permission.result", 1)["granted"]; got != true {
 		t.Fatalf("permission result = %#v", got)
 	}
 
 	nh.permission = false
 	post(t, ci, map[string]any{"type": "notify.permission.request", "id": "os-denied"})
-	if got := rec.wait(t, "notify.permission.request.result", 2)["granted"]; got != false {
+	if got := rec.wait(t, "notify.permission.result", 2)["granted"]; got != false {
 		t.Fatalf("OS-denied permission result = %#v", got)
 	}
 }

@@ -182,8 +182,36 @@
         if (!json || json.length > limit) throw new Error("NAP envelope is too large")
         return rpc("nap.msg", json)
       })
-      .then(deliver, err => console.error("[napplet-host]", err))
+      .then(deliver, err => {
+        console.error("[napplet-host]", err)
+        refuse(data, err)
+      })
   })
+
+  // refuse answers a request that never reached Go (too large, unencodable,
+  // or the rpc failed). The shim sets no deadline of its own, so without an
+  // answer the napplet would wait for good. Mirrors napCall.fail in nap.go.
+  const refuse = (data, err) => {
+    if (typeof data.id !== "string" && typeof data.id !== "number") return
+    const error = (err && err.message) || "request failed"
+    const reply = { id: data.id }
+    switch (data.type) {
+      case "config.get":
+        Object.assign(reply, { type: "config.schemaError", code: "internal-error", error })
+        break
+      case "notify.permission.request":
+        Object.assign(reply, { type: "notify.permission.result", granted: false })
+        break
+      case "resource.bytes":
+      case "resource.bytesMany":
+      case "relay.publish":
+        Object.assign(reply, { type: data.type + ".error", ok: false, error })
+        break
+      default:
+        Object.assign(reply, { type: data.type + ".result", ok: false, error })
+    }
+    deliver(reply)
+  }
 
   // ── the launcher's own hooks ────────────────────────────────────
   // the theme: the host page paints itself in it (the napplet gets

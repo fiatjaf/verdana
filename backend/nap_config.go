@@ -72,7 +72,8 @@ func napConfigRegisterSchema(c *napCall) {
 func napConfigGet(c *napCall) {
 	values, ok := configValues(c.ci.napp.ID)
 	if !ok {
-		c.ci.napPushGen(c.gen, configSchemaErrorEnv(cfgNoSchema, "no schema has been registered"))
+		// with the request's id, so the shim can settle the pending get
+		c.replyAs("config.schemaError", map[string]any{"code": cfgNoSchema, "error": "no schema has been registered"})
 		return
 	}
 	c.replyAs("config.values", map[string]any{"values": values})
