@@ -89,7 +89,7 @@ rpc for it.
 
 | Domain | Where | Notes |
 |---|---|---|
-| `shell` | `nap.go` | `shell.ready` → `shell.init {capabilities:{domains}}`; a second `shell.ready` (a reload) starts a new session |
+| `shell` | `nap.go` | `shell.ready` → `shell.init {capabilities:{domains}}`. A repeated `shell.ready` is ignored; a reload arrives as `nap.reset` first, which ends the session |
 | `relay` | `nap_relay.go` | subscribe/close/query use the outbox model. publish/publishEncrypted show **one** prompt, then encrypt, sign and publish. Events are delivered exactly as signed: encrypted DMs stay ciphertext, as the napplet spec requires |
 | `identity` | `nap_identity.go` | read-only; `identity.changed` on login/logout |
 | `storage` | `nap_basic.go` | 512 KB, shared or per-window scope. Keyed by the napplet's **address**, not its artifact hash, so data survives updates (a deliberate deviation from NAP-STORAGE) |
@@ -99,10 +99,12 @@ rpc for it.
 | `inc` | `nap_inc.go` | topics (exact match, never echoed back to the sender) and channels; the sender is always stamped by the launcher |
 | `intent` | `nap_intent.go` | A convention URI is normalized by the shim, then routed through the launcher's picker, rules, and cold launch. Acceptance transfers delivery responsibility to the runtime. Napplets receive buffered `intent.deliver` events independently of the source lifecycle |
 | `resource` | `nap_resource.go` | `data:`, `https:`, `blossom:sha256:`, `nostr:`. Public addresses only (checked at dial time on every hop), 10 MiB, 30 s, MIME sniffed, no SVG or HTML. Web fetches are asked once per session |
+| `upload` | `nap_upload.go` | Blossom only, to the signed-in user's servers, behind the upload prompt |
+| `media` | `nap_media.go`, `desktop/media*.go` | NAP-MEDIA (draft, naps PR #10). `owner:"shell"` plays the source in the system's player: mpv (JSON IPC) or else VLC (oldrc socket) on the desktop, another app through an `ACTION_VIEW` intent on Android. Sources are `https:` urls on public hosts or `blossomHash` (the first server that has it); `nostr` is not supported yet. The player fetches the url itself, so the address is only checked up front, not on each hop. Asked once per session; 4 sessions per window. State is pushed (position at most once a second) and `play/pause/stop/seek/volume` commands are passed through. On Windows and Android the player is only started: it reports `playing` and ignores commands. `owner:"napplet"` sessions are tracked but the launcher has no media controls to show them in yet |
 | `outbox` | `nap_outbox.go`, `outbox.go` | NAP-OUTBOX (draft, naps PR #32). Reads are split per relay: each author is asked on their own NIP-65 write relays, `#p` people on their inboxes, hints and fallback relays get the rest. Results are deduplicated, verified, delivered as signed (never decrypted) and carry `sidecar.relayHints`. A subscription never sends an eose, and ends with `outbox.closed` when no relay is left. `publish` signs once and fans out to the user's write relays (`toOutbox`, default true), every `toInboxes` person's read relays and validated `relays`. A recipient with no inbox fails the publish before the prompt. `resolveRelays` uses NIP-65 markers: `write` is where people post, `read` is their inbox. `query({stream})` is not supported yet |
 
-Not implemented yet: `notify`, `keys`, `config`, `media`, `upload`,
-`lists`, `dm` and `count`.
+Not implemented yet: `notify`, `keys`, `config`, `lists`, `dm` and
+`count`.
 
 ## Security notes
 

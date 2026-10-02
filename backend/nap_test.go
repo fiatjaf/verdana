@@ -119,6 +119,9 @@ func setupNapTest(t *testing.T) {
 		storagesMu.Lock()
 		storages = make(map[string]*nappStorage)
 		storagesMu.Unlock()
+		configMu.Lock()
+		configs = make(map[string]*configEntry)
+		configMu.Unlock()
 	})
 }
 

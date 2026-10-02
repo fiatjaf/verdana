@@ -34,8 +34,7 @@ import (
 // never the napplet's R/O tags (WEB-NAPPLET.md forbids gating on those).
 var napDomains = []string{
 	"relay", "identity", "storage", "resource", "common",
-	"theme", "inc", "intent", "link", "upload", "outbox",
-	"notify",
+	"theme", "inc", "intent", "link", "upload", "outbox", "media", "notify",
 }
 
 // napSession is what one napplet window has going: the subscriptions and
@@ -77,6 +76,11 @@ type napSession struct {
 	notifyBadge       uint
 	notifyTimes       []time.Time
 	urgentNotifyTimes []time.Time
+	// media sessions by canonical id; shell-owned ones hold a player that a
+	// reset stops. mediaSeq numbers ids and is never reset, so an id from an
+	// old document never names a session in a new one.
+	media    map[string]*mediaSession
+	mediaSeq int
 
 	// queue serializes envelopes; started lazily by the first one
 	queue chan napCall
@@ -124,6 +128,10 @@ func (s *napSession) resetLocked() {
 	s.notifyBadge = 0
 	s.notifyTimes = nil
 	s.urgentNotifyTimes = nil
+	for _, ms := range s.media {
+		ms.stop()
+	}
+	s.media = make(map[string]*mediaSession)
 	s.established = false
 	s.ready = make(chan struct{})
 }
