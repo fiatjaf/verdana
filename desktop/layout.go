@@ -336,6 +336,7 @@ func layoutMain(
 	extraBtn *widget.Clickable,
 	installedOpenBtns,
 	installedAuthorBtns,
+	installedSettingsBtns,
 	discoCardBtns,
 	discoOpenBtns,
 	discoAuthorBtns []widget.Clickable,
@@ -370,7 +371,7 @@ func layoutMain(
 					shortcutDelBtns, shortcutEditBtns, st)
 			}
 			if tab == 1 {
-				return layoutNappsTab(gtx, th, installedList, installedFilterEd, cardBtns, uninstBtns, installedUpdateBtns, installedOpenBtns, installedAuthorBtns, checkUpdBtn, instVis, st)
+				return layoutNappsTab(gtx, th, installedList, installedFilterEd, cardBtns, uninstBtns, installedUpdateBtns, installedOpenBtns, installedAuthorBtns, installedSettingsBtns, checkUpdBtn, instVis, st)
 			}
 			if tab == 2 {
 				return layoutDiscoveryTab(gtx, th, discoveryList, relaysEd, filterEd, fetchBtn, actionBtns,
@@ -754,7 +755,8 @@ func layoutNappsTab(
 	uninstBtns []widget.Clickable,
 	installedUpdateBtns []widget.Clickable,
 	openBtns,
-	authorBtns []widget.Clickable,
+	authorBtns,
+	settingsBtns []widget.Clickable,
 	checkUpdBtn *widget.Clickable,
 	vis []int,
 	st backend.State,
@@ -806,7 +808,7 @@ func layoutNappsTab(
 					uninstBtn = &uninstBtns[row]
 				}
 				// the card opens the napp page; Open launches it
-				var updateBtn, openBtn, authorBtn *widget.Clickable
+				var updateBtn, openBtn, authorBtn, settingsBtn *widget.Clickable
 				if row < len(installedUpdateBtns) && st.Installed[row].UpdateAvailable != nil {
 					updateBtn = &installedUpdateBtns[row]
 				}
@@ -816,7 +818,10 @@ func layoutNappsTab(
 				if row < len(authorBtns) {
 					authorBtn = &authorBtns[row]
 				}
-				return renderNappCard(gtx, th, cardBtn, authorBtn, openBtn, uninstBtn, updateBtn, "Uninstall", "Update", st.Installed[row])
+				if row < len(settingsBtns) && st.Installed[row].IsNapplet() {
+					settingsBtn = &settingsBtns[row]
+				}
+				return renderNappCard(gtx, th, cardBtn, authorBtn, openBtn, settingsBtn, uninstBtn, updateBtn, "Uninstall", "Update", st.Installed[row])
 			})
 		}),
 	)
@@ -980,7 +985,7 @@ func layoutDiscoveryTab(
 				if row < len(authorBtns) {
 					authorBtn = &authorBtns[row]
 				}
-				return renderNappCard(gtx, th, cardBtn, authorBtn, openBtn, btn, updBtn, label, updLabel, n)
+				return renderNappCard(gtx, th, cardBtn, authorBtn, openBtn, nil, btn, updBtn, label, updLabel, n)
 			})
 		}),
 	)
@@ -1089,7 +1094,7 @@ func layoutDevTab(
 				if i < len(publishBtns) && backend.DevSourceKind(st.Dev[i].ID) == "folder" {
 					publishBtn = &publishBtns[i]
 				}
-				return renderNappCard(gtx, th, openBtn, nil, nil, publishBtn, unloadBtn, "Publish", "Unload", st.Dev[i])
+				return renderNappCard(gtx, th, openBtn, nil, nil, nil, publishBtn, unloadBtn, "Publish", "Unload", st.Dev[i])
 			})
 		}),
 	)
@@ -1299,6 +1304,7 @@ func renderNappCard(
 	cardBtn,
 	authorBtn,
 	openBtn,
+	settingsBtn,
 	btn,
 	secondBtn *widget.Clickable,
 	btnLabel,
@@ -1419,6 +1425,20 @@ func renderNappCard(
 						b := material.Button(th, openBtn, "Open")
 						b.Background = currentTheme().suggestBg
 						b.Color = currentTheme().suggestFg
+						b.TextSize = unit.Sp(13)
+						b.Inset = layout.UniformInset(unit.Dp(8))
+						return b.Layout(gtx)
+					})
+				}),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					if settingsBtn == nil {
+						return layout.Dimensions{}
+					}
+					return layout.Inset{Left: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						pointer.CursorPointer.Add(gtx.Ops)
+						b := material.Button(th, settingsBtn, "Settings")
+						b.Background = currentTheme().chipBg
+						b.Color = currentTheme().chipFg
 						b.TextSize = unit.Sp(13)
 						b.Inset = layout.UniformInset(unit.Dp(8))
 						return b.Layout(gtx)

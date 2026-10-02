@@ -479,6 +479,7 @@ private fun InstalledTab(activity: MainActivity, st: LauncherState, theme: Theme
                     onAuthor = { onAuthor(napp.author) },
                     onLaunch = { activity.launch(napp.id) },
                     showOpen = true,
+                    onSettings = if (napp.isNapplet) ({ VerdanaHost.openNappSettings(napp.id) }) else null,
                     primaryLabel = if (busy) "Working…" else "Uninstall",
                     onPrimary = { activity.uninstall(napp.id) },
                     secondaryLabel = if (napp.updateAvailable) "Update" else null,
@@ -629,6 +630,7 @@ private fun NappCard(
     onDetail: (() -> Unit)? = null,
     onAuthor: (() -> Unit)? = null,
     onLaunch: (() -> Unit)? = null,
+    onSettings: (() -> Unit)? = null,
     showOpen: Boolean = false,
 ) {
     // icons load off the main thread, keyed by blob hash like the desktop
@@ -714,6 +716,17 @@ private fun NappCard(
                 colors = ButtonDefaults.buttonColors(containerColor = theme.suggestBg, contentColor = theme.suggestFg),
             ) {
                 Text("Open", fontSize = 13.sp)
+            }
+            Spacer(Modifier.width(6.dp))
+        }
+        if (onSettings != null) {
+            Button(
+                onClick = onSettings,
+                enabled = primaryLabel != "Working…",
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = theme.chipBg, contentColor = theme.chipFg),
+            ) {
+                Text("Settings", fontSize = 13.sp)
             }
             Spacer(Modifier.width(6.dp))
         }

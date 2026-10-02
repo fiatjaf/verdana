@@ -517,7 +517,7 @@ func layoutProfileDetail(
 				}
 				// inside a profile the author row is the profile itself:
 				// no nested author button
-				return renderNappCard(gtx, th, cardBtn, nil, openBtn, actBtn, updBtn, label, updLabel, n)
+				return renderNappCard(gtx, th, cardBtn, nil, openBtn, nil, actBtn, updBtn, label, updLabel, n)
 			})
 		}),
 	)

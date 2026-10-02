@@ -11,24 +11,12 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
@@ -42,9 +30,8 @@ import mobile.Mobile
 // window of its own and launching the same one brings this window back
 // instead of opening a second.
 //
-// A window carries almost no launcher chrome: it is a napp, not a tab inside
-// a browser. A slim bar above it holds the gear to its settings window, and
-// nothing else. Back walks the napp's own history and then leaves the window;
+// A window carries no launcher chrome: it is a napp, not a tab inside a
+// browser. Back walks the napp's own history and then leaves the window;
 // the only thing that ever covers a napp is a prompt it has to answer.
 class NappActivity : ComponentActivity() {
 
@@ -235,15 +222,10 @@ class NappActivity : ComponentActivity() {
                 }
 
                 Box(Modifier.fillMaxSize()) {
-                    Column(Modifier.fillMaxSize().systemBarsPadding()) {
-                        WindowBar(web.name.ifBlank { nappId }, theme) {
-                            VerdanaHost.openSettingsFor(instance)
-                        }
-                        AndroidView(
-                            factory = { web.view },
-                            modifier = Modifier.fillMaxWidth().weight(1f),
-                        )
-                    }
+                    AndroidView(
+                        factory = { web.view },
+                        modifier = Modifier.fillMaxSize().systemBarsPadding(),
+                    )
                     if (prompt != null) {
                         // the prompt covers the whole window, bars included:
                         // it is a blocking question, not a dialog over the
@@ -255,32 +237,6 @@ class NappActivity : ComponentActivity() {
                         }
                     }
                 }
-            }
-        }
-    }
-
-    // WindowBar is the window's only chrome: the napp's name and the gear
-    // that opens its settings window.
-    @androidx.compose.runtime.Composable
-    private fun WindowBar(name: String, theme: Theme, onSettings: () -> Unit) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(40.dp)
-                .background(theme.card)
-                .padding(start = 12.dp),
-        ) {
-            Text(
-                name,
-                color = theme.muted,
-                fontSize = 13.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
-            TextButton(onClick = onSettings) {
-                Text("\u2699", color = theme.fg, fontSize = 18.sp)
             }
         }
     }

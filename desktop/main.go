@@ -294,58 +294,59 @@ func gioMain() {
 	gioWin = w
 
 	var (
-		loginEd             widget.Editor
-		loginBtn            widget.Clickable
-		relaysEd            widget.Editor
-		fetchBtn            widget.Clickable
-		tabNappsBtn         widget.Clickable
-		tabDiscoBtn         widget.Clickable
-		tabDevBtn           widget.Clickable
-		tabWindowsBtn       widget.Clickable
-		themeBtn            widget.Clickable
-		settingsBtn         widget.Clickable
-		logoutBtn           widget.Clickable
-		confirmYesBtn       widget.Clickable
-		confirmNoBtn        widget.Clickable
-		installedList       widget.List
-		discoveryList       widget.List
-		devList             widget.List
-		windowsList         widget.List
-		devURLed            widget.Editor
-		devPathEd           widget.Editor
-		loadURLBtn          widget.Clickable
-		browseBtn           widget.Clickable
-		loadFolderBtn       widget.Clickable
-		devOpenBtns         []widget.Clickable
-		devUnloadBtns       []widget.Clickable
-		devPublishBtns      []widget.Clickable
-		closeBtns           []widget.Clickable
-		reopenBtns          []widget.Clickable
-		cardBtns            []widget.Clickable
-		uninstBtns          []widget.Clickable
-		installedUpdateBtns []widget.Clickable
-		installedOpenBtns   []widget.Clickable
-		installedAuthorBtns []widget.Clickable
-		actionBtns          []widget.Clickable
-		updateBtns          []widget.Clickable
-		discoCardBtns       []widget.Clickable
-		discoOpenBtns       []widget.Clickable
-		discoAuthorBtns     []widget.Clickable
-		checkUpdBtn         widget.Clickable
-		tabExtraBtn         widget.Clickable
-		detailOpenBtn       widget.Clickable
-		detailPrimaryBtn    widget.Clickable
-		detailUpdateBtn     widget.Clickable
-		detailAuthorBtn     widget.Clickable
-		detailCopyAddrBtn   widget.Clickable
-		detailSettingsBtn   widget.Clickable
-		profileList         widget.List
-		profileCardBtns     []widget.Clickable
-		profileOpenBtns     []widget.Clickable
-		profileActionBtns   []widget.Clickable
-		profileUpdateBtns   []widget.Clickable
-		promptBtns          promptButtons
-		optBtns             []widget.Clickable
+		loginEd               widget.Editor
+		loginBtn              widget.Clickable
+		relaysEd              widget.Editor
+		fetchBtn              widget.Clickable
+		tabNappsBtn           widget.Clickable
+		tabDiscoBtn           widget.Clickable
+		tabDevBtn             widget.Clickable
+		tabWindowsBtn         widget.Clickable
+		themeBtn              widget.Clickable
+		settingsBtn           widget.Clickable
+		logoutBtn             widget.Clickable
+		confirmYesBtn         widget.Clickable
+		confirmNoBtn          widget.Clickable
+		installedList         widget.List
+		discoveryList         widget.List
+		devList               widget.List
+		windowsList           widget.List
+		devURLed              widget.Editor
+		devPathEd             widget.Editor
+		loadURLBtn            widget.Clickable
+		browseBtn             widget.Clickable
+		loadFolderBtn         widget.Clickable
+		devOpenBtns           []widget.Clickable
+		devUnloadBtns         []widget.Clickable
+		devPublishBtns        []widget.Clickable
+		closeBtns             []widget.Clickable
+		reopenBtns            []widget.Clickable
+		cardBtns              []widget.Clickable
+		uninstBtns            []widget.Clickable
+		installedUpdateBtns   []widget.Clickable
+		installedOpenBtns     []widget.Clickable
+		installedAuthorBtns   []widget.Clickable
+		installedSettingsBtns []widget.Clickable
+		actionBtns            []widget.Clickable
+		updateBtns            []widget.Clickable
+		discoCardBtns         []widget.Clickable
+		discoOpenBtns         []widget.Clickable
+		discoAuthorBtns       []widget.Clickable
+		checkUpdBtn           widget.Clickable
+		tabExtraBtn           widget.Clickable
+		detailOpenBtn         widget.Clickable
+		detailPrimaryBtn      widget.Clickable
+		detailUpdateBtn       widget.Clickable
+		detailAuthorBtn       widget.Clickable
+		detailCopyAddrBtn     widget.Clickable
+		detailSettingsBtn     widget.Clickable
+		profileList           widget.List
+		profileCardBtns       []widget.Clickable
+		profileOpenBtns       []widget.Clickable
+		profileActionBtns     []widget.Clickable
+		profileUpdateBtns     []widget.Clickable
+		promptBtns            promptButtons
+		optBtns               []widget.Clickable
 
 		bundleNameEd      widget.Editor
 		createShortcutBtn widget.Clickable
@@ -529,6 +530,9 @@ func gioMain() {
 					for len(installedAuthorBtns) < len(st.Installed) {
 						installedAuthorBtns = append(installedAuthorBtns, widget.Clickable{})
 					}
+					for len(installedSettingsBtns) < len(st.Installed) {
+						installedSettingsBtns = append(installedSettingsBtns, widget.Clickable{})
+					}
 					for len(actionBtns) < len(st.Discovery) {
 						actionBtns = append(actionBtns, widget.Clickable{})
 					}
@@ -631,6 +635,16 @@ func gioMain() {
 							if installedAuthorBtns[i].Clicked(gtx) {
 								openProfileTab(st.Installed[i].Author.Hex())
 								acted = true
+							}
+						}
+						if !acted {
+							for _, i := range instVis {
+								if st.Installed[i].IsNapplet() && installedSettingsBtns[i].Clicked(gtx) {
+									if err := backend.OpenSettings(st.Installed[i].ID); err != nil {
+										log.Warn().Err(err).Str("napp", st.Installed[i].ID).Msg("could not open settings")
+									}
+									acted = true
+								}
 							}
 						}
 						if !acted {
@@ -902,6 +916,7 @@ func gioMain() {
 						&tabExtraBtn,
 						installedOpenBtns,
 						installedAuthorBtns,
+						installedSettingsBtns,
 						discoCardBtns,
 						discoOpenBtns,
 						discoAuthorBtns,
