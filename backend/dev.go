@@ -261,8 +261,19 @@ func readDevFolder(dir string) (Napp, error) {
 
 	var total int64
 	err = filepath.WalkDir(dir, func(p string, de os.DirEntry, err error) error {
-		if err != nil || !de.Type().IsRegular() {
+		if err != nil {
 			return err
+		}
+		// hidden files and folders (.git, .env, editor state) are not part
+		// of a napp, and must never be published to public servers
+		if p != dir && strings.HasPrefix(de.Name(), ".") {
+			if de.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !de.Type().IsRegular() {
+			return nil
 		}
 		info, err := de.Info()
 		if err != nil {
