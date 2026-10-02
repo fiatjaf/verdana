@@ -120,5 +120,26 @@ func nappBaseDir(id string) string {
 	return filepath.Join(dataDir, "napps", name)
 }
 
+// migrateNappDir moves an installed napp's files from where they went before
+// ids were escaped (the raw id) to where nappBaseDir looks for them now.
+// Nothing happens when the names are the same, when the new place is already
+// taken, or when the old name pointed outside the napps directory.
+func migrateNappDir(id string) {
+	to := nappBaseDir(id)
+	from := filepath.Join(dataDir, "napps", id)
+	if from == to || !filepath.IsLocal(id) {
+		return
+	}
+	if _, err := os.Stat(to); err == nil {
+		return
+	}
+	if _, err := os.Stat(from); err != nil {
+		return
+	}
+	if err := os.Rename(from, to); err != nil {
+		log.Warn().Err(err).Str("napp", id).Msg("could not move napp files to their new directory")
+	}
+}
+
 // NappBaseDir is where a napp's files are unpacked.
 func NappBaseDir(id string) string { return nappBaseDir(id) }

@@ -86,6 +86,9 @@ func loadState() {
 	}
 	themeName = state.Theme
 	saveState()
+	for id := range state.InstalledNapps {
+		migrateNappDir(id)
+	}
 	log.Info().Int("napps", len(state.InstalledNapps)).Msg("state loaded")
 }
 
