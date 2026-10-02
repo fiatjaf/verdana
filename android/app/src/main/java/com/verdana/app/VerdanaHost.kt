@@ -300,6 +300,33 @@ object VerdanaHost : UI {
         return went
     }
 
+    // playMedia hands a napplet's shell-owned media session to whatever
+    // player app the phone has. Like amberRequest, it waits on the main
+    // thread only long enough to know whether some app took it.
+    override fun playMedia(url: String, mime: String, title: String): Boolean {
+        val ctx = appContext ?: return false
+        val done = java.util.concurrent.Semaphore(0)
+        var went = false
+        ctx.startActivityOnMain {
+            try {
+                val type = mime.ifBlank { "video/*" }
+                ctx.startActivity(
+                    Intent(Intent.ACTION_VIEW)
+                        .setDataAndType(Uri.parse(url), type)
+                        .putExtra(Intent.EXTRA_TITLE, title)
+                        .putExtra("title", title)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+                went = true
+            } catch (e: android.content.ActivityNotFoundException) {
+                Toast.makeText(ctx, "No app to play this media", Toast.LENGTH_SHORT).show()
+            }
+            done.release()
+        }
+        done.tryAcquire(java.util.concurrent.TimeUnit.SECONDS.toNanos(5), java.util.concurrent.TimeUnit.NANOSECONDS)
+        return went
+    }
+
     private fun mimeGuess(name: String): String = when {
         name.endsWith(".html") -> "text/html"
         name.endsWith(".png") -> "image/png"
