@@ -237,11 +237,14 @@ type settingsLoad struct {
 }
 
 type launcherSettings struct {
-	Relays             []string `json:"relays"`
-	BlossomServers     []string `json:"blossomServers"`
-	ThemeMode          string   `json:"themeMode"`
-	AutostartSupported bool     `json:"autostartSupported"`
-	Autostart          bool     `json:"autostart"`
+	Relays                []string `json:"relays"`
+	BlossomServers        []string `json:"blossomServers"`
+	ThemeMode             string   `json:"themeMode"`
+	AutostartSupported    bool     `json:"autostartSupported"`
+	Autostart             bool     `json:"autostart"`
+	AppShortcutsSupported bool     `json:"appShortcutsSupported"`
+	AppShortcuts          bool     `json:"appShortcuts"`
+	AppShortcutNaming     string   `json:"appShortcutNaming"`
 }
 
 func settingsRPC(w *settingsWindow, method, params string) (any, error) {
@@ -272,6 +275,8 @@ func settingsRPC(w *settingsWindow, method, params string) (any, error) {
 			BlossomServers []string `json:"blossomServers"`
 			ThemeMode      string   `json:"themeMode"`
 			Autostart      *bool    `json:"autostart"`
+			AppShortcuts   *bool    `json:"appShortcuts"`
+			ShortcutNaming string   `json:"appShortcutNaming"`
 		}
 		if err := json.Unmarshal([]byte(params), &req); err != nil {
 			return nil, errors.New("invalid request")
@@ -298,6 +303,17 @@ func settingsRPC(w *settingsWindow, method, params string) (any, error) {
 				return nil, err
 			}
 		}
+		if req.AppShortcuts != nil || req.ShortcutNaming != "" {
+			enabled := AppShortcutsEnabled()
+			if req.AppShortcuts != nil {
+				enabled = *req.AppShortcuts
+			}
+			naming := AppShortcutNaming()
+			if req.ShortcutNaming != "" {
+				naming = req.ShortcutNaming
+			}
+			SetAppShortcutSettings(enabled, naming)
+		}
 		return settingsLoadFor(w), nil
 	case "settings.forgetPermission":
 		var req struct {
@@ -319,11 +335,14 @@ func settingsLoadFor(w *settingsWindow) settingsLoad {
 	out := settingsLoad{
 		Set: []string{}, Secrets: []string{}, Permissions: []PermissionRule{},
 		Launcher: launcherSettings{
-			Relays:             Relays(),
-			BlossomServers:     BlossomServers(),
-			ThemeMode:          ThemeMode(),
-			AutostartSupported: host.AutostartSupported(),
-			Autostart:          host.AutostartEnabled(),
+			Relays:                Relays(),
+			BlossomServers:        BlossomServers(),
+			ThemeMode:             ThemeMode(),
+			AutostartSupported:    host.AutostartSupported(),
+			Autostart:             host.AutostartEnabled(),
+			AppShortcutsSupported: host.AppShortcutsSupported(),
+			AppShortcuts:          AppShortcutsEnabled(),
+			AppShortcutNaming:     AppShortcutNaming(),
 		},
 	}
 	if w.nappID == launcherSettingsID {

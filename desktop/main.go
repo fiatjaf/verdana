@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 	"verdana/backend"
 
 	"gioui.org/app"
@@ -132,6 +133,9 @@ func main() {
 	background, startupToken := startupArgs(os.Args[1:])
 
 	verdanaDir := filepath.Join(dataDir, "Verdana")
+	if err := os.MkdirAll(verdanaDir, 0700); err != nil {
+		log.Fatal().Err(err).Msg("could not create data directory")
+	}
 
 	forwarded := instanceCommand{Command: commandOpenManager}
 	if startupToken != "" {
@@ -144,6 +148,24 @@ func main() {
 		log.Info().Str("command", forwarded.Command).Msg("forwarded invocation to the running launcher")
 		return
 	}
+	releaseInstanceLock, acquired, err := acquireInstanceLock(verdanaDir)
+	if err != nil {
+		log.Fatal().Err(err).Msg("could not acquire the launcher instance lock")
+	}
+	if !acquired {
+		// The lock holder may be between acquiring the lock and publishing its
+		// forwarding port. Give that cold-start window time to finish.
+		deadline := time.Now().Add(3 * time.Second)
+		for time.Now().Before(deadline) {
+			if forwardToInstance(verdanaDir, forwarded) {
+				return
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		log.Warn().Msg("another Verdana launcher is starting; leaving it as the sole instance")
+		return
+	}
+	defer releaseInstanceLock()
 
 	// the listener goes up before the backend, so a shortcut clicked while
 	// this launcher is still starting finds someone to forward to instead of
@@ -191,9 +213,15 @@ func main() {
 
 func startupArgs(args []string) (background bool, token string) {
 	var tokenArgs []string
-	for _, arg := range args {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
 		if arg == "--background" {
 			background = true
+			continue
+		}
+		if arg == "--launch-napp" && i+1 < len(args) {
+			i++
+			tokenArgs = append(tokenArgs, args[i])
 			continue
 		}
 		if strings.HasPrefix(arg, "-") {

@@ -64,6 +64,11 @@ type Host interface {
 	AutostartEnabled() bool
 	SetAutostart(bool) error
 
+	// SyncAppShortcuts reconciles Verdana-owned system launcher entries with
+	// the complete desired set. Passing nil removes every managed entry.
+	AppShortcutsSupported() bool
+	SyncAppShortcuts([]AppShortcut) error
+
 	// AmberRequest hands a NIP-55 operation (sign_event, nip44_encrypt, …)
 	// to the phone's signer app — the Android host launches the signer and
 	// the answer comes back to AnswerAmber with the same id. False means
@@ -165,6 +170,15 @@ type ShortcutFile struct {
 	Token string
 }
 
+// AppShortcut is one installed napp or napplet exposed as a native system
+// application entry. Icon may be nil; platforms then use Verdana's icon.
+type AppShortcut struct {
+	ID          string
+	Name        string
+	Description string
+	Icon        []byte
+}
+
 // Transport is one napp window, seen from the backend: a place to send wire
 // messages and a way to make it go away.
 type Transport interface {
@@ -240,11 +254,13 @@ func (noopHost) OpenLink(string) error                   { return errors.New("no
 func (noopHost) CreateShortcutFile(string, string) (string, error) {
 	return "", errors.New("no shortcuts here")
 }
-func (noopHost) DeleteShortcutFile(string) error   { return nil }
-func (noopHost) ListShortcutFiles() []ShortcutFile { return nil }
-func (noopHost) AutostartSupported() bool          { return false }
-func (noopHost) AutostartEnabled() bool            { return false }
-func (noopHost) SetAutostart(bool) error           { return errors.New("no autostart service") }
+func (noopHost) DeleteShortcutFile(string) error      { return nil }
+func (noopHost) ListShortcutFiles() []ShortcutFile    { return nil }
+func (noopHost) AutostartSupported() bool             { return false }
+func (noopHost) AutostartEnabled() bool               { return false }
+func (noopHost) SetAutostart(bool) error              { return errors.New("no autostart service") }
+func (noopHost) AppShortcutsSupported() bool          { return false }
+func (noopHost) SyncAppShortcuts([]AppShortcut) error { return nil }
 func (noopHost) AmberRequest(string, string, string, string, string, string) bool {
 	return false
 }

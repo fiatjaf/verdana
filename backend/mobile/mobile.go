@@ -190,11 +190,13 @@ func AnswerAmber(id string, answer string, ok bool) {
 func (h mobileHost) CreateShortcutFile(string, string) (string, error) {
 	return "", errors.New("shortcut files are a desktop concept")
 }
-func (h mobileHost) DeleteShortcutFile(string) error           { return nil }
-func (h mobileHost) ListShortcutFiles() []backend.ShortcutFile { return nil }
-func (h mobileHost) AutostartSupported() bool                  { return false }
-func (h mobileHost) AutostartEnabled() bool                    { return false }
-func (h mobileHost) SetAutostart(bool) error                   { return errors.New("autostart is a desktop feature") }
+func (h mobileHost) DeleteShortcutFile(string) error              { return nil }
+func (h mobileHost) ListShortcutFiles() []backend.ShortcutFile    { return nil }
+func (h mobileHost) AutostartSupported() bool                     { return false }
+func (h mobileHost) AutostartEnabled() bool                       { return false }
+func (h mobileHost) SetAutostart(bool) error                      { return errors.New("autostart is a desktop feature") }
+func (h mobileHost) AppShortcutsSupported() bool                  { return false }
+func (h mobileHost) SyncAppShortcuts([]backend.AppShortcut) error { return nil }
 
 type mobileTransport struct {
 	ui       UI

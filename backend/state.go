@@ -47,6 +47,12 @@ type AppState struct {
 	// resolved light/dark theme and its colors live in theme.go.
 	Theme string `json:"theme"`
 
+	// ExposeInstalledApps mirrors installed napps and napplets into the
+	// desktop's native application launcher. AppShortcutNameStyle is "plain"
+	// or "hosted" ("Name — Verdana").
+	ExposeInstalledApps  bool   `json:"expose_installed_apps,omitempty"`
+	AppShortcutNameStyle string `json:"app_shortcut_name_style,omitempty"`
+
 	// NostrConnectRelay is the relay the login screen's nostrconnect QR
 	// code sends signers to (see nostrconnect.go).
 	NostrConnectRelay string `json:"nostrconnect_relay"`
@@ -95,6 +101,9 @@ func loadState() {
 	}
 	if state.Theme != ThemeSystem && state.Theme != ThemeLight && state.Theme != ThemeDark {
 		state.Theme = ThemeSystem
+	}
+	if state.AppShortcutNameStyle != AppShortcutNameHosted {
+		state.AppShortcutNameStyle = AppShortcutNamePlain
 	}
 	themeMu.Lock()
 	if state.Theme == ThemeDark {

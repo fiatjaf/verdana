@@ -67,7 +67,8 @@ func TestLauncherSettingsWindow(t *testing.T) {
 	}
 	if load.Napp || !slices.Equal(load.Launcher.Relays, []string{"wss://relay.one"}) ||
 		!slices.Equal(load.Launcher.BlossomServers, defaultBlossomServers) || load.Launcher.ThemeMode != ThemeSystem ||
-		!load.Launcher.AutostartSupported || load.Launcher.Autostart {
+		!load.Launcher.AutostartSupported || load.Launcher.Autostart || !load.Launcher.AppShortcutsSupported || load.Launcher.AppShortcuts ||
+		load.Launcher.AppShortcutNaming != AppShortcutNamePlain {
 		t.Fatalf("load: %+v", load)
 	}
 
@@ -88,6 +89,14 @@ func TestLauncherSettingsWindow(t *testing.T) {
 	}
 	if !h.autostart {
 		t.Fatal("autostart was not enabled")
+	}
+	HandleSettingsMessage(win, WireMsg{T: "rpc", ID: 6, Method: "settings.saveLauncher",
+		Params: `{"appShortcuts":true,"appShortcutNaming":"hosted"}`})
+	if r := srec.resp(t, 6); r.Error != "" {
+		t.Fatal(r.Error)
+	}
+	if !AppShortcutsEnabled() || AppShortcutNaming() != AppShortcutNameHosted {
+		t.Fatalf("app shortcut settings were not saved: enabled=%v naming=%q", AppShortcutsEnabled(), AppShortcutNaming())
 	}
 
 	// a napp's window carries the launcher's page too

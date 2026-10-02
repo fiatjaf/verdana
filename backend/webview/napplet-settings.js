@@ -475,6 +475,34 @@
         ),
       )
     }
+    const appShortcuts = el("input", { type: "checkbox", name: "appShortcuts" })
+    appShortcuts.checked = !!l.appShortcuts
+    const shortcutNaming = el(
+      "select",
+      { name: "appShortcutNaming" },
+      el("option", { value: "plain" }, "App name"),
+      el("option", { value: "hosted" }, "App name — Verdana"),
+    )
+    shortcutNaming.value = l.appShortcutNaming || "plain"
+    shortcutNaming.disabled = !appShortcuts.checked
+    appShortcuts.onchange = () => {
+      shortcutNaming.disabled = !appShortcuts.checked
+    }
+    if (l.appShortcutsSupported) {
+      appearance.append(
+        el(
+          "div",
+          { class: "field check" },
+          el(
+            "label",
+            {},
+            appShortcuts,
+            el("span", {}, "Show installed apps in the system launcher", el("span", { class: "hint" }, "Keep native entries synchronized for every installed napp and napplet.")),
+          ),
+        ),
+        el("label", { class: "field" }, el("span", {}, "Launcher names"), shortcutNaming),
+      )
+    }
     const relays = listEditor(
       "Relays",
       "Napps and napplets are discovered on these relays.",
@@ -499,6 +527,9 @@
               relays: relays.read(),
               blossomServers: servers.read(),
               ...(autostart ? { autostart: autostart.checked } : {}),
+              ...(l.appShortcutsSupported
+                ? { appShortcuts: appShortcuts.checked, appShortcutNaming: shortcutNaming.value }
+                : {}),
             },
             "Saved",
           )

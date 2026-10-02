@@ -17,8 +17,9 @@ type settingsTestHost struct {
 	autostart bool
 }
 
-func (h *settingsTestHost) AutostartSupported() bool { return true }
-func (h *settingsTestHost) AutostartEnabled() bool   { return h.autostart }
+func (h *settingsTestHost) AutostartSupported() bool    { return true }
+func (h *settingsTestHost) AppShortcutsSupported() bool { return true }
+func (h *settingsTestHost) AutostartEnabled() bool      { return h.autostart }
 func (h *settingsTestHost) SetAutostart(v bool) error {
 	h.autostart = v
 	return nil

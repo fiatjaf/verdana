@@ -26,6 +26,7 @@ func refreshInstalled() {
 	ls.mu.Unlock()
 	notifyState()
 	go broadcastIntentChanges()
+	go syncAppShortcuts()
 }
 
 // Install downloads a napp's files and records it as installed. Blocking:

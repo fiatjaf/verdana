@@ -137,6 +137,16 @@ func (gioHost) SetAutostart(enabled bool) error {
 	return setAutostart(enabled, exe)
 }
 
+func (gioHost) AppShortcutsSupported() bool { return true }
+
+func (gioHost) SyncAppShortcuts(shortcuts []backend.AppShortcut) error {
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	return syncAppShortcuts(shortcuts, exe)
+}
+
 func (gioHost) OpenLink(url string) error {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {

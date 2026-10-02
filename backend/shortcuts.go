@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -275,10 +276,6 @@ func RunShortcutEntries(entries []ShortcutEntry) error {
 			SetFetchErr("shortcut napp " + entry.NappID + " is not installed")
 			continue
 		}
-		if len(entry.Actions) == 0 {
-			Launch(napp)
-			continue
-		}
 		if err := openAndDispatch(ctx, napp, entry.Actions); err != nil {
 			SetFetchErr("shortcut failed on " + napp.Label() + ": " + err.Error())
 		}
@@ -290,17 +287,27 @@ func RunShortcutEntries(entries []ShortcutEntry) error {
 // gives up dispatching: each napp's window gets its share.
 const shortcutActionTimeout = 60 * time.Second
 
+// shortcutLaunchMu makes the running-instance check and instance registration
+// one operation. Two launcher entries opened at the same moment therefore
+// converge on one napp window instead of both observing that none exists.
+var shortcutLaunchMu sync.Mutex
+
 // openAndDispatch launches a napp (or finds its running instance) and sends
 // each action straight there, in order, with no handler-picking prompt: a
 // shortcut names its napp exactly, unlike an unknown-caller action dispatch.
 func openAndDispatch(ctx context.Context, napp Napp, actions []ShortcutAction) error {
+	shortcutLaunchMu.Lock()
 	if running := runningForNapp(napp.ID); len(running) > 0 {
+		ci := running[0]
+		shortcutLaunchMu.Unlock()
 		log.Info().Str("napp", napp.ID).Str("instance", running[0].instance).Msg("shortcut reusing open instance")
-		return dispatchActions(ctx, running[0], actions)
+		ci.focus()
+		return dispatchActions(ctx, ci, actions)
 	}
 
 	markLaunched(napp.ID)
 	ci, err := launch(ctx, napp)
+	shortcutLaunchMu.Unlock()
 	if err != nil {
 		return err
 	}

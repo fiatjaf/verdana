@@ -20,6 +20,7 @@ func TestStartupArgs(t *testing.T) {
 		{name: "background", args: []string{"--background"}, background: true},
 		{name: "tool flags ignored", args: []string{"-debug", "napp-id", "+open"}, token: "napp-id +open"},
 		{name: "background shortcut", args: []string{"--background", "napp-id", "+open"}, background: true, token: "napp-id +open"},
+		{name: "native app shortcut", args: []string{"--background", "--launch-napp", "napplet-id"}, background: true, token: "napplet-id"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
