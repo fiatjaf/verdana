@@ -206,7 +206,6 @@ fun LoginScreen(activity: MainActivity, st: LauncherState) {
 fun LauncherScreen(activity: MainActivity, st: LauncherState) {
     val theme = themeByName(st.theme)
     var tab by remember { mutableStateOf(if (st.installed.isNotEmpty()) 0 else 1) }
-    var relaysEd by remember(st.relays.hashCode()) { mutableStateOf(st.relays.joinToString("\n")) }
     var discoveryFilter by remember { mutableStateOf("") }
     var discoveryKind by remember { mutableStateOf(DiscoveryKind.All) }
     var installedFilter by remember { mutableStateOf("") }
@@ -277,7 +276,7 @@ fun LauncherScreen(activity: MainActivity, st: LauncherState) {
                 onOpenNapp = { openNapp(it) })
             tab == 0 -> InstalledTab(activity, st, theme, installedFilter, { installedFilter = it },
                 onDetail = { openNapp(it) }, onAuthor = { openProfile(it) })
-            else -> DiscoveryTab(activity, st, theme, relaysEd, { relaysEd = it }, discoveryFilter, { discoveryFilter = it },
+            else -> DiscoveryTab(activity, st, theme, discoveryFilter, { discoveryFilter = it },
                 discoveryKind, { discoveryKind = it },
                 onDetail = { openNapp(it) }, onAuthor = { openProfile(it) })
         }
@@ -504,8 +503,6 @@ private fun DiscoveryTab(
     activity: MainActivity,
     st: LauncherState,
     theme: Theme,
-    relaysEd: String,
-    setRelaysEd: (String) -> Unit,
     filter: String,
     setFilter: (String) -> Unit,
     kind: DiscoveryKind,
@@ -541,19 +538,6 @@ private fun DiscoveryTab(
                 singleLine = true,
             )
             Spacer(Modifier.height(10.dp))
-            Column {
-                Text("Relays (one per line)", color = theme.subtle, fontSize = 13.sp)
-                Spacer(Modifier.height(6.dp))
-                OutlinedTextField(
-                    value = relaysEd,
-                    onValueChange = setRelaysEd,
-                    modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("relay.example.com", color = theme.inputHint) },
-                    colors = outlinedColors(theme),
-                    minLines = 2,
-                )
-            }
-            Spacer(Modifier.height(10.dp))
             // the kind tabs, and at the other end the refresh button that
             // asks the relays again
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -564,10 +548,7 @@ private fun DiscoveryTab(
                 }
                 Spacer(Modifier.weight(1f))
                 Button(
-                    onClick = {
-                        activity.saveRelays(relaysEd)
-                        activity.fetchNapps()
-                    },
+                    onClick = { activity.fetchNapps() },
                     enabled = !st.fetching,
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
                 ) {
@@ -587,7 +568,7 @@ private fun DiscoveryTab(
                         st.fetching -> "Searching relays…"
                         st.discovery.isNotEmpty() && filter.isBlank() -> "No ${kind.label.lowercase()} found on these relays."
                         st.discovery.isNotEmpty() -> "Nothing matches the filter."
-                        else -> "No napps yet. Tap \"Refresh\"."
+                        else -> "No napps yet. Pick some good relays in Settings and tap \"Refresh\"."
                     },
                     color = theme.muted,
                 )

@@ -82,7 +82,6 @@ class MainActivity : ComponentActivity() {
     fun login(input: String) = Mobile.login(input)
     fun logout() = Mobile.logout()
     fun fetchNapps() = Mobile.fetch()
-    fun saveRelays(text: String) = Mobile.setRelays(text)
     fun install(id: String) = Mobile.install(id)
     fun update(id: String) = Mobile.update(id)
     fun uninstall(id: String) = Mobile.uninstall(id)

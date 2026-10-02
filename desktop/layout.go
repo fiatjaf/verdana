@@ -24,21 +24,6 @@ func emph(l material.LabelStyle) material.LabelStyle {
 	return l
 }
 
-func parseRelays(text string) []string {
-	var out []string
-	for _, line := range strings.Split(text, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		if !strings.Contains(line, "://") {
-			line = "wss://" + line
-		}
-		out = append(out, line)
-	}
-	return out
-}
-
 // promptButtons are the six answers an approval prompt can get: allow and
 // deny, each of them for this prompt only, for this session or always.
 type promptButtons struct {
@@ -298,7 +283,6 @@ func layoutMain(
 	installedList,
 	discoveryList,
 	devList *widget.List,
-	relaysEd,
 	filterEd,
 	installedFilterEd,
 	devURLed,
@@ -374,7 +358,7 @@ func layoutMain(
 				return layoutNappsTab(gtx, th, installedList, installedFilterEd, cardBtns, uninstBtns, installedUpdateBtns, installedOpenBtns, installedAuthorBtns, installedSettingsBtns, checkUpdBtn, instVis, st)
 			}
 			if tab == 2 {
-				return layoutDiscoveryTab(gtx, th, discoveryList, relaysEd, filterEd, fetchBtn, actionBtns,
+				return layoutDiscoveryTab(gtx, th, discoveryList, filterEd, fetchBtn, actionBtns,
 					updateBtns, discoCardBtns, discoOpenBtns, discoAuthorBtns, vis, st.FetchErr, st.Fetching, st.Discovery, st.Lookup, installedSet, busy)
 			}
 			if tab == 4 && extra != nil {
@@ -831,7 +815,6 @@ func layoutDiscoveryTab(
 	gtx layout.Context,
 	th *material.Theme,
 	list *widget.List,
-	relaysEd,
 	filterEd *widget.Editor,
 	fetchBtn *widget.Clickable,
 	actionBtns,
@@ -852,21 +835,6 @@ func layoutDiscoveryTab(
 		// author, author name or description, or naming one by its address.
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return editorBox(gtx, th, filterEd, "filter by name, author or description, or paste an naddr")
-		}),
-		layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
-		// then the relays editor
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					l := emph(material.Body2(th, "Relays (one per line)"))
-					l.Color = currentTheme().subtle
-					return l.Layout(gtx)
-				}),
-				layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return editorBox(gtx, th, relaysEd, "relay.example.com")
-				}),
-			)
 		}),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
 		// the kind tabs (all, napps, napplets) and, at the other end, the
@@ -932,7 +900,7 @@ func layoutDiscoveryTab(
 		layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			if len(vis) == 0 {
-				msg := "No napps yet. Pick some good relays and click \"Refresh\"."
+				msg := "No napps yet. Pick some good relays in Settings and click \"Refresh\"."
 				if fetching {
 					msg = "Searching relays\u2026"
 				}
@@ -954,8 +922,9 @@ func layoutDiscoveryTab(
 				l.Color = currentTheme().muted
 				return l.Layout(gtx)
 			}
-			return material.List(th, list).Layout(gtx, len(vis), func(gtx layout.Context, i int) layout.Dimensions {
-				row := vis[i]
+			// a grid of tiles, as many across as the window fits; a narrow
+			// window gets the one-per-row cards instead
+			card := func(gtx layout.Context, row int, tile bool) layout.Dimensions {
 				var btn, updBtn *widget.Clickable
 				if row < len(actionBtns) {
 					btn = &actionBtns[row]
@@ -985,7 +954,33 @@ func layoutDiscoveryTab(
 				if row < len(authorBtns) {
 					authorBtn = &authorBtns[row]
 				}
+				if tile {
+					return renderNappTile(gtx, th, cardBtn, authorBtn, openBtn, btn, updBtn, label, updLabel, n)
+				}
 				return renderNappCard(gtx, th, cardBtn, authorBtn, openBtn, nil, btn, updBtn, label, updLabel, n)
+			}
+			cols := gridColumns(gtx, gtx.Constraints.Max.X)
+			// the list scrolls by row: keep the same napps in view when a
+			// resize changes how many a row holds
+			if discoCols != 0 && cols != discoCols {
+				list.Position.First = list.Position.First * discoCols / cols
+				list.Position.Offset = 0
+			}
+			discoCols = cols
+			if cols == 1 {
+				return material.List(th, list).Layout(gtx, len(vis), func(gtx layout.Context, i int) layout.Dimensions {
+					return card(gtx, vis[i], false)
+				})
+			}
+			rows := (len(vis) + cols - 1) / cols
+			return material.List(th, list).Layout(gtx, rows, func(gtx layout.Context, r int) layout.Dimensions {
+				first := r * cols
+				n := min(cols, len(vis)-first)
+				return layout.Inset{Bottom: tileGap}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return gridRow(gtx, cols, n, func(gtx layout.Context, i int) layout.Dimensions {
+						return card(gtx, vis[first+i], true)
+					})
+				})
 			})
 		}),
 	)
@@ -1293,6 +1288,25 @@ func editorBox(gtx layout.Context, th *material.Theme, ed *widget.Editor, hint s
 	})
 }
 
+// nappAuthor is the name and picture a napp's author is shown with: their
+// profile's once it is cached, else the napp's own hint or a short pubkey.
+func nappAuthor(napp backend.Napp) (name, picture string) {
+	if napp.Author.Hex() == "" {
+		return "", ""
+	}
+	if p := cachedProfile(napp.Author.Hex()); p != nil && p.ShortName != "" {
+		return p.ShortName, p.Picture
+	}
+	name = napp.AuthorShortName()
+	if name == "" {
+		name = napp.Author.Hex()
+		if len(name) > 16 {
+			name = name[:16] + "…"
+		}
+	}
+	return name, ""
+}
+
 // renderNappCard draws one napp row: icon, name, description, author and the
 // action buttons. When cardBtn is not nil the whole card is clickable (it
 // opens the napp's page); authorBtn alone opens the author's profile page.
@@ -1311,20 +1325,7 @@ func renderNappCard(
 	secondLabel string,
 	napp backend.Napp,
 ) layout.Dimensions {
-	authorName, authorPic := "", ""
-	if napp.Author.Hex() != "" {
-		if p := cachedProfile(napp.Author.Hex()); p != nil && p.ShortName != "" {
-			authorName, authorPic = p.ShortName, p.Picture
-		} else {
-			authorName = napp.AuthorShortName()
-			if authorName == "" {
-				authorName = napp.Author.Hex()
-				if len(authorName) > 16 {
-					authorName = authorName[:16] + "…"
-				}
-			}
-		}
-	}
+	authorName, authorPic := nappAuthor(napp)
 	return layout.Inset{Bottom: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		sz := gtx.Constraints.Max
 		macro := op.Record(gtx.Ops)

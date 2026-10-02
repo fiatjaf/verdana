@@ -77,8 +77,7 @@ var (
 	log    zerolog.Logger
 
 	// filterEd and installedFilterEd are the discovery and installed tabs'
-	// filter boxes (one window, so one of each is enough; relaysEd stays
-	// with the window's other widgets).
+	// filter boxes (one window, so one of each is enough).
 	filterEd          widget.Editor
 	installedFilterEd widget.Editor
 
@@ -86,6 +85,8 @@ var (
 	// discoKind* constants), switched by discoKindBtns.
 	discoKind     int
 	discoKindBtns [3]widget.Clickable
+	// discoCols is how many napps a row of the discovery tab held last frame.
+	discoCols int
 )
 
 const (
@@ -296,7 +297,6 @@ func gioMain() {
 	var (
 		loginEd               widget.Editor
 		loginBtn              widget.Clickable
-		relaysEd              widget.Editor
 		fetchBtn              widget.Clickable
 		tabNappsBtn           widget.Clickable
 		tabDiscoBtn           widget.Clickable
@@ -356,7 +356,6 @@ func gioMain() {
 		shortcutEditBtns  []widget.Clickable
 	)
 	loginEd.SingleLine = true
-	relaysEd.SingleLine = false
 	filterEd.SingleLine = true
 	installedFilterEd.SingleLine = true
 	devURLed.SingleLine = true
@@ -366,10 +365,6 @@ func gioMain() {
 	devList.Axis = layout.Vertical
 	windowsList.Axis = layout.Vertical
 	profileList.Axis = layout.Vertical
-	// relaysEd follows the stored list when it changes elsewhere (the
-	// settings window), so a fetch from here never writes back a stale one
-	relaysSynced := backend.Relays()
-	relaysEd.SetText(strings.Join(relaysSynced, "\n"))
 
 	var ops op.Ops
 	for {
@@ -387,10 +382,6 @@ func gioMain() {
 			paint.Fill(gtx.Ops, pal.bg)
 
 			st := backend.Snapshot()
-			if !slices.Equal(st.Relays, relaysSynced) {
-				relaysSynced = st.Relays
-				relaysEd.SetText(strings.Join(relaysSynced, "\n"))
-			}
 			activePrompt := backend.CurrentPrompt()
 
 			ui.mu.Lock()
@@ -506,8 +497,6 @@ func gioMain() {
 						setConfirmLogout(true)
 					}
 					if fetchBtn.Clicked(gtx) {
-						backend.SetRelays(parseRelays(relaysEd.Text()))
-						relaysSynced = backend.Relays()
 						go backend.Discover()
 					}
 					for k := range discoKindBtns {
@@ -876,7 +865,6 @@ func gioMain() {
 						&installedList,
 						&discoveryList,
 						&devList,
-						&relaysEd,
 						&filterEd,
 						&installedFilterEd,
 
