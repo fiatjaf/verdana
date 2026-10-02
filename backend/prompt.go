@@ -322,10 +322,11 @@ func askActionHandler(caller *Instance, action string, payload json.RawMessage, 
 // covered window keeps it up until the answer comes back, and the launcher
 // chrome only shows prompts it generated itself.
 
-// promptOverlays tracks the instances currently showing a prompt overlay, so
-// each screen gets exactly one and stale ones come down when the prompt is
-// answered (or times out).
-var promptOverlays = xsync.NewMapOf[string, bool]()
+// promptOverlays tracks the instances currently showing a prompt overlay, and
+// which prompt each shows, so each screen gets exactly one, stale ones come
+// down when the prompt is answered (or times out) and the next prompt queued
+// for the same window replaces the one just answered.
+var promptOverlays = xsync.NewMapOf[string, int]()
 
 // syncPromptOverlays makes what each napp window shows match the prompt
 // state: one overlay per window with a pending prompt, none elsewhere.
@@ -355,7 +356,8 @@ func syncPromptOverlays() {
 		}
 	}
 	for inst, p := range targets {
-		if _, shown := promptOverlays.LoadOrStore(inst, true); !shown {
+		if shown, ok := promptOverlays.Load(inst); !ok || shown != p.ID {
+			promptOverlays.Store(inst, p.ID)
 			showList = append(showList, p)
 		}
 	}
