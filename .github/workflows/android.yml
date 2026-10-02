@@ -33,6 +33,9 @@ jobs:
       - uses: android-actions/setup-android@v3
         with:
           cmdline-tools-version: 11076708
+          # the default list has "tools", which sdkmanager no longer knows;
+          # the step below installs what the build needs
+          packages: ""
 
       - name: install sdk packages
         run: |
