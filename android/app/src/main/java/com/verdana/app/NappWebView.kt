@@ -94,7 +94,10 @@ class NappWebView(
             override fun shouldInterceptRequest(
                 v: WebView,
                 request: WebResourceRequest,
-            ): WebResourceResponse? = serve(request.url.path ?: "/")
+            ): WebResourceResponse? =
+                // only the napp's own origin is its files: anything else
+                // (an api, an avatar host) goes to the network as asked
+                if (isNappOrigin(request.url)) serve(request.url.path ?: "/") else null
 
             override fun shouldOverrideUrlLoading(v: WebView, request: WebResourceRequest): Boolean {
                 // Only the napp's exact origin may navigate the main frame.
