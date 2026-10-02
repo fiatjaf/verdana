@@ -1756,7 +1756,7 @@ var NappletShimPrelude = (() => {
       postToShell(msg);
     });
   }
-  function sendBytesRequest(url, id) {
+  function sendBytesRequest(url, id, servers) {
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         if (pendingBytes.delete(id)) {
@@ -1767,23 +1767,24 @@ var NappletShimPrelude = (() => {
       const msg = {
         type: "resource.bytes",
         id,
-        url
+        url,
+        ...servers === void 0 ? {} : { servers }
       };
       postToShell(msg);
     });
   }
-  function sendBytesManyRequest(urls, id) {
+  function sendBytesManyRequest(requests, id) {
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         if (pendingMany.delete(id)) {
-          reject(new Error(`resource.bytesMany timed out for ${urls.length} URLs`));
+          reject(new Error(`resource.bytesMany timed out for ${requests.length} requests`));
         }
       }, REQUEST_TIMEOUT_MS7);
       pendingMany.set(id, { resolve, reject, timeout });
       const msg = {
         type: "resource.bytesMany",
         id,
-        urls
+        requests
       };
       postToShell(msg);
     });
@@ -1955,7 +1956,7 @@ var NappletShimPrelude = (() => {
         work = decodeDataUrl(url);
       } else {
         cancelId = crypto.randomUUID();
-        work = sendBytesRequest(url, cancelId);
+        work = sendBytesRequest(url, cancelId, opts?.servers);
       }
     } catch {
       return Promise.reject(new Error(`invalid URL: ${url}`));
@@ -1971,15 +1972,16 @@ var NappletShimPrelude = (() => {
       cancelId ? (reason) => cancelBytes(cancelId, reason) : void 0
     );
   }
-  function bytesMany(urls, opts) {
-    if (urls.length === 0) {
-      return Promise.reject(new Error("invalid-request: urls must be non-empty"));
+  function bytesMany(requests, opts) {
+    if (requests.length === 0) {
+      return Promise.reject(new Error("invalid-request: requests must be non-empty"));
     }
     if (opts?.signal?.aborted) {
       return Promise.reject(new DOMException("Aborted", "AbortError"));
     }
+    const normalizedRequests = requests.map((request) => typeof request === "string" ? { url: request } : request);
     const id = crypto.randomUUID();
-    const work = sendBytesManyRequest(urls, id);
+    const work = sendBytesManyRequest(normalizedRequests, id);
     return wireManySignal(work, opts?.signal, id);
   }
   function bytesAsObjectURL(url) {
@@ -3373,7 +3375,10 @@ var NappletShimPrelude = (() => {
   function request5(pending4, timeoutMessage, message) {
     const id = crypto.randomUUID();
     return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
+      // verdana: a null timeoutMessage means no timeout. Writes wait on the
+      // user's approval prompt, which can take longer than 30s (as
+      // relay.publish does); the session teardown still rejects them.
+      const timeout = timeoutMessage === null ? void 0 : setTimeout(() => {
         if (pending4.delete(id)) reject(new Error(timeoutMessage));
       }, REQUEST_TIMEOUT_MS17);
       pending4.set(id, { resolve, reject, timeout });
@@ -3427,21 +3432,21 @@ var NappletShimPrelude = (() => {
     }));
   }
   function follow(...pubkeys) {
-    return request5(pendingFollow, "common.follow timed out", (id) => ({
+    return request5(pendingFollow, null, (id) => ({
       type: "common.follow",
       id,
       pubkeys
     }));
   }
   function unfollow(...pubkeys) {
-    return request5(pendingUnfollow, "common.unfollow timed out", (id) => ({
+    return request5(pendingUnfollow, null, (id) => ({
       type: "common.unfollow",
       id,
       pubkeys
     }));
   }
   function react(targetEventId, reaction, customEmojiHref) {
-    return request5(pendingReact, "common.react timed out", (id) => ({
+    return request5(pendingReact, null, (id) => ({
       type: "common.react",
       id,
       targetEventId,
@@ -3450,7 +3455,7 @@ var NappletShimPrelude = (() => {
     }));
   }
   function report(target, reason, text) {
-    return request5(pendingReport, "common.report timed out", (id) => ({
+    return request5(pendingReport, null, (id) => ({
       type: "common.report",
       id,
       target,

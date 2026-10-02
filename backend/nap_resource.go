@@ -38,6 +38,7 @@ func init() {
 const (
 	resourceMaxBytes     = 10 << 20
 	resourceMaxURLs      = 100
+	resourceMaxServers   = 8
 	resourceTimeout      = 30 * time.Second
 	resourceMaxRedirects = 3
 	resourceParallel     = 6
@@ -93,8 +94,9 @@ func napResourceInfo(c *napCall) {
 			{"scheme": "nostr", "enabled": true},
 			{"scheme": "http", "enabled": false},
 		},
-		"maxBytes": resourceMaxBytes,
-		"maxUrls":  resourceMaxURLs,
+		"maxBytes":   resourceMaxBytes,
+		"maxUrls":    resourceMaxURLs,
+		"maxServers": resourceMaxServers,
 	}})
 }
 
@@ -194,8 +196,12 @@ func napResourceBytesMany(c *napCall) {
 	for _, q := range r.Requests {
 		reqs = append(reqs, req{url: q.URL, servers: q.Servers})
 	}
-	if len(reqs) == 0 || len(reqs) > resourceMaxURLs {
+	if len(reqs) == 0 {
 		c.replyAs("resource.bytesMany.error", map[string]any{"error": "invalid-request"})
+		return
+	}
+	if len(reqs) > resourceMaxURLs {
+		c.replyAs("resource.bytesMany.error", map[string]any{"error": "too-large"})
 		return
 	}
 
@@ -396,6 +402,9 @@ func decodeDataURL(raw string) (resourceResult, error) {
 // napplet suggested, the user's own, and the launcher's defaults, and only
 // accepts bytes that hash right.
 func fetchBlossomResource(ctx context.Context, c *napCall, ref string, hinted []string) (resourceResult, error) {
+	if len(hinted) > resourceMaxServers {
+		return resourceResult{}, rerr("too-large", "too many Blossom servers")
+	}
 	sha := strings.TrimPrefix(ref, "sha256:")
 	sha, _, _ = strings.Cut(sha, ".")
 	if !hex64.MatchString(sha) {
