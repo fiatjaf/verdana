@@ -122,9 +122,10 @@ func nostrConnectBunkerURL(signer nostr.PubKey, relays []string) string {
 	return "bunker://" + signer.Hex() + "?" + q.Encode()
 }
 
-// nc is the nostrconnect uri on offer while the launcher is on its login
-// screen. It is started and stopped with the phase (see setPhaseLocked), so
-// its mutex nests inside ls.mu.
+// nc is the nostrconnect uri on offer while the login screen shows its
+// "connect signer" view. It is started from that view (StartNostrConnect)
+// and withdrawn with it or with the login phase (see setPhaseLocked), so its
+// mutex nests inside ls.mu.
 var nc struct {
 	mu     sync.Mutex
 	uri    string
@@ -204,6 +205,28 @@ func nostrConnectURI() string {
 	return nc.uri
 }
 
+// StartNostrConnect puts up a fresh nostrconnect uri for the login screen's
+// "connect signer" view and waits for a signer to answer it.
+func StartNostrConnect() {
+	ls.mu.Lock()
+	if ls.phase == PhaseLogin {
+		ls.loginErr = ""
+		startNostrConnectLocked()
+	}
+	ls.mu.Unlock()
+	notifyState()
+}
+
+// CancelNostrConnect withdraws the nostrconnect uri: the user went back from
+// the "connect signer" view.
+func CancelNostrConnect() {
+	stopNostrConnect()
+	ls.mu.Lock()
+	ls.loginErr = ""
+	ls.mu.Unlock()
+	notifyState()
+}
+
 // NostrConnectRelay is the relay the login screen's nostrconnect uri points
 // signers to.
 func NostrConnectRelay() string {
@@ -215,8 +238,8 @@ func NostrConnectRelay() string {
 	return state.NostrConnectRelay
 }
 
-// SetNostrConnectRelay stores the relay for nostrconnect logins and, on the
-// login screen, offers a new uri on it.
+// SetNostrConnectRelay stores the relay for nostrconnect logins and, when a
+// uri is on offer, replaces it with one on the new relay.
 func SetNostrConnectRelay(input string) {
 	relay, err := cleanRelayURL(input)
 	if err != nil {
@@ -237,7 +260,7 @@ func SetNostrConnectRelay(input string) {
 
 	ls.mu.Lock()
 	ls.loginErr = ""
-	if changed && ls.phase == PhaseLogin {
+	if changed && ls.phase == PhaseLogin && nostrConnectURI() != "" {
 		startNostrConnectLocked()
 	}
 	ls.mu.Unlock()

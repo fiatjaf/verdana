@@ -80,6 +80,8 @@ class MainActivity : ComponentActivity() {
     // ─── launcher actions (called from composables) ──────────────────
 
     fun login(input: String) = Mobile.login(input)
+    fun startNostrConnect() = Mobile.startNostrConnect()
+    fun cancelNostrConnect() = Mobile.cancelNostrConnect()
     fun setNostrConnectRelay(relay: String) = Mobile.setNostrConnectRelay(relay)
 
     // openSigner hands the nostrconnect:// uri to a signer app on this phone

@@ -32,7 +32,8 @@ type State struct {
 	LoginErr string `json:"loginErr"`
 
 	// NostrConnectURI is the nostrconnect:// uri the login screen shows as
-	// a QR code for a NIP-46 signer to scan, "" outside the login phase.
+	// a QR code for a NIP-46 signer to scan, "" until the user asks to
+	// connect a signer (StartNostrConnect) and outside the login phase.
 	// NostrConnectRelay is the relay it names, for the relay field under it.
 	NostrConnectURI   string `json:"nostrConnectUri"`
 	NostrConnectRelay string `json:"nostrConnectRelay"`
@@ -239,12 +240,10 @@ func notifyState() {
 }
 
 // setPhase moves the launcher to a phase and wakes whoever is waiting for it
-// to change. Entering the login phase puts up a fresh nostrconnect uri,
-// leaving it withdraws it. ls.mu must be held.
+// to change. Leaving the login phase withdraws the nostrconnect uri, if one
+// was on offer. ls.mu must be held.
 func setPhaseLocked(phase string) {
-	if phase == PhaseLogin && ls.phase != PhaseLogin {
-		startNostrConnectLocked()
-	} else if phase != PhaseLogin && ls.phase == PhaseLogin {
+	if phase != PhaseLogin && ls.phase == PhaseLogin {
 		stopNostrConnect()
 	}
 	ls.phase = phase

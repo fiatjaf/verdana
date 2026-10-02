@@ -301,6 +301,11 @@ func AnswerPrompt(id int, ok bool, index int, scope string) {
 // state's phase and loginErr for the outcome.
 func Login(input string) { go backend.Login(input) }
 
+// StartNostrConnect puts up the nostrconnect uri for the login screen's
+// "connect signer" view; CancelNostrConnect withdraws it.
+func StartNostrConnect()  { backend.StartNostrConnect() }
+func CancelNostrConnect() { backend.CancelNostrConnect() }
+
 // SetNostrConnectRelay changes the relay the login screen's nostrconnect QR
 // code points signers to, and puts up a new code for it.
 func SetNostrConnectRelay(relay string) { go backend.SetNostrConnectRelay(relay) }

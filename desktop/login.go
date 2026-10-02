@@ -18,15 +18,19 @@ import (
 	"gioui.org/widget/material"
 )
 
-// loginScreen is the login phase's widgets: the nostrconnect QR code a
-// signer scans, the relay it points to, and the nsec / bunker:// field.
+// loginScreen is the login phase's widgets: the nsec / bunker:// field and,
+// behind "Connect signer", the nostrconnect QR code a signer scans with the
+// relay it points to. Which of the two shows follows the backend: the QR
+// view is up while a nostrconnect uri is on offer.
 type loginScreen struct {
-	list     widget.List
-	ed       widget.Editor
-	btn      widget.Clickable
-	relayEd  widget.Editor
-	relayBtn widget.Clickable
-	copyBtn  widget.Clickable
+	list       widget.List
+	ed         widget.Editor
+	btn        widget.Clickable
+	connectBtn widget.Clickable
+	backBtn    widget.Clickable
+	relayEd    widget.Editor
+	relayBtn   widget.Clickable
+	copyBtn    widget.Clickable
 
 	// qrURI is the uri qr was drawn from; relaySeen the relay last put in
 	// relayEd, so a new one from the backend replaces what is typed there.
@@ -63,6 +67,12 @@ func (s *loginScreen) update(gtx layout.Context, st backend.State) {
 		if input := strings.TrimSpace(s.ed.Text()); input != "" {
 			go backend.Login(input)
 		}
+	}
+	if s.connectBtn.Clicked(gtx) {
+		go backend.StartNostrConnect()
+	}
+	if s.backBtn.Clicked(gtx) {
+		go backend.CancelNostrConnect()
 	}
 	if submitted(&s.relayEd) || s.relayBtn.Clicked(gtx) {
 		go backend.SetNostrConnectRelay(s.relayEd.Text())
@@ -112,58 +122,76 @@ func (s *loginScreen) layout(gtx layout.Context, th *material.Theme, st backend.
 		}
 	}
 
-	rows := []layout.Widget{
-		func(gtx layout.Context) layout.Dimensions {
-			t := material.H5(th, "Log in to Verdana")
+	title := func(text string) layout.Widget {
+		return func(gtx layout.Context) layout.Dimensions {
+			t := material.H5(th, text)
 			t.Font.Weight = font.Bold
 			return t.Layout(gtx)
-		},
-		space(8),
-		subtle("Scan with your signer app (Amber, nsec.app, Primal…)"),
-		space(12),
-		s.layoutQR,
-		space(8),
-		chip(&s.copyBtn, "Copy connect link"),
-		space(16),
-		subtle("Relay"),
-		space(6),
-		func(gtx layout.Context) layout.Dimensions {
-			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-					return editorBox(gtx, th, &s.relayEd, "wss://…")
-				}),
-				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
-				layout.Rigid(chip(&s.relayBtn, "Change")),
-			)
-		},
-		func(gtx layout.Context) layout.Dimensions {
-			if st.LoginErr == "" {
-				return layout.Dimensions{}
-			}
-			return layout.Inset{Top: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				l := material.Body2(th, st.LoginErr)
-				l.Color = currentTheme().danger
-				return l.Layout(gtx)
-			})
-		},
-		space(28),
-		func(gtx layout.Context) layout.Dimensions {
-			t := material.Subtitle2(th, "Other options")
-			t.Font.Weight = font.Bold
-			return t.Layout(gtx)
-		},
-		space(6),
-		subtle("Paste your nsec or a bunker:// URL"),
-		space(8),
-		func(gtx layout.Context) layout.Dimensions {
-			gtx.Constraints.Min.X = gtx.Constraints.Max.X
-			return editorBox(gtx, th, &s.ed, "nsec1... or bunker://...")
-		},
-		space(12),
-		func(gtx layout.Context) layout.Dimensions {
-			pointer.CursorPointer.Add(gtx.Ops)
-			return material.Button(th, &s.btn, "Log in").Layout(gtx)
-		},
+		}
+	}
+	loginErr := func(gtx layout.Context) layout.Dimensions {
+		if st.LoginErr == "" {
+			return layout.Dimensions{}
+		}
+		return layout.Inset{Top: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			l := material.Body2(th, st.LoginErr)
+			l.Color = currentTheme().danger
+			return l.Layout(gtx)
+		})
+	}
+
+	var rows []layout.Widget
+	if st.NostrConnectURI == "" {
+		rows = []layout.Widget{
+			title("Log in to Verdana"),
+			space(8),
+			subtle("Paste your nsec or a bunker:// URL"),
+			space(12),
+			func(gtx layout.Context) layout.Dimensions {
+				gtx.Constraints.Min.X = gtx.Constraints.Max.X
+				return editorBox(gtx, th, &s.ed, "nsec1... or bunker://...")
+			},
+			space(12),
+			func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						pointer.CursorPointer.Add(gtx.Ops)
+						return material.Button(th, &s.btn, "Log in").Layout(gtx)
+					}),
+					layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
+					layout.Rigid(subtle("or")),
+					layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
+					layout.Rigid(chip(&s.connectBtn, "Connect signer")),
+				)
+			},
+			loginErr,
+		}
+	} else {
+		rows = []layout.Widget{
+			title("Connect a signer"),
+			space(8),
+			subtle("Scan with your signer app (Amber, nsec.app, Primal…)"),
+			space(12),
+			s.layoutQR,
+			space(8),
+			chip(&s.copyBtn, "Copy connect link"),
+			space(16),
+			subtle("Relay"),
+			space(6),
+			func(gtx layout.Context) layout.Dimensions {
+				gtx.Constraints.Max.X = min(gtx.Constraints.Max.X, gtx.Dp(unit.Dp(420)))
+				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+						return editorBox(gtx, th, &s.relayEd, "wss://…")
+					}),
+					layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+					layout.Rigid(chip(&s.relayBtn, "Change")),
+				)
+			},
+			loginErr,
+			space(24),
+			chip(&s.backBtn, "Back"),
+		}
 	}
 	return material.List(th, &s.list).Layout(gtx, len(rows), func(gtx layout.Context, i int) layout.Dimensions {
 		gtx.Constraints.Min.X = 0 // buttons keep their own width

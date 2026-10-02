@@ -214,3 +214,42 @@ func TestQRCodeHasQuietZone(t *testing.T) {
 		t.Fatalf("QRCodePNG: %v", err)
 	}
 }
+
+func TestNostrConnectOnlyOnRequest(t *testing.T) {
+	ls.mu.Lock()
+	oldPhase := ls.phase
+	ls.mu.Unlock()
+	t.Cleanup(func() {
+		stopNostrConnect()
+		ls.mu.Lock()
+		ls.phase = oldPhase
+		ls.mu.Unlock()
+	})
+
+	setPhase(PhaseLoading)
+	setPhase(PhaseLogin)
+	if uri := nostrConnectURI(); uri != "" {
+		t.Fatalf("login screen put up %q before the user asked", uri)
+	}
+
+	StartNostrConnect()
+	first := nostrConnectURI()
+	if !strings.HasPrefix(first, "nostrconnect://") {
+		t.Fatalf("StartNostrConnect offered %q", first)
+	}
+	StartNostrConnect()
+	if again := nostrConnectURI(); again == first {
+		t.Fatal("a new start reused the old secret")
+	}
+
+	CancelNostrConnect()
+	if uri := nostrConnectURI(); uri != "" {
+		t.Fatalf("cancel left %q on offer", uri)
+	}
+
+	StartNostrConnect()
+	setPhase(PhaseLoading)
+	if uri := nostrConnectURI(); uri != "" {
+		t.Fatalf("leaving the login phase left %q on offer", uri)
+	}
+}
