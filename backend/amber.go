@@ -102,7 +102,7 @@ func (a AmberSigner) request(ctx context.Context, op string, payload string, cou
 		return "", errors.New("no NIP-55 signer is configured")
 	}
 	id := shortID()
-	ch := make(chan string, 1)
+	ch := make(chan amberAnswer, 1)
 	amberWaiters.Store(id, ch)
 	defer amberWaiters.Delete(id)
 
@@ -112,7 +112,10 @@ func (a AmberSigner) request(ctx context.Context, op string, payload string, cou
 
 	select {
 	case answer := <-ch:
-		return answer, nil
+		if !answer.ok {
+			return "", fmt.Errorf("the NIP-55 signer rejected %s", op)
+		}
+		return answer.result, nil
 	case <-ctx.Done():
 		return "", fmt.Errorf("the NIP-55 signer did not answer for %s: %w", op, ctx.Err())
 	}
@@ -137,7 +140,14 @@ func shortID() string {
 
 // amberWaiters holds the pipes the answers come back through, keyed by the
 // request id the Android side carries with the request.
-var amberWaiters = xsync.NewMapOf[string, chan string]()
+var amberWaiters = xsync.NewMapOf[string, chan amberAnswer]()
+
+// amberAnswer is one signer answer: what it produced, and whether the user
+// approved at all (a rejection comes back with an empty result).
+type amberAnswer struct {
+	result string
+	ok     bool
+}
 
 // AnswerAmber files a signer's answer in for the request with that id.
 // Late answers to abandoned requests are dropped here.
@@ -146,12 +156,9 @@ func AnswerAmber(id string, answer string, ok bool) {
 	if !ok2 {
 		return
 	}
-	if answer == "" {
-		answer = ""
-	}
 	select {
-	case ch <- answer:
+	case ch <- amberAnswer{result: answer, ok: ok}:
 	default:
-		close(ch) // signal: the id was answered... twice?
+		// the id was already answered: the first answer stands
 	}
 }
