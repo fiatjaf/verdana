@@ -36,7 +36,6 @@ var napDomains = []string{
 	"relay", "identity", "storage", "resource", "common",
 	"theme", "inc", "intent", "link", "upload", "outbox", "media",
 	"config", "notify",
-	"fs",
 }
 
 // napSession is what one napplet window has going: the subscriptions and

@@ -71,9 +71,6 @@
   // Ordinary NAP envelopes stay small. NAP-UPLOAD may carry up to 16 MiB of
   // raw bytes; base64 plus its JSON envelope needs a larger transport bound.
   const MAX_ENVELOPE = 1024 * 1024
-  // A max-sized NAP-FS write is 1 MiB after decoding and about 1.34 MiB on
-  // the JSON wire. Keep the larger allowance specific to fs.write.
-  const MAX_FS_WRITE_ENVELOPE = 1536 * 1024
   const MAX_UPLOAD_BYTES = 16 * 1024 * 1024
   const MAX_UPLOAD_ENVELOPE = 24 * 1024 * 1024
 
@@ -181,9 +178,7 @@
       .then(async () => {
         const encoded = await dehydrate(data)
         const json = JSON.stringify(encoded)
-        const limit = data.type === "upload.upload"
-          ? MAX_UPLOAD_ENVELOPE
-          : data.type === "fs.write" ? MAX_FS_WRITE_ENVELOPE : MAX_ENVELOPE
+        const limit = data.type === "upload.upload" ? MAX_UPLOAD_ENVELOPE : MAX_ENVELOPE
         if (!json || json.length > limit) throw new Error("NAP envelope is too large")
         return rpc("nap.msg", json)
       })
