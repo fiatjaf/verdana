@@ -345,8 +345,11 @@ func TestNapUploadBlossomReplicatesAndReportsStatus(t *testing.T) {
 	post(t, ci, uploadEnvelope("u1", data))
 	started := rec.wait(t, "upload.upload.result", 1)
 	result := started["result"].(map[string]any)
-	if result["status"] != "uploading" || result["rail"] != "blossom" {
+	if result["status"] != "pending" || result["rail"] != "blossom" {
 		t.Fatalf("initial result: %v", result)
+	}
+	if got := rec.wait(t, "upload.status.changed", 1)["status"].(map[string]any); got["status"] != "uploading" {
+		t.Fatalf("approved status: %v", got)
 	}
 	complete := rec.wait(t, "upload.status.changed", 2)["status"].(map[string]any)
 	if complete["status"] != "complete" || complete["sha256"] != hash || complete["url"] != "https://one.example/"+hash+".txt" {
@@ -400,6 +403,59 @@ func TestNapUploadRejectsBadRequestsAndUnverifiedResults(t *testing.T) {
 	if failed["status"] != "failed" || failed["error"] != "upload failed" {
 		t.Fatalf("unverified descriptor accepted: %v", failed)
 	}
+}
+
+// The shim times upload.upload out after 30s, so the result must not wait on
+// the approval prompt: an upload the user approved late was already reported
+// as failed to the napplet.
+func TestNapUploadAnswersBeforeApproval(t *testing.T) {
+	setupNapTest(t)
+	ci, rec := openNapplet(t, "upload-ask")
+	setupNapUploadTest(t, ci)
+	clearSessionRule(RuleKey{Napp: ci.napp.ID, Permission: PermUpload})
+	ready(t, ci, rec, 1)
+
+	napUploadServers = func(context.Context, nostr.PubKey) []string { return []string{"https://one.example"} }
+	napUploadToServer = func(context.Context, string, []byte, string, nostr.Keyer) (*blossom.BlobDescriptor, error) {
+		t.Error("uploaded without approval")
+		return nil, errors.New("not approved")
+	}
+	post(t, ci, uploadEnvelope("ask", []byte("hold on")))
+	result := rec.wait(t, "upload.upload.result", 1)["result"].(map[string]any)
+	if result["status"] != "pending" || result["uploadId"] == "" {
+		t.Fatalf("result before approval: %v", result)
+	}
+	p := CurrentPrompt()
+	if p == nil {
+		t.Fatal("no approval prompt")
+	}
+	AnswerPrompt(p.ID, Answer{OK: false})
+	cancelled := rec.wait(t, "upload.status.changed", 1)["status"].(map[string]any)
+	if cancelled["status"] != "cancelled" || cancelled["uploadId"] != result["uploadId"] {
+		t.Fatalf("denied status: %v", cancelled)
+	}
+}
+
+func TestUploadSignerReportsSigningFailure(t *testing.T) {
+	signed := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		signed = r.Header.Get("Authorization") != ""
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+	_, err := napUploadToServer(context.Background(), srv.URL, []byte("x"), "text/plain", failingSigner{})
+	if err == nil || !strings.Contains(err.Error(), "bunker offline") {
+		t.Fatalf("error hides the signer's: %v", err)
+	}
+	if signed {
+		t.Fatal("sent an Authorization header with no signature")
+	}
+}
+
+type failingSigner struct{ nostr.Keyer }
+
+func (failingSigner) SignEvent(context.Context, *nostr.Event) error {
+	return errors.New("bunker offline")
 }
 
 func TestNapUploadIsCancelledOnReload(t *testing.T) {

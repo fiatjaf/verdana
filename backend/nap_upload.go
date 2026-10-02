@@ -72,9 +72,27 @@ var (
 		return servers
 	}
 	napUploadToServer = func(ctx context.Context, server string, data []byte, mimeType string, keyer nostr.Keyer) (*blossom.BlobDescriptor, error) {
-		return blossom.NewClient(server, keyer).UploadBlob(ctx, bytes.NewReader(data), mimeType)
+		signer := &uploadSigner{Keyer: keyer}
+		descriptor, err := blossom.NewClient(server, signer).UploadBlob(ctx, bytes.NewReader(data), mimeType)
+		if err != nil && signer.err != nil {
+			return nil, fmt.Errorf("signing the Blossom authorization: %w", signer.err)
+		}
+		return descriptor, err
 	}
 )
+
+// uploadSigner remembers why signing failed. The blossom client drops a
+// signer error and sends the request with no Authorization header, so all
+// that would surface is the server's 401.
+type uploadSigner struct {
+	nostr.Keyer
+	err error
+}
+
+func (s *uploadSigner) SignEvent(ctx context.Context, evt *nostr.Event) error {
+	s.err = s.Keyer.SignEvent(ctx, evt)
+	return s.err
+}
 
 func init() {
 	handleNap(map[string]napHandler{
@@ -144,27 +162,36 @@ func napUpload(c *napCall) {
 			return
 		}
 
+		// Answer now, before the approval prompt: the shim gives up on
+		// upload.upload after 30s, and the user may take longer than that to
+		// find and answer the prompt. Everything after this is pushed as
+		// upload.status.changed.
 		uploadID := "upload-" + randomID()
 		status := napUploadStatus{
-			UploadID: uploadID, Status: "cancelled", Rail: "blossom",
-			Error: "user cancelled", BytesTotal: len(data), UpdatedAt: time.Now().Unix(),
+			OK: true, UploadID: uploadID, Status: "pending", Rail: "blossom",
+			BytesTotal: len(data), UpdatedAt: time.Now().Unix(),
 		}
+		napStoreUpload(c, &status)
+		c.reply(map[string]any{"result": napUploadPublic(status)})
+
 		detail := fmt.Sprintf("%s (%s, %s) to %d Blossom server(s): %s",
 			napUploadFilename(r.Filename), mimeType, byteCount(len(data)), len(servers),
 			preview(strings.Join(stripSchemes(servers), ", "), 180))
 		if !askApproval(c.ci, PermUpload, "upload a public file", detail, preview(r.Caption, 200)) {
+			status.OK = false
+			status.Status = "cancelled"
+			status.Error = "user cancelled"
+			status.UpdatedAt = time.Now().Unix()
 			napStoreUpload(c, &status)
-			c.reply(map[string]any{"result": status})
+			napPushUploadStatus(c, status)
 			return
 		}
 
 		uploadCtx, uploadCancel := context.WithTimeout(ctx, 60*time.Second)
-		status.OK = true
 		status.Status = "uploading"
-		status.Error = ""
+		status.UpdatedAt = time.Now().Unix()
 		status.cancel = uploadCancel
 		napStoreUpload(c, &status)
-		c.reply(map[string]any{"result": napUploadPublic(status)})
 		napPushUploadStatus(c, status)
 
 		napRunUpload(uploadCtx, c, status, data, mimeType, r.Caption, servers, keyer)
