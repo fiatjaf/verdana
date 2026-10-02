@@ -474,6 +474,7 @@ private fun InstalledTab(activity: MainActivity, st: LauncherState, theme: Theme
                 val busy = st.busy.contains(napp.id)
                 NappCard(
                     activity, napp, theme,
+                    showActions = false,
                     onDetail = { onDetail(napp) },
                     onAuthor = { onAuthor(napp.author) },
                     onLaunch = { activity.launch(napp.id) },
@@ -579,6 +580,7 @@ private fun DiscoveryTab(
             val busy = st.busy.contains(napp.id)
             NappCard(
                 activity, napp, theme,
+                showActions = false,
                 onDetail = { onDetail(napp) },
                 onAuthor = { onAuthor(napp.author) },
                 onLaunch = { if (installed) activity.launch(napp.id) else activity.tryNapplet(napp.id) },
@@ -615,6 +617,7 @@ private fun NappCard(
     onSettings: (() -> Unit)? = null,
     showOpen: Boolean = false,
     openLabel: String = "Open",
+    showActions: Boolean = true,
 ) {
     // icons load off the main thread, keyed by blob hash like the desktop
     val hash = napp.iconHash()
@@ -652,7 +655,7 @@ private fun NappCard(
             if (napp.description.isNotBlank()) {
                 Text(napp.description, color = theme.subtle, fontSize = 13.sp, maxLines = 2)
             }
-            if (napp.actions.any { it.isNotBlank() }) {
+            if (showActions && napp.actions.any { it.isNotBlank() }) {
                 Row(
                     Modifier
                         .padding(top = 5.dp)

@@ -533,7 +533,7 @@ func layoutProfileDetail(
 				if !installedSet[n.ID] && n.IsNapplet() {
 					openLabel = "Try"
 				}
-				return renderNappCard(gtx, th, cardBtn, nil, openBtn, nil, actBtn, updBtn, openLabel, label, updLabel, n)
+				return renderNappCard(gtx, th, cardBtn, nil, openBtn, nil, actBtn, updBtn, openLabel, label, updLabel, true, n)
 			})
 		}),
 	)

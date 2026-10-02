@@ -811,9 +811,9 @@ func layoutNappsTab(
 					settingsBtn = &settingsBtns[row]
 				}
 				if tile {
-					return renderNappTile(gtx, th, cardBtn, authorBtn, openBtn, settingsBtn, uninstBtn, updateBtn, "Open", "Uninstall", "Update", st.Installed[row])
+					return renderNappTile(gtx, th, cardBtn, authorBtn, openBtn, settingsBtn, uninstBtn, updateBtn, "Open", "Uninstall", "Update", false, st.Installed[row])
 				}
-				return renderNappCard(gtx, th, cardBtn, authorBtn, openBtn, settingsBtn, uninstBtn, updateBtn, "Open", "Uninstall", "Update", st.Installed[row])
+				return renderNappCard(gtx, th, cardBtn, authorBtn, openBtn, settingsBtn, uninstBtn, updateBtn, "Open", "Uninstall", "Update", false, st.Installed[row])
 			})
 		}),
 	)
@@ -967,9 +967,9 @@ func layoutDiscoveryTab(
 					authorBtn = &authorBtns[row]
 				}
 				if tile {
-					return renderNappTile(gtx, th, cardBtn, authorBtn, openBtn, nil, btn, updBtn, openLabel, label, updLabel, n)
+					return renderNappTile(gtx, th, cardBtn, authorBtn, openBtn, nil, btn, updBtn, openLabel, label, updLabel, false, n)
 				}
-				return renderNappCard(gtx, th, cardBtn, authorBtn, openBtn, nil, btn, updBtn, openLabel, label, updLabel, n)
+				return renderNappCard(gtx, th, cardBtn, authorBtn, openBtn, nil, btn, updBtn, openLabel, label, updLabel, false, n)
 			}
 			return nappGrid(gtx, th, list, &discoCols, vis, card)
 		}),
@@ -1079,7 +1079,7 @@ func layoutDevTab(
 				if i < len(publishBtns) && backend.DevSourceKind(st.Dev[i].ID) == "folder" {
 					publishBtn = &publishBtns[i]
 				}
-				return renderNappCard(gtx, th, openBtn, nil, nil, nil, publishBtn, unloadBtn, "", "Publish", "Unload", st.Dev[i])
+				return renderNappCard(gtx, th, openBtn, nil, nil, nil, publishBtn, unloadBtn, "", "Publish", "Unload", true, st.Dev[i])
 			})
 		}),
 	)
@@ -1298,9 +1298,10 @@ func nappAuthor(napp backend.Napp) (name, picture string) {
 	return name, ""
 }
 
-// renderNappCard draws one napp row: icon, name, description, author and the
-// action buttons. When cardBtn is not nil the whole card is clickable (it
-// opens the napp's page); authorBtn alone opens the author's profile page.
+// renderNappCard draws one napp row: icon, name, description, author, optional
+// handled actions, and action buttons. When cardBtn is not nil the whole card
+// is clickable (it opens the napp's page); authorBtn alone opens the author's
+// profile page.
 // Buttons drawn on top of the card's area keep working, so the frame handler
 // must check which of them fired before acting on the card itself.
 func renderNappCard(
@@ -1315,6 +1316,7 @@ func renderNappCard(
 	openLabel,
 	btnLabel,
 	secondLabel string,
+	showActions bool,
 	napp backend.Napp,
 ) layout.Dimensions {
 	authorName, authorPic := nappAuthor(napp)
@@ -1351,6 +1353,9 @@ func renderNappCard(
 							)
 						}),
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							if !showActions {
+								return layout.Dimensions{}
+							}
 							chips := actionChips(th, napp)
 							if len(chips) == 0 {
 								return layout.Dimensions{}

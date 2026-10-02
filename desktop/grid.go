@@ -166,7 +166,7 @@ func cardDescription(s string) string {
 }
 
 // renderNappTile draws one napp as a grid tile: icon and name on top, then
-// the description, its actions and author, and the buttons along the bottom.
+// the description, optional actions and author, and buttons along the bottom.
 // The clickable parts work as renderNappCard's do. Given a minimum height
 // (gridRow's second pass) the tile stretches to it and keeps its buttons at
 // the bottom edge.
@@ -182,6 +182,7 @@ func renderNappTile(
 	openLabel,
 	btnLabel,
 	secondLabel string,
+	showActions bool,
 	napp backend.Napp,
 ) layout.Dimensions {
 	authorName, authorPic := nappAuthor(napp)
@@ -314,6 +315,9 @@ func renderNappTile(
 			})
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if !showActions {
+				return layout.Dimensions{}
+			}
 			chips := actionChips(th, napp)
 			if len(chips) == 0 {
 				return layout.Dimensions{}
