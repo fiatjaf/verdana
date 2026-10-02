@@ -34,6 +34,9 @@ object VerdanaHost : UI {
     var prompt by mutableStateOf<Prompt?>(null)
         private set
 
+    var discoveryArchetype by mutableStateOf("")
+        private set
+
     // the napp windows that are alive right now, by instance id
     private val windows = ConcurrentHashMap<String, NappActivity>()
 
@@ -160,6 +163,10 @@ object VerdanaHost : UI {
         setCurrentThemeName(next)
     }
 
+    fun consumeDiscoveryArchetype() {
+        discoveryArchetype = ""
+    }
+
     // ─── mobile.UI ───────────────────────────────────────────────────
     // Every one of these may be called from any thread.
 
@@ -193,6 +200,18 @@ object VerdanaHost : UI {
         val snapshot = Mobile.state()
         android.os.Handler(android.os.Looper.getMainLooper()).post {
             state = parseState(snapshot)
+        }
+    }
+
+    override fun openDiscovery(archetype: String) {
+        val ctx = appContext ?: return
+        ctx.startActivityOnMain {
+            discoveryArchetype = archetype
+            ctx.startActivity(
+                Intent(ctx, MainActivity::class.java).addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                )
+            )
         }
     }
 

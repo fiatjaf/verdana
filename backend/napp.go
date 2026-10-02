@@ -123,6 +123,17 @@ func (n Napp) Handles(action string) bool {
 	return false
 }
 
+// HandlesArchetype says whether a napplet advertises a convention for role.
+func (n Napp) HandlesArchetype(role string) bool {
+	prefix := "napplet:" + role + "/"
+	for _, convention := range n.Conventions {
+		if strings.HasPrefix(convention.ID, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 // InstalledNapp looks an installed napp up by id.
 func InstalledNapp(id string) (Napp, bool) {
 	stateMu.Lock()

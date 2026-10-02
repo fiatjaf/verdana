@@ -25,6 +25,7 @@ type UI interface {
 	// The dir is where the napp's files are: serve them to the WebView, inject
 	// BridgeJS(), and send everything the page posts up to HandleMessage.
 	OpenWindow(instance string, specJSON string) error
+	OpenDiscovery(archetype string)
 
 	// SendToWindow delivers one wire message to a napp's shell. It is a JSON
 	// object with a "t": "resp" answers an rpc, "eval" runs code, "action"
@@ -85,6 +86,7 @@ func (h mobileHost) OpenWindow(spec backend.WindowSpec) (backend.Transport, erro
 }
 
 func (h mobileHost) StateChanged()                               { h.ui.StateChanged() }
+func (h mobileHost) OpenDiscovery(archetype string)              { h.ui.OpenDiscovery(archetype) }
 func (h mobileHost) PromptsChanged()                             { h.ui.PromptsChanged() }
 func (h mobileHost) CopyText(text string) error                  { return h.ui.CopyText(text) }
 func (h mobileHost) SaveFileTarget() string                      { return h.ui.SaveFileTarget() }

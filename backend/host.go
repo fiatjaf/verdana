@@ -17,6 +17,10 @@ type Host interface {
 	// HandleWireMessage for everything the napp's bridge sends up.
 	OpenWindow(spec WindowSpec) (Transport, error)
 
+	// OpenDiscovery brings the launcher to Discovery and limits the catalog
+	// to napplets advertising archetype.
+	OpenDiscovery(archetype string)
+
 	// StateChanged says the launcher's State() changed and whatever renders
 	// it should render it again.
 	StateChanged()
@@ -130,6 +134,7 @@ type noopHost struct{}
 func (noopHost) OpenWindow(WindowSpec) (Transport, error) {
 	return nil, errors.New("this host cannot open windows")
 }
+func (noopHost) OpenDiscovery(string)                    {}
 func (noopHost) StateChanged()                           {}
 func (noopHost) PromptsChanged()                         {}
 func (noopHost) CopyText(string) error                   { return errors.New("no clipboard") }

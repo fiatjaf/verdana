@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"verdana/backend"
+
+	"gioui.org/io/system"
 )
 
 // gioHost is this launcher's answer to everything platform-shaped the backend
@@ -24,6 +26,17 @@ func (gioHost) OpenWindow(spec backend.WindowSpec) (backend.Transport, error) {
 
 func (gioHost) StateChanged() {
 	if gioWin != nil {
+		gioWin.Invalidate()
+	}
+}
+
+func (gioHost) OpenDiscovery(archetype string) {
+	ui.mu.Lock()
+	ui.tab = tabDiscovery
+	ui.discoveryArchetype = archetype
+	ui.mu.Unlock()
+	if gioWin != nil {
+		gioWin.Perform(system.ActionRaise)
 		gioWin.Invalidate()
 	}
 }

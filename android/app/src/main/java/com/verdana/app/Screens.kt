@@ -214,6 +214,18 @@ fun LauncherScreen(activity: MainActivity, st: LauncherState) {
     var detailNapp by remember { mutableStateOf<Napp?>(null) }
     var detailProfile by remember { mutableStateOf<String?>(null) }
 
+    val requestedArchetype = VerdanaHost.discoveryArchetype
+    androidx.compose.runtime.LaunchedEffect(requestedArchetype) {
+        if (requestedArchetype.isNotBlank()) {
+            tab = 1
+            discoveryFilter = "archetype:$requestedArchetype"
+            discoveryKind = DiscoveryKind.Napplets
+            detailNapp = null
+            detailProfile = null
+            VerdanaHost.consumeDiscoveryArchetype()
+        }
+    }
+
     fun pickTab(t: Int) {
         tab = t
         detailNapp = null
@@ -493,12 +505,18 @@ private fun DiscoveryTab(
     // name (see matchesQuery); applied to the snapshot's list, cards stay
     // keyed by id either way. A napp address (naddr, nostr: link) is looked
     // up on relays instead, and only what it names is listed.
-    LaunchedEffect(filter) { activity.lookupAddress(filter) }
-    val lookup = st.lookup?.takeIf { it.query == filter.trim() }
+    val isArchetypeFilter = filter.trim().startsWith("archetype:")
+    LaunchedEffect(filter) { activity.lookupAddress(if (isArchetypeFilter) "" else filter) }
+    val lookup = st.lookup?.takeIf { !isArchetypeFilter && it.query == filter.trim() }
     // The kind tabs narrow the list to napps or napplets, except for an
     // address, which names one app whatever its kind.
+    val requestedArchetype = filter.trim().removePrefix("archetype:").takeIf {
+        filter.trim().startsWith("archetype:") && it.isNotBlank()
+    }
     val visible = if (lookup != null) st.discovery.filter { it.id == lookup.nappId }
-    else st.discovery.matching(filter).filter { kind.matches(it) }
+    else st.discovery
+        .matching(if (requestedArchetype == null) filter else "")
+        .filter { kind.matches(it) && (requestedArchetype == null || requestedArchetype in it.archetypes) }
     LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
             // the filter comes first

@@ -26,6 +26,7 @@ data class Napp(
     val format: String = "",
     // a napplet's icon is a bare blob hash, not one of its paths
     val iconSha: String = "",
+    val archetypes: List<String> = listOf(),
 ) {
     val isNapplet: Boolean get() = format == "napplet"
 }
@@ -129,6 +130,10 @@ fun parseState(json: String): LauncherState {
                 },
                 format = n.optString("format"),
                 iconSha = n.optString("iconSha"),
+                archetypes = (0 until (n.optJSONArray("conventions")?.length() ?: 0)).mapNotNull {
+                    n.optJSONArray("conventions")?.optJSONObject(it)?.optString("id")
+                        ?.removePrefix("napplet:")?.substringBefore('/')?.takeIf(String::isNotBlank)
+                }.distinct(),
             )
         }
     }

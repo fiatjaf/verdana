@@ -38,12 +38,24 @@ func napIntentInvoke(c *napCall) {
 		return
 	}
 	req := r.Request
-	result := map[string]any{"ok": false}
+	if req.Action == "" {
+		req.Action = "open"
+	}
+	result := map[string]any{
+		"ok": false, "archetype": req.Archetype, "action": req.Action, "handled": false,
+	}
 	fail := func(msg string) {
 		result["error"] = msg
 		c.reply(map[string]any{"result": result})
 	}
 
+	if !domainToken.MatchString(req.Archetype) {
+		fail("unknown archetype")
+		return
+	}
+	if req.Convention == "" {
+		req.Convention = "napplet:" + req.Archetype + "/" + req.Action
+	}
 	archetype, action, ok := conventionParts(req.Convention)
 	if !ok || archetype != req.Archetype || action != req.Action {
 		fail("invalid convention")
@@ -68,8 +80,8 @@ func napIntentInvoke(c *napCall) {
 	opts.Accept = func(target *Instance) {
 		accepted = true
 		result = map[string]any{
-			"ok": true, "archetype": archetype, "action": action,
-			"convention": req.Convention, "handler": target.napp.D,
+			"ok": true, "archetype": archetype, "action": action, "handled": true,
+			"convention": req.Convention, "handler": target.napp.D, "windowId": target.instance,
 		}
 		c.reply(map[string]any{"result": result})
 	}
@@ -82,6 +94,7 @@ func napIntentInvoke(c *napCall) {
 		switch {
 		case errors.Is(err, errNoHandler):
 			result["error"] = "no handler"
+			host.OpenDiscovery(archetype)
 		case err != nil && strings.Contains(err.Error(), "cancelled"):
 			result["error"] = "user cancelled"
 		default:

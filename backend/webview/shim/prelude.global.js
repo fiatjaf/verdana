@@ -2751,9 +2751,15 @@ var NappletShimPrelude = (() => {
       handleDelivery(msg);
     }
   }
-  function invoke(uri, options = {}) {
-    const { payload, ...hints } = options;
-    const request7 = { ...normalizeConventionUri(uri, payload), ...hints };
+  function invoke(request, options = {}) {
+    let request7;
+    if (typeof request === "string") {
+      const { payload, ...hints } = options;
+      request7 = { ...normalizeConventionUri(request, payload), ...hints };
+    } else {
+      request7 = { ...request };
+      if (!request7.action) request7.action = "open";
+    }
     const id = crypto.randomUUID();
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
@@ -2768,12 +2774,11 @@ var NappletShimPrelude = (() => {
       postToShell(msg);
     });
   }
-  function open2(uri, options) {
-    const normalized = normalizeConventionUri(uri, options?.payload);
-    if (normalized.action !== "open") {
-      throw new Error("intent.open requires a convention URI whose intent is open");
+  function open2(archetype, payload, options = {}) {
+    if (archetype.startsWith("napplet:")) {
+      return invoke(archetype, payload ?? {});
     }
-    return invoke(uri, options);
+    return invoke({ archetype, action: "open", payload, ...options });
   }
   function available(archetype) {
     const id = crypto.randomUUID();

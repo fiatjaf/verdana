@@ -675,6 +675,41 @@ func TestConventionPartsAcceptsOnlyStableIdentity(t *testing.T) {
 	}
 }
 
+type intentDiscoveryHost struct {
+	noopHost
+	opened chan string
+}
+
+func (h *intentDiscoveryHost) OpenDiscovery(archetype string) { h.opened <- archetype }
+
+func TestNapIntentWithoutHandlerOpensDiscovery(t *testing.T) {
+	setupNapTest(t)
+	caller, rec := openNapplet(t, "intent-caller")
+	ready(t, caller, rec, 1)
+
+	oldHost := host
+	discovery := &intentDiscoveryHost{opened: make(chan string, 1)}
+	host = discovery
+	t.Cleanup(func() { host = oldHost })
+
+	post(t, caller, map[string]any{"type": "intent.invoke", "id": "missing", "request": map[string]any{
+		"archetype": "emoji-list", "payload": map[string]any{"seed": []string{"wave"}},
+	}})
+	result := rec.wait(t, "intent.invoke.result", 1)["result"].(map[string]any)
+	if result["ok"] != false || result["handled"] != false || result["archetype"] != "emoji-list" ||
+		result["action"] != "open" || result["error"] != "no handler" {
+		t.Fatalf("missing handler result: %v", result)
+	}
+	select {
+	case archetype := <-discovery.opened:
+		if archetype != "emoji-list" {
+			t.Fatalf("opened discovery for %q", archetype)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("missing handler did not open discovery")
+	}
+}
+
 func TestNapIntentAcceptanceSurvivesSourceLifecycle(t *testing.T) {
 	setupNapTest(t)
 	caller, recCaller := openNapplet(t, "intent-caller")
@@ -715,11 +750,13 @@ func TestNapIntentAcceptanceSurvivesSourceLifecycle(t *testing.T) {
 	}
 
 	post(t, caller, map[string]any{"type": "intent.invoke", "id": "invoke", "request": map[string]any{
-		"archetype": "profile", "action": "open", "convention": "napplet:profile/open",
-		"payload": map[string]any{"pubkey": "abc"},
+		"archetype": "profile",
+		"payload":   map[string]any{"pubkey": "abc"},
 	}})
 	result := recCaller.wait(t, "intent.invoke.result", 2)["result"].(map[string]any)
-	if result["ok"] != true || result["handler"] != handler.napp.D || result["handled"] != nil || result["windowId"] != nil {
+	if result["ok"] != true || result["handler"] != handler.napp.D || result["handled"] != true ||
+		result["windowId"] != handler.instance || result["action"] != "open" ||
+		result["convention"] != "napplet:profile/open" {
 		t.Fatalf("acceptance result: %v", result)
 	}
 

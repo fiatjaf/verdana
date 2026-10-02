@@ -4,6 +4,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"verdana/backend"
@@ -28,6 +29,10 @@ import (
 type gioState struct {
 	mu  sync.Mutex
 	tab int
+
+	// discoveryArchetype is set by an intent dispatch off the UI thread and
+	// consumed by the next frame.
+	discoveryArchetype string
 
 	// confirmLogout parks the "log out?" dialog over the main screen until
 	// the user answers it: logging out closes every napp.
@@ -233,10 +238,21 @@ func setShortcutEdit(edit *shortcutEditState) {
 //
 // The kind tabs narrow it further to napps or napplets, except for an
 // address: that names one app, whatever its kind.
-func discoveryFilter(st backend.State) []int {
-	backend.LookupAddress(filterEd.Text())
+func discoveryFilter(st backend.State, archetype string) []int {
 	q := strings.ToLower(strings.TrimSpace(filterEd.Text()))
+	if role, ok := strings.CutPrefix(q, "archetype:"); ok {
+		archetype = strings.TrimSpace(role)
+		q = ""
+		backend.LookupAddress("")
+	} else {
+		backend.LookupAddress(filterEd.Text())
+	}
 	vis := nappFilter(st.Discovery, q)
+	if archetype != "" {
+		vis = slices.DeleteFunc(vis, func(i int) bool {
+			return !st.Discovery[i].HandlesArchetype(archetype)
+		})
+	}
 	if discoKind == discoKindAll || backend.IsNappAddress(q) {
 		return vis
 	}
@@ -363,9 +379,15 @@ func gioMain() {
 
 			ui.mu.Lock()
 			tab := ui.tab
+			discoveryArchetype := ui.discoveryArchetype
+			ui.discoveryArchetype = ""
 			pendingCopies := ui.clipboard
 			ui.clipboard = nil
 			ui.mu.Unlock()
+			if discoveryArchetype != "" {
+				filterEd.SetText("archetype:" + discoveryArchetype)
+				discoKind = discoKindNapplets
+			}
 
 			installedSet := make(map[string]bool, len(st.Installed))
 			for _, n := range st.Installed {
@@ -522,7 +544,7 @@ func gioMain() {
 							bundleChecks[w.Instance] = new(widget.Bool)
 						}
 					}
-					vis := discoveryFilter(st)
+					vis := discoveryFilter(st, discoveryArchetype)
 					instVis := installedFilter(st)
 					if tab == 0 {
 						for i, w := range st.ManagedWindows {
