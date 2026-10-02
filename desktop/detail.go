@@ -213,6 +213,11 @@ func layoutNappDetail(
 	}
 	installed := installedSet[n.ID]
 	working := busy[n.ID]
+	canOpen := installed || n.IsNapplet()
+	openLabel := "Open"
+	if !installed && n.IsNapplet() {
+		openLabel = "Try"
+	}
 	primaryLabel := "Install"
 	if installed {
 		primaryLabel = "Uninstall"
@@ -290,17 +295,17 @@ func layoutNappDetail(
 		return layout.Inset{Top: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					if !installed || openBtn == nil {
+					if !canOpen || openBtn == nil {
 						return layout.Dimensions{}
 					}
 					pointer.CursorPointer.Add(gtx.Ops)
-					b := material.Button(th, openBtn, "Open")
+					b := material.Button(th, openBtn, openLabel)
 					b.Background = currentTheme().suggestBg
 					b.Color = currentTheme().suggestFg
 					return b.Layout(gtx)
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					if !installed || openBtn == nil {
+					if !canOpen || openBtn == nil {
 						return layout.Dimensions{}
 					}
 					return layout.Spacer{Width: unit.Dp(8)}.Layout(gtx)
@@ -502,7 +507,7 @@ func layoutProfileDetail(
 				if i < len(cardBtns) {
 					cardBtn = &cardBtns[i]
 				}
-				if i < len(openBtns) && installedSet[n.ID] {
+				if i < len(openBtns) && (installedSet[n.ID] || n.IsNapplet()) {
 					openBtn = &openBtns[i]
 				}
 				if i < len(actionBtns) {
@@ -524,7 +529,11 @@ func layoutProfileDetail(
 				}
 				// inside a profile the author row is the profile itself:
 				// no nested author button
-				return renderNappCard(gtx, th, cardBtn, nil, openBtn, nil, actBtn, updBtn, label, updLabel, n)
+				openLabel := "Open"
+				if !installedSet[n.ID] && n.IsNapplet() {
+					openLabel = "Try"
+				}
+				return renderNappCard(gtx, th, cardBtn, nil, openBtn, nil, actBtn, updBtn, openLabel, label, updLabel, n)
 			})
 		}),
 	)

@@ -106,6 +106,56 @@ func InstallFromDiscovery(id string) bool {
 	return false
 }
 
+// TryNapplet downloads, verifies and opens a napplet without installing it.
+// Its document stays in memory for the lifetime of the window and the napp is
+// never added to InstalledNapps.
+func TryNapplet(n Napp) {
+	go func() {
+		if err := tryNapplet(context.Background(), n); err != nil {
+			log.Error().Err(err).Str("napp", n.ID).Msg("napplet preview failed")
+			SetFetchErr("try failed: " + err.Error())
+		}
+	}()
+}
+
+func tryNapplet(ctx context.Context, n Napp) error {
+	if !n.IsNapplet() {
+		return errors.New("only napplets can be tried without installing")
+	}
+	if n.ID == "" {
+		return errors.New("napplet has no id")
+	}
+	want := n.IndexHash()
+	if want == "" {
+		return errors.New("napplet has no index document")
+	}
+	setBusy(n.ID, true)
+	defer setBusy(n.ID, false)
+
+	fetchCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
+	defer cancel()
+	document, err := downloadBlob(fetchCtx, n.BlossomServers(fetchCtx), want)
+	if err != nil {
+		return err
+	}
+	_, err = launchWithDocument(ctx, n, "", document)
+	return err
+}
+
+// TryNappletFromDiscovery resolves an uninstalled discovery result and opens
+// it ephemerally. Installed napplets are opened normally.
+func TryNappletFromDiscovery(id string) bool {
+	if n, ok := InstalledNapp(id); ok {
+		Launch(n)
+		return true
+	}
+	if n, ok := DiscoveredNapp(id); ok && n.IsNapplet() {
+		TryNapplet(n)
+		return true
+	}
+	return false
+}
+
 // maxParallelAssets caps how many of a napp's files are in flight at once, so
 // a big napp doesn't open a connection per asset against the same server.
 const maxParallelAssets = 6

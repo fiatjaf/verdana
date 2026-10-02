@@ -811,9 +811,9 @@ func layoutNappsTab(
 					settingsBtn = &settingsBtns[row]
 				}
 				if tile {
-					return renderNappTile(gtx, th, cardBtn, authorBtn, openBtn, settingsBtn, uninstBtn, updateBtn, "Uninstall", "Update", st.Installed[row])
+					return renderNappTile(gtx, th, cardBtn, authorBtn, openBtn, settingsBtn, uninstBtn, updateBtn, "Open", "Uninstall", "Update", st.Installed[row])
 				}
-				return renderNappCard(gtx, th, cardBtn, authorBtn, openBtn, settingsBtn, uninstBtn, updateBtn, "Uninstall", "Update", st.Installed[row])
+				return renderNappCard(gtx, th, cardBtn, authorBtn, openBtn, settingsBtn, uninstBtn, updateBtn, "Open", "Uninstall", "Update", st.Installed[row])
 			})
 		}),
 	)
@@ -956,16 +956,20 @@ func layoutDiscoveryTab(
 				if row < len(cardBtns) {
 					cardBtn = &cardBtns[row]
 				}
-				if row < len(openBtns) && installedSet[n.ID] {
+				if row < len(openBtns) && (installedSet[n.ID] || n.IsNapplet()) {
 					openBtn = &openBtns[row]
+				}
+				openLabel := "Open"
+				if !installedSet[n.ID] && n.IsNapplet() {
+					openLabel = "Try"
 				}
 				if row < len(authorBtns) {
 					authorBtn = &authorBtns[row]
 				}
 				if tile {
-					return renderNappTile(gtx, th, cardBtn, authorBtn, openBtn, nil, btn, updBtn, label, updLabel, n)
+					return renderNappTile(gtx, th, cardBtn, authorBtn, openBtn, nil, btn, updBtn, openLabel, label, updLabel, n)
 				}
-				return renderNappCard(gtx, th, cardBtn, authorBtn, openBtn, nil, btn, updBtn, label, updLabel, n)
+				return renderNappCard(gtx, th, cardBtn, authorBtn, openBtn, nil, btn, updBtn, openLabel, label, updLabel, n)
 			}
 			return nappGrid(gtx, th, list, &discoCols, vis, card)
 		}),
@@ -1075,7 +1079,7 @@ func layoutDevTab(
 				if i < len(publishBtns) && backend.DevSourceKind(st.Dev[i].ID) == "folder" {
 					publishBtn = &publishBtns[i]
 				}
-				return renderNappCard(gtx, th, openBtn, nil, nil, nil, publishBtn, unloadBtn, "Publish", "Unload", st.Dev[i])
+				return renderNappCard(gtx, th, openBtn, nil, nil, nil, publishBtn, unloadBtn, "", "Publish", "Unload", st.Dev[i])
 			})
 		}),
 	)
@@ -1308,6 +1312,7 @@ func renderNappCard(
 	settingsBtn,
 	btn,
 	secondBtn *widget.Clickable,
+	openLabel,
 	btnLabel,
 	secondLabel string,
 	napp backend.Napp,
@@ -1398,7 +1403,7 @@ func renderNappCard(
 					}
 					return layout.Inset{Left: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 						pointer.CursorPointer.Add(gtx.Ops)
-						b := material.Button(th, openBtn, "Open")
+						b := material.Button(th, openBtn, openLabel)
 						b.Background = currentTheme().suggestBg
 						b.Color = currentTheme().suggestFg
 						b.TextSize = unit.Sp(13)

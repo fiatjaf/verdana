@@ -681,11 +681,11 @@ func gioMain() {
 						}
 						if !acted {
 							for _, i := range vis {
-								if installedSet[st.Discovery[i].ID] && discoOpenBtns[i].Clicked(gtx) {
+								if (installedSet[st.Discovery[i].ID] || st.Discovery[i].IsNapplet()) && discoOpenBtns[i].Clicked(gtx) {
 									if n, ok := backend.InstalledNapp(st.Discovery[i].ID); ok {
 										backend.Launch(n)
 									} else {
-										backend.Launch(st.Discovery[i])
+										backend.TryNapplet(st.Discovery[i])
 									}
 									acted = true
 								}
@@ -728,11 +728,11 @@ func gioMain() {
 							n := detailNapp(extraTabState)
 							if detailAuthorBtn.Clicked(gtx) && n.Author.Hex() != "" {
 								openProfileTab(n.Author.Hex())
-							} else if detailOpenBtn.Clicked(gtx) && installedSet[n.ID] {
+							} else if detailOpenBtn.Clicked(gtx) && (installedSet[n.ID] || n.IsNapplet()) {
 								if in, ok := backend.InstalledNapp(n.ID); ok {
 									backend.Launch(in)
 								} else {
-									backend.Launch(n)
+									backend.TryNapplet(n)
 								}
 							} else if detailPrimaryBtn.Clicked(gtx) {
 								if busy[n.ID] {
@@ -769,11 +769,11 @@ func gioMain() {
 								if i >= len(profileOpenBtns) {
 									break
 								}
-								if installedSet[pn.ID] && profileOpenBtns[i].Clicked(gtx) {
+								if (installedSet[pn.ID] || pn.IsNapplet()) && profileOpenBtns[i].Clicked(gtx) {
 									if in, ok := backend.InstalledNapp(pn.ID); ok {
 										backend.Launch(in)
 									} else {
-										backend.Launch(pn)
+										backend.TryNapplet(pn)
 									}
 									pacted = true
 								}

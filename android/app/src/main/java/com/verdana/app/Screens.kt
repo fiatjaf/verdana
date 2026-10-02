@@ -581,8 +581,9 @@ private fun DiscoveryTab(
                 activity, napp, theme,
                 onDetail = { onDetail(napp) },
                 onAuthor = { onAuthor(napp.author) },
-                onLaunch = { activity.launch(napp.id) },
-                showOpen = installed,
+                onLaunch = { if (installed) activity.launch(napp.id) else activity.tryNapplet(napp.id) },
+                showOpen = installed || napp.isNapplet,
+                openLabel = if (installed) "Open" else "Try",
                 primaryLabel = when {
                     busy -> "Working…"
                     installed -> "Uninstall"
@@ -613,6 +614,7 @@ private fun NappCard(
     onLaunch: (() -> Unit)? = null,
     onSettings: (() -> Unit)? = null,
     showOpen: Boolean = false,
+    openLabel: String = "Open",
 ) {
     // icons load off the main thread, keyed by blob hash like the desktop
     val hash = napp.iconHash()
@@ -696,7 +698,7 @@ private fun NappCard(
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = theme.suggestBg, contentColor = theme.suggestFg),
             ) {
-                Text("Open", fontSize = 13.sp)
+                Text(openLabel, fontSize = 13.sp)
             }
             Spacer(Modifier.width(6.dp))
         }
@@ -1129,11 +1131,11 @@ fun NappDetailScreen(
         }
         Spacer(Modifier.height(12.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            if (installed) {
+            if (installed || napp.isNapplet) {
                 Button(
-                    onClick = { activity.launch(napp.id) },
+                    onClick = { if (installed) activity.launch(napp.id) else activity.tryNapplet(napp.id) },
                     colors = ButtonDefaults.buttonColors(containerColor = theme.suggestBg, contentColor = theme.suggestFg),
-                ) { Text("Open") }
+                ) { Text(if (installed) "Open" else "Try") }
                 Spacer(Modifier.width(8.dp))
             }
             Button(
@@ -1240,8 +1242,9 @@ fun AuthorProfileDetailScreen(
                         activity, n, theme,
                         onDetail = { onOpenNapp(n) },
                         onAuthor = null,
-                        onLaunch = { activity.launch(n.id) },
-                        showOpen = installed,
+                        onLaunch = { if (installed) activity.launch(n.id) else activity.tryNapplet(n.id) },
+                        showOpen = installed || n.isNapplet,
+                        openLabel = if (installed) "Open" else "Try",
                         primaryLabel = if (busy) "Working…" else if (installed) "Uninstall" else "Install",
                         onPrimary = { if (installed) activity.uninstall(n.id) else activity.install(n.id) },
                         secondaryLabel = if (installed && n.updateAvailable) "Update" else null,

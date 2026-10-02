@@ -404,7 +404,7 @@ func (ci *Instance) napClosed() {
 // nappletBoot answers nap.boot: the napplet's verified HTML, wrapped for the
 // sandboxed frame.
 func nappletBoot(ci *Instance) (any, error) {
-	html, err := nappletDocument(ci.napp)
+	html, err := nappletDocumentForInstance(ci)
 	if err != nil {
 		log.Error().Err(err).Str("napplet", ci.napp.ID).Msg("napplet will not boot")
 		return nil, err
@@ -414,6 +414,13 @@ func nappletBoot(ci *Instance) (any, error) {
 		return nil, err
 	}
 	return map[string]any{"srcdoc": doc, "title": ci.napp.Label()}, nil
+}
+
+func nappletDocumentForInstance(ci *Instance) ([]byte, error) {
+	if ci.previewDocument != nil {
+		return append([]byte(nil), ci.previewDocument...), nil
+	}
+	return nappletDocument(ci.napp)
 }
 
 // nappletDocument reads the napplet's one file: from a dev napplet's folder,

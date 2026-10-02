@@ -319,6 +319,13 @@ func Install(id string) {
 	}
 }
 
+// TryNapplet opens a discovered napplet without installing it.
+func TryNapplet(id string) {
+	if !backend.TryNappletFromDiscovery(id) {
+		backend.SetFetchErr("nothing known about napplet " + id)
+	}
+}
+
 // LookupAddress looks up a napp address (naddr, nostr: link) typed into the
 // discovery filter; anything else clears the lookup. The outcome shows in
 // the state's lookup, and the napp found joins its discovery list. Cheap to

@@ -86,6 +86,7 @@ class MainActivity : ComponentActivity() {
     fun update(id: String) = Mobile.update(id)
     fun uninstall(id: String) = Mobile.uninstall(id)
     fun launch(id: String) = Mobile.launch(id)
+    fun tryNapplet(id: String) = Mobile.tryNapplet(id)
     fun checkForUpdates() = Mobile.checkForUpdates()
     fun lookupAddress(input: String) = Mobile.lookupAddress(input)
     fun toggleTheme() = VerdanaHost.toggleTheme()

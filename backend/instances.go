@@ -35,6 +35,9 @@ type Instance struct {
 	storageInstance string
 	number          int
 	napp            Napp
+	// previewDocument is the verified, in-memory HTML of a napplet opened
+	// with Try. Preview napplets never need an install directory.
+	previewDocument []byte
 
 	sendMu    sync.Mutex
 	transport Transport
@@ -481,6 +484,10 @@ func launch(ctx context.Context, napp Napp) (*Instance, error) {
 }
 
 func launchWithInstance(ctx context.Context, napp Napp, requestedInstance string) (*Instance, error) {
+	return launchWithDocument(ctx, napp, requestedInstance, nil)
+}
+
+func launchWithDocument(ctx context.Context, napp Napp, requestedInstance string, previewDocument []byte) (*Instance, error) {
 	id := napp.ID
 	if id == "" {
 		return nil, errors.New("napp has no id")
@@ -491,7 +498,7 @@ func launchWithInstance(ctx context.Context, napp Napp, requestedInstance string
 		// a napplet window never navigates anywhere: the shell loads the
 		// launcher's host page and asks for the verified document (nap.boot),
 		// which comes from the install dir or, for a dev napplet, its folder
-		if devLookup(id) == nil {
+		if previewDocument == nil && devLookup(id) == nil {
 			if _, err := os.Stat(filepath.Join(appDir, "index.html")); err != nil {
 				return nil, fmt.Errorf("napplet %s is not installed", id)
 			}
@@ -527,6 +534,7 @@ func launchWithInstance(ctx context.Context, napp Napp, requestedInstance string
 		storageInstance: storageInstance,
 		number:          int(windowSerial.Add(1)),
 		napp:            napp,
+		previewDocument: previewDocument,
 		subs:            make(map[int]context.CancelFunc),
 		actions:         make(map[string]int),
 		changed:         make(chan struct{}),

@@ -179,6 +179,7 @@ func renderNappTile(
 	settingsBtn,
 	btn,
 	secondBtn *widget.Clickable,
+	openLabel,
 	btnLabel,
 	secondLabel string,
 	napp backend.Napp,
@@ -206,7 +207,7 @@ func renderNappTile(
 		})
 	}
 	p := currentTheme()
-	button(openBtn, "Open", &[2]color.NRGBA{p.suggestBg, p.suggestFg})
+	button(openBtn, openLabel, &[2]color.NRGBA{p.suggestBg, p.suggestFg})
 	button(settingsBtn, "Settings", &[2]color.NRGBA{p.chipBg, p.chipFg})
 	button(secondBtn, secondLabel, nil)
 	button(btn, btnLabel, nil)
