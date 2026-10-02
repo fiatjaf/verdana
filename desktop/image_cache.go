@@ -82,8 +82,8 @@ func cachedImage(key string, load func(context.Context) ([]byte, error)) (paint.
 			}
 			e.op = paint.NewImageOp(img)
 			e.ready.Store(true)
-			if gioWin != nil {
-				gioWin.Invalidate()
+			if w := managerWindow(); w != nil {
+				w.Invalidate()
 			}
 		}()
 	})

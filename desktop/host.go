@@ -10,8 +10,6 @@ import (
 	"strings"
 
 	"verdana/backend"
-
-	"gioui.org/io/system"
 )
 
 // gioHost is this launcher's answer to everything platform-shaped the backend
@@ -29,8 +27,8 @@ func (gioHost) OpenSettings(spec backend.SettingsSpec) (backend.Transport, error
 }
 
 func (gioHost) StateChanged() {
-	if gioWin != nil {
-		gioWin.Invalidate()
+	if w := managerWindow(); w != nil {
+		w.Invalidate()
 	}
 }
 
@@ -39,15 +37,12 @@ func (gioHost) OpenDiscovery(archetype string) {
 	ui.tab = tabDiscovery
 	ui.discoveryArchetype = archetype
 	ui.mu.Unlock()
-	if gioWin != nil {
-		gioWin.Perform(system.ActionRaise)
-		gioWin.Invalidate()
-	}
+	showManager()
 }
 
 func (gioHost) PromptsChanged() {
-	if gioWin != nil {
-		gioWin.Invalidate()
+	if w := managerWindow(); w != nil {
+		w.Invalidate()
 	}
 }
 
@@ -58,8 +53,8 @@ func (gioHost) CopyText(text string) error {
 	ui.mu.Lock()
 	ui.clipboard = append(ui.clipboard, text)
 	ui.mu.Unlock()
-	if gioWin != nil {
-		gioWin.Invalidate()
+	if w := managerWindow(); w != nil {
+		w.Invalidate()
 	}
 	return nil
 }
@@ -128,6 +123,18 @@ func (gioHost) ListShortcutFiles() []backend.ShortcutFile {
 	files := listShortcutFiles()
 	log.Info().Int("count", len(files)).Msg("shortcut files found")
 	return files
+}
+
+func (gioHost) AutostartSupported() bool { return true }
+
+func (gioHost) AutostartEnabled() bool { return autostartEnabled() }
+
+func (gioHost) SetAutostart(enabled bool) error {
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	return setAutostart(enabled, exe)
 }
 
 func (gioHost) OpenLink(url string) error {

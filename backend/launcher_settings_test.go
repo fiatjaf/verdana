@@ -66,7 +66,8 @@ func TestLauncherSettingsWindow(t *testing.T) {
 		t.Fatal(err)
 	}
 	if load.Napp || !slices.Equal(load.Launcher.Relays, []string{"wss://relay.one"}) ||
-		!slices.Equal(load.Launcher.BlossomServers, defaultBlossomServers) || load.Launcher.ThemeMode != ThemeSystem {
+		!slices.Equal(load.Launcher.BlossomServers, defaultBlossomServers) || load.Launcher.ThemeMode != ThemeSystem ||
+		!load.Launcher.AutostartSupported || load.Launcher.Autostart {
 		t.Fatalf("load: %+v", load)
 	}
 
@@ -80,6 +81,13 @@ func TestLauncherSettingsWindow(t *testing.T) {
 	}
 	if got := ThemeMode(); got != ThemeDark {
 		t.Fatalf("saved theme mode: %q", got)
+	}
+	HandleSettingsMessage(win, WireMsg{T: "rpc", ID: 5, Method: "settings.saveLauncher", Params: `{"autostart":true}`})
+	if r := srec.resp(t, 5); r.Error != "" {
+		t.Fatal(r.Error)
+	}
+	if !h.autostart {
+		t.Fatal("autostart was not enabled")
 	}
 
 	// a napp's window carries the launcher's page too

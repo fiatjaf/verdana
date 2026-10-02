@@ -58,6 +58,12 @@ type Host interface {
 	// is left out. Nothing where there are no OS shortcuts.
 	ListShortcutFiles() []ShortcutFile
 
+	// Autostart controls whether this launcher starts in the background when
+	// the desktop user logs in. Mobile and headless hosts report unsupported.
+	AutostartSupported() bool
+	AutostartEnabled() bool
+	SetAutostart(bool) error
+
 	// AmberRequest hands a NIP-55 operation (sign_event, nip44_encrypt, …)
 	// to the phone's signer app — the Android host launches the signer and
 	// the answer comes back to AnswerAmber with the same id. False means
@@ -236,6 +242,9 @@ func (noopHost) CreateShortcutFile(string, string) (string, error) {
 }
 func (noopHost) DeleteShortcutFile(string) error   { return nil }
 func (noopHost) ListShortcutFiles() []ShortcutFile { return nil }
+func (noopHost) AutostartSupported() bool          { return false }
+func (noopHost) AutostartEnabled() bool            { return false }
+func (noopHost) SetAutostart(bool) error           { return errors.New("no autostart service") }
 func (noopHost) AmberRequest(string, string, string, string, string, string) bool {
 	return false
 }

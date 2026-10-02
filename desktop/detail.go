@@ -117,8 +117,8 @@ func ensureProfile(pubkeyHex string) {
 		profileCache[pubkeyHex] = p
 		delete(profileBusy, pubkeyHex)
 		profMu.Unlock()
-		if gioWin != nil {
-			gioWin.Invalidate()
+		if w := managerWindow(); w != nil {
+			w.Invalidate()
 		}
 	}()
 }
@@ -152,8 +152,8 @@ func ensureAuthorNapps(pubkeyHex string) {
 		authorNapps[pubkeyHex] = list
 		authorFetching[pubkeyHex] = false
 		authorMu.Unlock()
-		if gioWin != nil {
-			gioWin.Invalidate()
+		if w := managerWindow(); w != nil {
+			w.Invalidate()
 		}
 	}()
 }

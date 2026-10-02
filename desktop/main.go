@@ -21,7 +21,8 @@ import (
 	"github.com/rs/zerolog"
 )
 
-// This is the desktop launcher: a Gio window, and nothing else. Everything it
+// This is the desktop launcher: a resident backend and tray, plus a Gio
+// manager window that may be closed and recreated. Everything the manager
 // shows comes from backend.Snapshot(), everything it does is a backend call,
 // and every napp window is a child process (see childproc.go).
 
@@ -72,9 +73,8 @@ type shortcutEditEntry struct {
 var bundleChecks = make(map[string]*widget.Bool)
 
 var (
-	ui     gioState
-	gioWin *app.Window
-	log    zerolog.Logger
+	ui  gioState
+	log zerolog.Logger
 
 	// filterEd and installedFilterEd are the discovery and installed tabs'
 	// filter boxes (one window, so one of each is enough).
@@ -129,20 +129,19 @@ func main() {
 	// a launcher is already running they were forwarded there and we never
 	// got this far; with none running, this process serves it. Tool and
 	// toolkit flags are left for gio and friends to chew on.
-	var tokenArgs []string
-	for _, arg := range os.Args[1:] {
-		if strings.HasPrefix(arg, "-") {
-			continue
-		}
-		tokenArgs = append(tokenArgs, arg)
-	}
-	startupToken := strings.Join(tokenArgs, " ")
+	background, startupToken := startupArgs(os.Args[1:])
 
 	verdanaDir := filepath.Join(dataDir, "Verdana")
 
-	if startupToken != "" && forwardToInstance(verdanaDir, startupToken) {
-		log.Info().Str("token", previewToken(startupToken)).
-			Msg("forwarded a bundle invocation to the running launcher")
+	forwarded := instanceCommand{Command: commandOpenManager}
+	if startupToken != "" {
+		forwarded.Command = commandRunShortcut
+		forwarded.Token = startupToken
+	} else if background {
+		forwarded.Command = commandEnsureRunning
+	}
+	if forwardToInstance(verdanaDir, forwarded) {
+		log.Info().Str("command", forwarded.Command).Msg("forwarded invocation to the running launcher")
 		return
 	}
 
@@ -150,7 +149,8 @@ func main() {
 	// this launcher is still starting finds someone to forward to instead of
 	// starting a second one; the tokens it accepts meanwhile wait for the
 	// backend to be up (see runBundleToken).
-	startInstanceListener(verdanaDir)
+	stopInstanceListener := startInstanceListener(verdanaDir)
+	defer stopInstanceListener()
 
 	closeStores, err := backend.Start(backend.Options{
 		DataDir: verdanaDir,
@@ -182,11 +182,26 @@ func main() {
 		ui.tab = 2
 	}
 
-	gioMain()
+	runDesktop(background)
 
 	backend.CloseAllWindows()
 	backend.CloseAllSettings()
 	killAllChildren()
+}
+
+func startupArgs(args []string) (background bool, token string) {
+	var tokenArgs []string
+	for _, arg := range args {
+		if arg == "--background" {
+			background = true
+			continue
+		}
+		if strings.HasPrefix(arg, "-") {
+			continue
+		}
+		tokenArgs = append(tokenArgs, arg)
+	}
+	return background, strings.Join(tokenArgs, " ")
 }
 
 func setTab(t int) {
@@ -194,15 +209,15 @@ func setTab(t int) {
 	if t != tabExtra {
 		clearExtraTab()
 	}
-	if gioWin != nil {
-		gioWin.Invalidate()
+	if w := managerWindow(); w != nil {
+		w.Invalidate()
 	}
 }
 
 func setConfirmLogout(v bool) {
 	ui.confirmLogout = v
-	if gioWin != nil {
-		gioWin.Invalidate()
+	if w := managerWindow(); w != nil {
+		w.Invalidate()
 	}
 }
 
@@ -210,8 +225,8 @@ func setShortcutErr(msg string) {
 	ui.mu.Lock()
 	ui.shortcutErr = msg
 	ui.mu.Unlock()
-	if gioWin != nil {
-		gioWin.Invalidate()
+	if w := managerWindow(); w != nil {
+		w.Invalidate()
 	}
 }
 
@@ -228,8 +243,8 @@ func setShortcutEdit(edit *shortcutEditState) {
 	ui.mu.Lock()
 	ui.shortcutEditing = edit
 	ui.mu.Unlock()
-	if gioWin != nil {
-		gioWin.Invalidate()
+	if w := managerWindow(); w != nil {
+		w.Invalidate()
 	}
 }
 
@@ -293,7 +308,8 @@ func gioMain() {
 
 	w := new(app.Window)
 	w.Option(app.Title(APP_TITLE), app.Size(unit.Dp(560), unit.Dp(640)))
-	gioWin = w
+	setManagerWindow(w)
+	defer setManagerWindow(nil)
 
 	var (
 		loginEd               widget.Editor

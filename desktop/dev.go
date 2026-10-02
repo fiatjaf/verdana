@@ -31,8 +31,8 @@ func pickAndLoadFolder(pathEd *widget.Editor) {
 		return
 	}
 	pathEd.SetText(path)
-	if gioWin != nil {
-		gioWin.Invalidate()
+	if w := managerWindow(); w != nil {
+		w.Invalidate()
 	}
 	go backend.DevLoadFolder(path)
 }

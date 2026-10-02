@@ -180,8 +180,8 @@ func applyThemeMode() {
 	curTheme = p
 	activeThemeMode = mode
 	themeMu.Unlock()
-	if changed && gioWin != nil {
-		gioWin.Invalidate()
+	if w := managerWindow(); changed && w != nil {
+		w.Invalidate()
 	}
 	backend.SetTheme(p.name, p.varsJSON())
 }

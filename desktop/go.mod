@@ -59,6 +59,7 @@ require (
 require (
 	github.com/gen2brain/beeep v0.11.2
 	github.com/godbus/dbus/v5 v5.2.2
+	github.com/gogpu/systray v0.3.0
 	verdana/backend v0.0.0
 )
 
@@ -69,6 +70,7 @@ require (
 	github.com/bits-and-blooms/bitset v1.17.0 // indirect
 	github.com/esiqveland/notify v0.13.3 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
+	github.com/go-webgpu/goffi v0.6.3 // indirect
 	github.com/jackmordaunt/icns/v3 v3.0.1 // indirect
 	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/kljensen/snowball v0.10.0 // indirect

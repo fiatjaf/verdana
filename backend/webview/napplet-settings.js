@@ -458,6 +458,19 @@
       el("div", { class: "hint" }, "System follows your desktop appearance and updates open napps and napplets automatically."),
       el("label", { class: "field" }, el("span", {}, "Theme"), themeMode),
     )
+    let autostart = null
+    if (l.autostartSupported) {
+      autostart = el("input", { type: "checkbox", name: "autostart" })
+      autostart.checked = !!l.autostart
+      appearance.append(
+        el(
+          "label",
+          { class: "field" },
+          el("span", {}, "Launch at login"),
+          el("span", {}, autostart, " Start Verdana in the background"),
+        ),
+      )
+    }
     const relays = listEditor(
       "Relays",
       "Napps and napplets are discovered on these relays.",
@@ -477,7 +490,12 @@
           e.preventDefault()
           run(
             "settings.saveLauncher",
-            { themeMode: themeMode.value, relays: relays.read(), blossomServers: servers.read() },
+            {
+              themeMode: themeMode.value,
+              relays: relays.read(),
+              blossomServers: servers.read(),
+              ...(autostart ? { autostart: autostart.checked } : {}),
+            },
             "Saved",
           )
         },

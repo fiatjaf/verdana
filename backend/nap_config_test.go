@@ -11,9 +11,17 @@ import (
 // settingsTestHost opens settings windows as recording transports.
 type settingsTestHost struct {
 	noopHost
-	mu     sync.Mutex
-	opened []SettingsSpec
-	wins   map[string]*settingsRec
+	mu        sync.Mutex
+	opened    []SettingsSpec
+	wins      map[string]*settingsRec
+	autostart bool
+}
+
+func (h *settingsTestHost) AutostartSupported() bool { return true }
+func (h *settingsTestHost) AutostartEnabled() bool   { return h.autostart }
+func (h *settingsTestHost) SetAutostart(v bool) error {
+	h.autostart = v
+	return nil
 }
 
 type settingsRec struct {

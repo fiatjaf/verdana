@@ -237,9 +237,11 @@ type settingsLoad struct {
 }
 
 type launcherSettings struct {
-	Relays         []string `json:"relays"`
-	BlossomServers []string `json:"blossomServers"`
-	ThemeMode      string   `json:"themeMode"`
+	Relays             []string `json:"relays"`
+	BlossomServers     []string `json:"blossomServers"`
+	ThemeMode          string   `json:"themeMode"`
+	AutostartSupported bool     `json:"autostartSupported"`
+	Autostart          bool     `json:"autostart"`
 }
 
 func settingsRPC(w *settingsWindow, method, params string) (any, error) {
@@ -265,7 +267,12 @@ func settingsRPC(w *settingsWindow, method, params string) (any, error) {
 		pushConfigValues(w.nappID)
 		return settingsLoadFor(w), nil
 	case "settings.saveLauncher":
-		var req launcherSettings
+		var req struct {
+			Relays         []string `json:"relays"`
+			BlossomServers []string `json:"blossomServers"`
+			ThemeMode      string   `json:"themeMode"`
+			Autostart      *bool    `json:"autostart"`
+		}
 		if err := json.Unmarshal([]byte(params), &req); err != nil {
 			return nil, errors.New("invalid request")
 		}
@@ -282,6 +289,14 @@ func settingsRPC(w *settingsWindow, method, params string) (any, error) {
 		}
 		if req.ThemeMode != "" {
 			SetThemeMode(req.ThemeMode)
+		}
+		if req.Autostart != nil {
+			if !host.AutostartSupported() {
+				return nil, errors.New("launch at login is not supported here")
+			}
+			if err := host.SetAutostart(*req.Autostart); err != nil {
+				return nil, err
+			}
 		}
 		return settingsLoadFor(w), nil
 	case "settings.forgetPermission":
@@ -303,7 +318,13 @@ func settingsRPC(w *settingsWindow, method, params string) (any, error) {
 func settingsLoadFor(w *settingsWindow) settingsLoad {
 	out := settingsLoad{
 		Set: []string{}, Secrets: []string{}, Permissions: []PermissionRule{},
-		Launcher: launcherSettings{Relays: Relays(), BlossomServers: BlossomServers(), ThemeMode: ThemeMode()},
+		Launcher: launcherSettings{
+			Relays:             Relays(),
+			BlossomServers:     BlossomServers(),
+			ThemeMode:          ThemeMode(),
+			AutostartSupported: host.AutostartSupported(),
+			Autostart:          host.AutostartEnabled(),
+		},
 	}
 	if w.nappID == launcherSettingsID {
 		out.Name = "Verdana"
