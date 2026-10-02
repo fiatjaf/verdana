@@ -176,7 +176,8 @@
       wrap.append(el("label", { for: id }, title), input)
       read = () => (input.value.trim() === "" ? undefined : Number(input.value))
     } else if (schema.type === "string") {
-      const formats = { email: "email", uri: "url", color: "color", date: "date" }
+      // format is only a hint: never a widget that refuses what it does not like
+      const formats = { color: "color", date: "date" }
       const type = secret ? "password" : formats[schema.format] || "text"
       const isSet = secret && data.secrets.includes(path)
       let cleared = false
@@ -356,12 +357,9 @@
     return box
   }
 
-  const render = () => {
-    const app = document.getElementById("app")
-    fields = []
-    document.title = (data.name || "Napp") + " — Settings"
-    const main = [el("h1", {}, data.name || "Napp"), el("div", { class: "muted" }, "Settings")]
-
+  // the napp's own page: its NAP-CONFIG form and its permissions
+  const nappPage = () => {
+    const out = []
     let schema = null
     if (data.schema) {
       try {
@@ -371,7 +369,7 @@
       }
     }
     if (!schema || !isObj(schema.properties)) {
-      main.push(el("p", { class: "muted" }, "This napp has no settings of its own."))
+      out.push(el("p", { class: "muted" }, "This napp has no settings of its own."))
     } else {
       // top-level properties grouped by x-napplet-section, in order of
       // first appearance; the unsectioned ones first, under no heading
@@ -400,14 +398,117 @@
           el("button", { type: "submit", class: "primary" }, "Save"),
         ),
       )
-      main.push(form)
+      out.push(form)
     }
-    main.push(permissionsView())
+    out.push(permissionsView())
+    return out
+  }
+
+  // listEditor edits a list of urls; read() is what it holds now
+  const listEditor = (title, hint, values, placeholder) => {
+    const list = el("div")
+    const inputs = []
+    const add = v => {
+      const input = el("input", { type: "text", inputmode: "url", placeholder, spellcheck: "false" })
+      if (v) input.value = v
+      const row = el("div", { class: "row" }, input)
+      row.append(
+        el(
+          "button",
+          {
+            type: "button",
+            onclick: () => {
+              inputs.splice(inputs.indexOf(input), 1)
+              row.remove()
+            },
+          },
+          "Remove",
+        ),
+      )
+      inputs.push(input)
+      list.append(row)
+    }
+    ;(values || []).forEach(add)
+    const box = el(
+      "section",
+      {},
+      el("h2", {}, title),
+      el("div", { class: "hint" }, hint),
+      el("div", { style: "margin-top:8px" }, list),
+      el("button", { type: "button", onclick: () => add("") }, "Add"),
+    )
+    return { box, read: () => inputs.map(i => i.value.trim()).filter(Boolean) }
+  }
+
+  // the launcher's own page: where napps are found and fetched from
+  const verdanaPage = () => {
+    const l = data.launcher || {}
+    const relays = listEditor(
+      "Relays",
+      "Napps and napplets are discovered on these relays.",
+      l.relays,
+      "wss://relay.example.com",
+    )
+    const servers = listEditor(
+      "Blossom servers",
+      "Napp and napplet files are fetched from these servers first, before the ones a napp or its author names. Every file is checked against its hash, wherever it comes from.",
+      l.blossomServers,
+      "https://blossom.example.com",
+    )
+    const form = el(
+      "form",
+      {
+        onsubmit: e => {
+          e.preventDefault()
+          run("settings.saveLauncher", { relays: relays.read(), blossomServers: servers.read() }, "Saved")
+        },
+      },
+      relays.box,
+      servers.box,
+      el(
+        "div",
+        { class: "actions" },
+        el("span", { id: "status", class: "status" }),
+        el("button", { type: "submit", class: "primary" }, "Save"),
+      ),
+    )
+    return [form]
+  }
+
+  let tab = ""
+  const render = () => {
+    const app = document.getElementById("app")
+    fields = []
+    if (!data.napp) tab = "verdana"
+    else if (!tab) tab = "napp"
+    document.title = (data.name || "Napp") + " — Settings"
+    const main = [el("h1", {}, data.name || "Napp"), el("div", { class: "muted" }, "Settings")]
+
+    if (data.napp) {
+      const tabBtn = (id, label) =>
+        el(
+          "button",
+          {
+            type: "button",
+            role: "tab",
+            "aria-selected": tab === id ? "true" : "false",
+            class: "tab" + (tab === id ? " active" : ""),
+            onclick: () => {
+              tab = id
+              render()
+            },
+          },
+          label,
+        )
+      main.push(el("div", { class: "tabs", role: "tablist" }, tabBtn("napp", data.name || "Napp"), tabBtn("verdana", "Verdana")))
+    }
+    main.push(...(tab === "napp" ? nappPage() : verdanaPage()))
     app.replaceChildren(...main)
 
     const sec = pendingSection || data.section
     pendingSection = ""
-    if (sec) showSection(sec)
+    data.section = ""
+    if (sec && tab === "napp") showSection(sec)
   }
 
   const showSection = name => {
@@ -450,8 +551,17 @@
   // for a section while this window was already open
   window.__settings_reload = load
   window.__settings_section = name => {
-    if (data) showSection(name)
-    else pendingSection = name
+    if (!data) {
+      pendingSection = name
+      return
+    }
+    if (data.napp && tab !== "napp") {
+      tab = "napp"
+      pendingSection = name
+      render()
+      return
+    }
+    showSection(name)
   }
 
   const start = () => {

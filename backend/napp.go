@@ -213,9 +213,11 @@ func (n Napp) nappletIconBlob(ctx context.Context) ([]byte, error) {
 
 // ─── blossom servers ─────────────────────────────────────────────
 
-// blossomServers is where a napp's blobs may live, most specific first: the
+// blossomServers is where a napp's blobs may live: the launcher's own
+// servers first (BlossomServers, which the user can change), then the
 // servers the napp event named itself, then the author's own blossom server
-// list (kind:10063, through the sdk), then ours as a last resort.
+// list (kind:10063, through the sdk). Blobs are checked against their hash,
+// so the order only decides who is asked first.
 func (n Napp) BlossomServers(ctx context.Context) []string {
 	servers := make([]string, 0, 8)
 	add := func(raw string) {
@@ -228,7 +230,9 @@ func (n Napp) BlossomServers(ctx context.Context) []string {
 		}
 	}
 
-	add("https://relay.nostrapps.com")
+	for _, srv := range BlossomServers() {
+		add(srv)
+	}
 
 	for _, srv := range n.Servers {
 		add(srv)
@@ -244,8 +248,6 @@ func (n Napp) BlossomServers(ctx context.Context) []string {
 		log.Debug().Str("napp", n.ID).Int("authored", len(list.Items)).
 			Msg("loaded the author's blossom servers")
 	}
-
-	add("https://nostr.download")
 
 	return servers
 }

@@ -19,6 +19,11 @@ type AppState struct {
 	Relays         []string        `json:"relays"`
 	InstalledNapps map[string]Napp `json:"installed_napps"`
 
+	// BlossomServers are the servers napp and napplet files are fetched
+	// from before any the napp or its author names. Nil (never set) means
+	// defaultBlossomServers; an empty list means none of our own.
+	BlossomServers []string `json:"blossom_servers"`
+
 	// LastLaunched records when the user last started a napp from the
 	// launcher's installed list, so it can be shown most-recently-used first.
 	// Launches that happen because another napp dispatched an action don't
