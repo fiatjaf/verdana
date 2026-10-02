@@ -478,6 +478,12 @@ func serveDevFile(wr http.ResponseWriter, r *http.Request) {
 		return
 	}
 	key := path.Clean("/" + f)
+	if strings.Contains(key, "/.") {
+		// hidden files are left out of what gets published (readDevFolder):
+		// serving them here would make a napp that only works in dev
+		http.NotFound(wr, r)
+		return
+	}
 	filePath := filepath.Join(d.dir, filepath.FromSlash(strings.TrimPrefix(key, "/")))
 	file, err := os.Open(filePath)
 	if err == nil {
