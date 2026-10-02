@@ -84,7 +84,9 @@ func loadState() {
 	if state.Theme != "light" && state.Theme != "dark" {
 		state.Theme = "light"
 	}
+	themeMu.Lock()
 	themeName = state.Theme
+	themeMu.Unlock()
 	saveState()
 	log.Info().Int("napps", len(state.InstalledNapps)).Msg("state loaded")
 }

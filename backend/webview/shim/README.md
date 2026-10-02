@@ -12,12 +12,14 @@
 - NAP-INC rejects empty query strings and query parameters without names.
 - NAP-NOTIFY remembers the shell's latest control list so an `onControls`
   subscriber registered after `shell.init` still receives initial capabilities.
+- NAP-SHELL exposes the mandatory `window.napplet.shell` API and consumes the
+  launcher's `shell.init` capability environment.
 
 The launcher inlines it into every napplet's srcdoc and activates it with
 `NappletShimPrelude.install({domains})`, so `window.napplet.*` exists before
 the napplet's own scripts run.
 
-sha256: `f35282bdeb0a9b30c1a6bb04c2e8ed05278ba89e4ccce1482f8e6f4b002dafed`
+sha256: `d3ed3b0db7d02df6f1b628f3e03f3456f93f27f71e06c69b9bd57da60cc37e3c`
 
 The Go NAP handlers (`backend/nap*.go`) are written against this build's wire
 shapes. To upgrade, replace the file, update the version and hash here, and
