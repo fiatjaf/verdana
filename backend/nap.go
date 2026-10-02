@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	"verdana/backend/webview"
@@ -34,6 +35,7 @@ import (
 var napDomains = []string{
 	"relay", "identity", "storage", "resource", "common",
 	"theme", "inc", "intent", "link", "upload", "outbox",
+	"notify",
 }
 
 // napSession is what one napplet window has going: the subscriptions and
@@ -67,6 +69,14 @@ type napSession struct {
 	// grantMu makes concurrent requests wait for that one question
 	grantMu sync.Mutex
 	grants  map[Permission]bool
+	// notifications are the OS notifications created by this document. The
+	// handles are session-owned so a reload or closed iframe dismisses them.
+	notifications     map[string]NotificationHandle
+	notifySeq         int
+	notifyChannels    map[string]notificationChannel
+	notifyBadge       uint
+	notifyTimes       []time.Time
+	urgentNotifyTimes []time.Time
 
 	// queue serializes envelopes; started lazily by the first one
 	queue chan napCall
@@ -106,6 +116,14 @@ func (s *napSession) resetLocked() {
 	}
 	s.uploads = make(map[string]*napUploadStatus)
 	s.grants = make(map[Permission]bool)
+	for _, n := range s.notifications {
+		_ = n.Dismiss()
+	}
+	s.notifications = make(map[string]NotificationHandle)
+	s.notifyChannels = make(map[string]notificationChannel)
+	s.notifyBadge = 0
+	s.notifyTimes = nil
+	s.urgentNotifyTimes = nil
 	s.established = false
 	s.ready = make(chan struct{})
 }
@@ -331,7 +349,7 @@ func (ci *Instance) napReady() {
 		"type":         "shell.init",
 		"capabilities": map[string]any{"domains": napDomains},
 		"services":     []any{},
-	})
+	}, map[string]any{"type": "notify.controls", "controls": host.NotificationControls()})
 	log.Info().Str("napplet", ci.napp.ID).Str("instance", ci.instance).Msg("napplet session started")
 }
 

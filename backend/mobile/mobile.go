@@ -55,6 +55,12 @@ type UI interface {
 	// deliver the answer back to AnswerAmber carrying the same id. False
 	// when no signer could be launched at all.
 	AmberRequest(id, op, payload, pubkey, counterpart, pkg string) bool
+
+	// SystemNotification shows a native notification described by requestJSON.
+	// DismissSystemNotification removes it when the platform supports removal.
+	SystemNotification(requestJSON string) error
+	DismissSystemNotification(id string)
+	RequestNotificationPermission() bool
 }
 
 // ─── host adapter ────────────────────────────────────────────────
@@ -95,6 +101,30 @@ func (h mobileHost) OpenLink(url string) error                   { return h.ui.O
 func (h mobileHost) SaveFile(n string, d []byte) (string, error) { return h.ui.SaveFile(n, d) }
 func (h mobileHost) AmberRequest(id, op, payload, pubkey, counterpart, pkg string) bool {
 	return h.ui.AmberRequest(id, op, payload, pubkey, counterpart, pkg)
+}
+func (h mobileHost) NotificationControls() []string { return []string{"system"} }
+func (h mobileHost) RequestNotificationPermission() bool {
+	return h.ui.RequestNotificationPermission()
+}
+func (h mobileHost) SendNotification(req backend.NotificationRequest) (backend.NotificationHandle, error) {
+	raw, err := json.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+	if err := h.ui.SystemNotification(string(raw)); err != nil {
+		return nil, err
+	}
+	return mobileNotification{ui: h.ui, id: req.ID}, nil
+}
+
+type mobileNotification struct {
+	ui UI
+	id string
+}
+
+func (n mobileNotification) Dismiss() error {
+	n.ui.DismissSystemNotification(n.id)
+	return nil
 }
 
 // AnswerAmber delivers one NIP-55 signer app answer back to whoever on the

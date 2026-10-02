@@ -56,15 +56,27 @@ require (
 	github.com/ebitengine/purego v0.8.2 // indirect
 )
 
-require verdana/backend v0.0.0
+require (
+	github.com/gen2brain/beeep v0.11.2
+	verdana/backend v0.0.0
+)
 
 require (
+	git.sr.ht/~jackmordaunt/go-toast v1.1.2 // indirect
 	github.com/RoaringBitmap/roaring v1.9.4 // indirect
 	github.com/andybalholm/brotli v1.1.1 // indirect
 	github.com/bits-and-blooms/bitset v1.17.0 // indirect
+	github.com/esiqveland/notify v0.13.3 // indirect
+	github.com/go-ole/go-ole v1.3.0 // indirect
+	github.com/godbus/dbus/v5 v5.1.0 // indirect
+	github.com/jackmordaunt/icns/v3 v3.0.1 // indirect
 	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/kljensen/snowball v0.10.0 // indirect
 	github.com/mschoch/smat v0.2.0 // indirect
+	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646 // indirect
+	github.com/sergeymakinen/go-bmp v1.0.0 // indirect
+	github.com/sergeymakinen/go-ico v1.0.0-beta.0 // indirect
+	github.com/tadvi/systray v0.0.0-20190226123456-11a2b8fa57af // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasthttp v1.59.0 // indirect
 	github.com/wizenheimer/blaze v0.0.0-20251014083344-98727d655839 // indirect

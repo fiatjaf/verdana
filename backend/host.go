@@ -63,6 +63,40 @@ type Host interface {
 	// the answer comes back to AnswerAmber with the same id. False means
 	// the signer app could not be launched at all.
 	AmberRequest(id, op, payload, pubkey, counterpart, pkg string) bool
+
+	// NotificationControls names the NAP-NOTIFY controls this platform can
+	// actually provide. SendNotification displays one system notification;
+	// the returned handle belongs to the napplet session and is dismissed
+	// when that session ends. Both methods may be called from any goroutine.
+	NotificationControls() []string
+	RequestNotificationPermission() bool
+	SendNotification(NotificationRequest) (NotificationHandle, error)
+}
+
+// NotificationRequest is a validated NAP-NOTIFY notification. Text is plain
+// text, Actions has at most three entries, and ID is unique for the lifetime
+// of the owning window.
+type NotificationRequest struct {
+	ID       string
+	NappID   string
+	NappName string
+	Title    string
+	Body     string
+	Icon     string
+	Channel  string
+	Priority string
+	Actions  []NotificationAction
+}
+
+type NotificationAction struct {
+	ID    string
+	Label string
+}
+
+// NotificationHandle controls one notification already handed to the OS.
+// Dismiss must return quickly because session teardown calls it while locked.
+type NotificationHandle interface {
+	Dismiss() error
 }
 
 // ShortcutFile is one bundle shortcut found on disk: the name the user gave
@@ -152,4 +186,9 @@ func (noopHost) DeleteShortcutFile(string) error   { return nil }
 func (noopHost) ListShortcutFiles() []ShortcutFile { return nil }
 func (noopHost) AmberRequest(string, string, string, string, string, string) bool {
 	return false
+}
+func (noopHost) NotificationControls() []string      { return nil }
+func (noopHost) RequestNotificationPermission() bool { return false }
+func (noopHost) SendNotification(NotificationRequest) (NotificationHandle, error) {
+	return nil, errors.New("no notification service")
 }
