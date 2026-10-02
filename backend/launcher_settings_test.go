@@ -66,17 +66,20 @@ func TestLauncherSettingsWindow(t *testing.T) {
 		t.Fatal(err)
 	}
 	if load.Napp || !slices.Equal(load.Launcher.Relays, []string{"wss://relay.one"}) ||
-		!slices.Equal(load.Launcher.BlossomServers, defaultBlossomServers) {
+		!slices.Equal(load.Launcher.BlossomServers, defaultBlossomServers) || load.Launcher.ThemeMode != ThemeSystem {
 		t.Fatalf("load: %+v", load)
 	}
 
 	HandleSettingsMessage(win, WireMsg{T: "rpc", ID: 2, Method: "settings.saveLauncher",
-		Params: `{"relays":["relay.two"],"blossomServers":["https://b.example"]}`})
+		Params: `{"themeMode":"dark","relays":["relay.two"],"blossomServers":["https://b.example"]}`})
 	if r := srec.resp(t, 2); r.Error != "" {
 		t.Fatal(r.Error)
 	}
 	if !slices.Equal(Relays(), []string{"wss://relay.two"}) || !slices.Equal(BlossomServers(), []string{"https://b.example"}) {
 		t.Fatalf("saved: %v %v", Relays(), BlossomServers())
+	}
+	if got := ThemeMode(); got != ThemeDark {
+		t.Fatalf("saved theme mode: %q", got)
 	}
 
 	// a napp's window carries the launcher's page too

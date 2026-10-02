@@ -443,6 +443,21 @@
   // the launcher's own page: where napps are found and fetched from
   const verdanaPage = () => {
     const l = data.launcher || {}
+    const themeMode = el(
+      "select",
+      { name: "themeMode" },
+      el("option", { value: "system" }, "System"),
+      el("option", { value: "light" }, "Light"),
+      el("option", { value: "dark" }, "Dark"),
+    )
+    themeMode.value = l.themeMode || "system"
+    const appearance = el(
+      "section",
+      {},
+      el("h2", {}, "Appearance"),
+      el("div", { class: "hint" }, "System follows your desktop appearance and updates open napps and napplets automatically."),
+      el("label", { class: "field" }, el("span", {}, "Theme"), themeMode),
+    )
     const relays = listEditor(
       "Relays",
       "Napps and napplets are discovered on these relays.",
@@ -460,9 +475,14 @@
       {
         onsubmit: e => {
           e.preventDefault()
-          run("settings.saveLauncher", { relays: relays.read(), blossomServers: servers.read() }, "Saved")
+          run(
+            "settings.saveLauncher",
+            { themeMode: themeMode.value, relays: relays.read(), blossomServers: servers.read() },
+            "Saved",
+          )
         },
       },
+      appearance,
       relays.box,
       servers.box,
       el(

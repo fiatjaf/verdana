@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"image/color"
+	"math"
 	"sync"
 	"verdana/backend"
 
@@ -102,8 +103,11 @@ var darkPalette = themePalette{
 }
 
 var (
-	themeMu  sync.Mutex
-	curTheme = lightPalette
+	themeMu         sync.RWMutex
+	curTheme        = lightPalette
+	systemThemeMu   sync.RWMutex
+	systemTheme     systemAppearance
+	activeThemeMode string
 )
 
 func paletteByName(name string) themePalette {
@@ -114,16 +118,93 @@ func paletteByName(name string) themePalette {
 }
 
 func currentTheme() themePalette {
+	themeMu.RLock()
+	defer themeMu.RUnlock()
 	return curTheme
 }
 
-// applyStoredTheme picks up the theme the user last chose. Called once at
-// startup, before the first frame and before any napp is launched, so napps
-// start already themed.
-func applyStoredTheme() {
-	p := paletteByName(backend.ThemeName())
+func appliedThemeMode() string {
+	themeMu.RLock()
+	defer themeMu.RUnlock()
+	return activeThemeMode
+}
+
+type systemAppearance struct {
+	dark      bool
+	accent    color.NRGBA
+	hasAccent bool
+}
+
+func resolvedPalette(mode string, appearance systemAppearance) themePalette {
+	name := mode
+	if mode == backend.ThemeSystem {
+		if appearance.dark {
+			name = backend.ThemeDark
+		} else {
+			name = backend.ThemeLight
+		}
+	}
+	p := paletteByName(name)
+	if mode == backend.ThemeSystem && appearance.hasAccent {
+		p.contrastBg = appearance.accent
+		p.contrastFg = readableText(appearance.accent)
+	}
+	return p
+}
+
+func readableText(bg color.NRGBA) color.NRGBA {
+	linear := func(component uint8) float64 {
+		value := float64(component) / 255
+		if value <= 0.04045 {
+			return value / 12.92
+		}
+		return math.Pow((value+0.055)/1.055, 2.4)
+	}
+	luma := 0.2126*linear(bg.R) + 0.7152*linear(bg.G) + 0.0722*linear(bg.B)
+	// Black has better WCAG contrast than white above this luminance.
+	if luma > 0.179 {
+		return rgb(0x000000)
+	}
+	return rgb(0xffffff)
+}
+
+func applyThemeMode() {
+	mode := backend.ThemeMode()
+	systemThemeMu.RLock()
+	appearance := systemTheme
+	systemThemeMu.RUnlock()
+	p := resolvedPalette(mode, appearance)
+
+	themeMu.Lock()
+	changed := curTheme != p
 	curTheme = p
+	activeThemeMode = mode
+	themeMu.Unlock()
+	if changed && gioWin != nil {
+		gioWin.Invalidate()
+	}
 	backend.SetTheme(p.name, p.varsJSON())
+}
+
+// startThemeController resolves the persisted preference before the first
+// frame and then keeps system mode synchronized with the OS.
+func startThemeController() func() {
+	initial, changes, stop := watchSystemAppearance()
+	systemThemeMu.Lock()
+	systemTheme = initial
+	systemThemeMu.Unlock()
+	applyThemeMode()
+	go func() {
+		for appearance := range changes {
+			systemThemeMu.Lock()
+			systemTheme = appearance
+			systemThemeMu.Unlock()
+			if backend.ThemeMode() == backend.ThemeSystem {
+				applyThemeMode()
+			}
+		}
+	}()
+	return stop
 }
 
 // apply hands the palette to Gio. The frame loop calls this on every frame,
@@ -173,27 +254,18 @@ func (p themePalette) varsJSON() string {
 	return string(varsJSON)
 }
 
-// setTheme switches the launcher's theme. The backend persists it and pushes
-// it to every open napp.
-func setTheme(name string) {
-	p := paletteByName(name)
-
-	if curTheme.name == p.name {
-		return
-	}
-
-	curTheme = p
-
-	if gioWin != nil {
-		gioWin.Invalidate()
-	}
-	backend.SetTheme(p.name, p.varsJSON())
+func setThemeMode(mode string) {
+	backend.SetThemeMode(mode)
+	applyThemeMode()
 }
 
 func toggleTheme() {
-	if currentTheme().name == "dark" {
-		setTheme("light")
-	} else {
-		setTheme("dark")
+	switch backend.ThemeMode() {
+	case backend.ThemeSystem:
+		setThemeMode(backend.ThemeLight)
+	case backend.ThemeLight:
+		setThemeMode(backend.ThemeDark)
+	default:
+		setThemeMode(backend.ThemeSystem)
 	}
 }

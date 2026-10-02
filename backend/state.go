@@ -43,8 +43,8 @@ type AppState struct {
 	// "this session" ones are not here either.
 	ActionUsage map[string]int `json:"action_usage"`
 
-	// Theme is "light" or "dark": what the launcher draws with and what
-	// every napp window is told to track.
+	// Theme is the user's preference: "system", "light" or "dark". The
+	// resolved light/dark theme and its colors live in theme.go.
 	Theme string `json:"theme"`
 }
 
@@ -86,11 +86,15 @@ func loadState() {
 	if state.ActionUsage == nil {
 		state.ActionUsage = make(map[string]int)
 	}
-	if state.Theme != "light" && state.Theme != "dark" {
-		state.Theme = "light"
+	if state.Theme != ThemeSystem && state.Theme != ThemeLight && state.Theme != ThemeDark {
+		state.Theme = ThemeSystem
 	}
 	themeMu.Lock()
-	themeName = state.Theme
+	if state.Theme == ThemeDark {
+		themeName = ThemeDark
+	} else {
+		themeName = ThemeLight
+	}
 	themeMu.Unlock()
 	saveState()
 	log.Info().Int("napps", len(state.InstalledNapps)).Msg("state loaded")

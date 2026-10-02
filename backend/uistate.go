@@ -42,8 +42,10 @@ type State struct {
 	// Fetching is true while discovery is running.
 	Fetching bool `json:"fetching"`
 
-	// Theme is "light" or "dark".
-	Theme string `json:"theme"`
+	// Theme is the resolved "light" or "dark" palette. ThemeMode is the
+	// persisted "system", "light" or "dark" preference.
+	Theme     string `json:"theme"`
+	ThemeMode string `json:"themeMode"`
 
 	// Relays are the discovery relays.
 	Relays []string `json:"relays"`
@@ -176,6 +178,7 @@ func Snapshot() State {
 		FetchErr:       ls.fetchErr,
 		Fetching:       ls.fetching,
 		Theme:          name,
+		ThemeMode:      ThemeMode(),
 		Installed:      append([]Napp(nil), ls.installed...),
 		Discovery:      append([]Napp(nil), ls.discovery...),
 		Lookup:         ls.lookup,

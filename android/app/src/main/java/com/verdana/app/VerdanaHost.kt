@@ -48,7 +48,7 @@ object VerdanaHost : UI {
 
     private fun emptyState() = LauncherState(
         phase = "loading", loginErr = "", profileName = "", profilePicture = "",
-        pubkey = "", fetchErr = "", fetching = false, theme = "light",
+        pubkey = "", fetchErr = "", fetching = false, theme = "light", themeMode = "system",
         relays = emptyList(), installed = emptyList(), discovery = emptyList(),
         busy = emptyList(), windows = emptyList(),
     )
@@ -67,16 +67,30 @@ object VerdanaHost : UI {
             Log.e("Verdana", "backend failed to start", e)
         }
 
-        // napps follow the system dark mode from day one
+        applyThemeMode(context)
+    }
+
+    private fun applyThemeMode(context: Context) {
         val mode = context.resources.configuration.uiMode and
             android.content.res.Configuration.UI_MODE_NIGHT_MASK
-        val initial = if (mode == android.content.res.Configuration.UI_MODE_NIGHT_YES) {
+        val systemName = if (mode == android.content.res.Configuration.UI_MODE_NIGHT_YES) {
             "dark"
         } else {
             "light"
         }
-        setCurrentThemeName(initial)
-        Mobile.setTheme(initial, themeVarsJSON(themeByName(initial)))
+        val preference = Mobile.themeMode()
+        val name = when (preference) {
+            "light" -> "light"
+            "dark" -> "dark"
+            else -> systemName
+        }
+        val theme = resolveTheme(context, name, preference == "system")
+        setCurrentThemeName(name)
+        Mobile.setTheme(name, themeVarsJSON(theme))
+    }
+
+    fun systemThemeChanged(context: Context) {
+        if (started && Mobile.themeMode() == "system") applyThemeMode(context)
     }
 
     // ─── windows ─────────────────────────────────────────────────────
@@ -158,9 +172,13 @@ object VerdanaHost : UI {
     }
 
     fun toggleTheme() {
-        val next = if (state.theme == "dark") "light" else "dark"
-        Mobile.setTheme(next, themeVarsJSON(themeByName(next)))
-        setCurrentThemeName(next)
+        val next = when (Mobile.themeMode()) {
+            "system" -> "light"
+            "light" -> "dark"
+            else -> "system"
+        }
+        Mobile.setThemeMode(next)
+        appContext?.let(::applyThemeMode)
     }
 
     fun consumeDiscoveryArchetype() {
@@ -203,7 +221,10 @@ object VerdanaHost : UI {
     override fun stateChanged() {
         val snapshot = Mobile.state()
         android.os.Handler(android.os.Looper.getMainLooper()).post {
-            state = parseState(snapshot)
+            val next = parseState(snapshot)
+            val modeChanged = next.themeMode != state.themeMode
+            state = next
+            if (modeChanged) appContext?.let(::applyThemeMode)
         }
     }
 
