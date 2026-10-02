@@ -291,6 +291,7 @@ func layoutMain(
 	tabDiscoBtn,
 	tabDevBtn,
 	themeBtn,
+	settingsBtn,
 	logoutBtn *widget.Clickable,
 	tab int,
 	windowsList,
@@ -352,7 +353,7 @@ func layoutMain(
 ) layout.Dimensions {
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layoutProfile(gtx, th, themeBtn, logoutBtn, st.ProfileName, st.ProfilePicture)
+			return layoutProfile(gtx, th, themeBtn, settingsBtn, logoutBtn, st.ProfileName, st.ProfilePicture)
 		}),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -1157,6 +1158,7 @@ func layoutProfile(
 	gtx layout.Context,
 	th *material.Theme,
 	themeBtn,
+	settingsBtn,
 	logoutBtn *widget.Clickable,
 	name,
 	pic string,
@@ -1189,6 +1191,20 @@ func layoutProfile(
 			return b.Layout(gtx)
 		}),
 		layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+		// the launcher's own settings window: relays, Blossom servers
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if settingsBtn == nil {
+				return layout.Dimensions{}
+			}
+			pointer.CursorPointer.Add(gtx.Ops)
+			p := currentTheme()
+			b := material.Button(th, settingsBtn, "\u2699 Settings")
+			b.Background = p.chipBg
+			b.Color = p.chipFg
+			b.TextSize = unit.Sp(13)
+			b.Inset = layout.UniformInset(unit.Dp(8))
+			return layout.Inset{Right: unit.Dp(8)}.Layout(gtx, b.Layout)
+		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			if logoutBtn == nil {
 				return layout.Dimensions{}

@@ -330,6 +330,12 @@ fun ProfileScreen(activity: MainActivity, st: LauncherState, onBack: () -> Unit)
                 Text(if (theme.name == "dark") "Light" else "Dark", color = theme.chipFg, fontSize = 13.sp)
             }
         }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Relays & servers", color = theme.fg, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            TextButton(onClick = { VerdanaHost.openLauncherSettings() }) {
+                Text("Settings", color = theme.chipFg, fontSize = 13.sp)
+            }
+        }
         Spacer(Modifier.height(8.dp))
         TextButton(
             onClick = { showLogoutConfirm = true },
@@ -1141,6 +1147,15 @@ fun NappDetailScreen(
                 Spacer(Modifier.width(8.dp))
                 Button(onClick = { activity.update(napp.id) }) { Text("Update") }
             }
+        }
+        // its settings window: what it declared (NAP-CONFIG) and what the
+        // user let it do; a line of its own, the row above is full on a phone
+        if (installed) {
+            Spacer(Modifier.height(8.dp))
+            Button(
+                onClick = { VerdanaHost.openNappSettings(napp.id) },
+                colors = ButtonDefaults.buttonColors(containerColor = theme.chipBg, contentColor = theme.chipFg),
+            ) { Text("Settings") }
         }
         Spacer(Modifier.height(12.dp))
         DetailRow("ID", napp.id, theme)

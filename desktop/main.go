@@ -301,6 +301,7 @@ func gioMain() {
 		tabDevBtn           widget.Clickable
 		tabWindowsBtn       widget.Clickable
 		themeBtn            widget.Clickable
+		settingsBtn         widget.Clickable
 		logoutBtn           widget.Clickable
 		confirmYesBtn       widget.Clickable
 		confirmNoBtn        widget.Clickable
@@ -362,7 +363,10 @@ func gioMain() {
 	devList.Axis = layout.Vertical
 	windowsList.Axis = layout.Vertical
 	profileList.Axis = layout.Vertical
-	relaysEd.SetText(strings.Join(backend.Relays(), "\n"))
+	// relaysEd follows the stored list when it changes elsewhere (the
+	// settings window), so a fetch from here never writes back a stale one
+	relaysSynced := backend.Relays()
+	relaysEd.SetText(strings.Join(relaysSynced, "\n"))
 
 	var ops op.Ops
 	for {
@@ -377,6 +381,10 @@ func gioMain() {
 			paint.Fill(gtx.Ops, pal.bg)
 
 			st := backend.Snapshot()
+			if !slices.Equal(st.Relays, relaysSynced) {
+				relaysSynced = st.Relays
+				relaysEd.SetText(strings.Join(relaysSynced, "\n"))
+			}
 			activePrompt := backend.CurrentPrompt()
 
 			ui.mu.Lock()
@@ -481,11 +489,19 @@ func gioMain() {
 					if themeBtn.Clicked(gtx) {
 						toggleTheme()
 					}
+					if settingsBtn.Clicked(gtx) {
+						go func() {
+							if err := backend.OpenLauncherSettings(); err != nil {
+								log.Warn().Err(err).Msg("could not open settings")
+							}
+						}()
+					}
 					if logoutBtn.Clicked(gtx) {
 						setConfirmLogout(true)
 					}
 					if fetchBtn.Clicked(gtx) {
 						backend.SetRelays(parseRelays(relaysEd.Text()))
+						relaysSynced = backend.Relays()
 						go backend.Discover()
 					}
 					for k := range discoKindBtns {
@@ -833,6 +849,7 @@ func gioMain() {
 						&tabDiscoBtn,
 						devBtn,
 						&themeBtn,
+						&settingsBtn,
 						&logoutBtn,
 						tab,
 

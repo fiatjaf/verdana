@@ -56,5 +56,17 @@
             android:theme="@android:style/Theme.Material.Light.NoActionBar"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"
             android:windowSoftInputMode="adjustResize" />
+
+        <!-- a settings window (a napp's, or the launcher's own) is a document
+             of its own too: verdana://settings/<window> -->
+        <activity
+            android:name=".SettingsActivity"
+            android:exported="false"
+            android:launchMode="standard"
+            android:documentLaunchMode="intoExisting"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Material.Light.NoActionBar"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"
+            android:windowSoftInputMode="adjustResize" />
     </application>
 </manifest>

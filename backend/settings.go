@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"sync"
 )
@@ -87,6 +88,14 @@ func settingsNapp(nappID string) (Napp, bool) {
 // OpenSettings opens (or brings up) a napp's settings window.
 func OpenSettings(nappID string) error { return openSettings(nappID, "") }
 
+// OpenLauncherSettings opens the settings window with only the launcher's
+// own page in it (relays, Blossom servers).
+func OpenLauncherSettings() error { return openSettings(launcherSettingsID, "") }
+
+// launcherSettingsID stands for the launcher among the napp ids settings
+// windows are kept by; no napp id is empty.
+const launcherSettingsID = ""
+
 // OpenSettingsFor opens the settings of the napp in a window: the gear in
 // the window's chrome.
 func OpenSettingsFor(instance string) error {
@@ -98,9 +107,13 @@ func OpenSettingsFor(instance string) error {
 }
 
 func openSettings(nappID, section string) error {
-	napp, ok := settingsNapp(nappID)
-	if !ok {
-		return errors.New("unknown napp")
+	name := "Verdana"
+	if nappID != launcherSettingsID {
+		napp, ok := settingsNapp(nappID)
+		if !ok {
+			return errors.New("unknown napp")
+		}
+		name = napp.Label()
 	}
 
 	settingsMu.Lock()
@@ -126,7 +139,7 @@ func openSettings(nappID, section string) error {
 	t, err := host.OpenSettings(SettingsSpec{
 		Window:    w.id,
 		NappID:    nappID,
-		Name:      napp.Label(),
+		Name:      name,
 		Section:   section,
 		Theme:     theme,
 		ThemeVars: vars,
@@ -206,6 +219,8 @@ func HandleSettingsMessage(window string, m WireMsg) {
 
 // settingsLoad is everything the page renders.
 type settingsLoad struct {
+	// Napp is false for the launcher's own window: no napp page then.
+	Napp   bool            `json:"napp"`
 	Name   string          `json:"name"`
 	Schema json.RawMessage `json:"schema"`
 	Values map[string]any  `json:"values"`
@@ -215,6 +230,15 @@ type settingsLoad struct {
 	Section string   `json:"section,omitempty"`
 	// Permissions are what the user decided for this napp.
 	Permissions []PermissionRule `json:"permissions"`
+
+	// Launcher is the launcher's own settings, on every window's Verdana
+	// page.
+	Launcher launcherSettings `json:"launcher"`
+}
+
+type launcherSettings struct {
+	Relays         []string `json:"relays"`
+	BlossomServers []string `json:"blossomServers"`
 }
 
 func settingsRPC(w *settingsWindow, method, params string) (any, error) {
@@ -239,12 +263,32 @@ func settingsRPC(w *settingsWindow, method, params string) (any, error) {
 		}
 		pushConfigValues(w.nappID)
 		return settingsLoadFor(w), nil
+	case "settings.saveLauncher":
+		var req launcherSettings
+		if err := json.Unmarshal([]byte(params), &req); err != nil {
+			return nil, errors.New("invalid request")
+		}
+		if req.Relays != nil {
+			before := Relays()
+			SetRelays(req.Relays)
+			if sys != nil && !slices.Equal(before, Relays()) {
+				// what is discoverable depends on them
+				go Discover()
+			}
+		}
+		if req.BlossomServers != nil {
+			SetBlossomServers(req.BlossomServers)
+		}
+		return settingsLoadFor(w), nil
 	case "settings.forgetPermission":
 		var req struct {
 			Permission Permission `json:"permission"`
 		}
 		if err := json.Unmarshal([]byte(params), &req); err != nil {
 			return nil, errors.New("invalid request")
+		}
+		if w.nappID == launcherSettingsID {
+			return nil, errors.New("no napp to forget for")
 		}
 		ForgetPermission(w.nappID, req.Permission)
 		return settingsLoadFor(w), nil
@@ -253,7 +297,15 @@ func settingsRPC(w *settingsWindow, method, params string) (any, error) {
 }
 
 func settingsLoadFor(w *settingsWindow) settingsLoad {
-	out := settingsLoad{Set: []string{}, Secrets: []string{}, Permissions: []PermissionRule{}}
+	out := settingsLoad{
+		Set: []string{}, Secrets: []string{}, Permissions: []PermissionRule{},
+		Launcher: launcherSettings{Relays: Relays(), BlossomServers: BlossomServers()},
+	}
+	if w.nappID == launcherSettingsID {
+		out.Name = "Verdana"
+		return out
+	}
+	out.Napp = true
 	if napp, ok := settingsNapp(w.nappID); ok {
 		out.Name = napp.Label()
 	}
