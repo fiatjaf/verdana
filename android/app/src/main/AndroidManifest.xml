@@ -2,6 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- NIP-55: allow querying who on the phone answers the nostrsigner
          scheme (Amber and other signer apps) and calling them. -->

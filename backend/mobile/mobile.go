@@ -56,6 +56,12 @@ type UI interface {
 	// when no signer could be launched at all.
 	AmberRequest(id, op, payload, pubkey, counterpart, pkg string) bool
 
+	// SystemNotification shows a native notification described by requestJSON.
+	// DismissSystemNotification removes it when the platform supports removal.
+	SystemNotification(requestJSON string) error
+	DismissSystemNotification(id string)
+	RequestNotificationPermission() bool
+
 	// PlayMedia hands an https media url to whatever app on the phone plays
 	// it (an ACTION_VIEW intent). Already approved. mime may be empty. False
 	// when no app could take it.
@@ -126,6 +132,30 @@ func (h mobileHost) OpenLink(url string) error                   { return h.ui.O
 func (h mobileHost) SaveFile(n string, d []byte) (string, error) { return h.ui.SaveFile(n, d) }
 func (h mobileHost) AmberRequest(id, op, payload, pubkey, counterpart, pkg string) bool {
 	return h.ui.AmberRequest(id, op, payload, pubkey, counterpart, pkg)
+}
+func (h mobileHost) NotificationControls() []string { return []string{"system"} }
+func (h mobileHost) RequestNotificationPermission() bool {
+	return h.ui.RequestNotificationPermission()
+}
+func (h mobileHost) SendNotification(req backend.NotificationRequest) (backend.NotificationHandle, error) {
+	raw, err := json.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+	if err := h.ui.SystemNotification(string(raw)); err != nil {
+		return nil, err
+	}
+	return mobileNotification{ui: h.ui, id: req.ID}, nil
+}
+
+type mobileNotification struct {
+	ui UI
+	id string
+}
+
+func (n mobileNotification) Dismiss() error {
+	n.ui.DismissSystemNotification(n.id)
+	return nil
 }
 
 // MediaPlay hands the url to another app. Once it has, the launcher can't

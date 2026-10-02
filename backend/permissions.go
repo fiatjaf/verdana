@@ -38,6 +38,9 @@ const (
 	// PermFetch is a napplet having the launcher download from the web for
 	// it (NAP-RESOURCE): napplets have no network of their own.
 	PermFetch Permission = "fetch"
+	// PermNotify lets a napplet put user-facing text in the system's
+	// notification UI (NAP-NOTIFY).
+	PermNotify Permission = "notify"
 	// PermMedia is a napplet having the launcher play media in the system's
 	// player for it (NAP-MEDIA shell-owned sessions).
 	PermMedia Permission = "media"

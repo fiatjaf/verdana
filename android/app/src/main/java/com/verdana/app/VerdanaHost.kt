@@ -1,6 +1,8 @@
 package com.verdana.app
 
 import android.app.ActivityManager
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -11,9 +13,12 @@ import android.widget.Toast
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import mobile.Mobile
 import mobile.UI
 import java.util.concurrent.ConcurrentHashMap
+import org.json.JSONObject
 
 // VerdanaHost is the process-wide implementation of the backend's mobile.UI
 // interface: the one place the Go side talks to. It deliberately outlives
@@ -49,6 +54,7 @@ object VerdanaHost : UI {
 
     private var started = false
     private var appContext: Context? = null
+    private val notificationPermissionLock = Any()
 
     private fun emptyState() = LauncherState(
         phase = "loading", loginErr = "", profileName = "", profilePicture = "",
@@ -360,6 +366,60 @@ object VerdanaHost : UI {
         // can be known this early, so wait for just that
         done.tryAcquire(java.util.concurrent.TimeUnit.SECONDS.toNanos(5), java.util.concurrent.TimeUnit.NANOSECONDS)
         return went
+    }
+
+    override fun systemNotification(requestJSON: String) {
+        val ctx = appContext ?: throw java.io.IOException("verdana is not started")
+        val request = JSONObject(requestJSON)
+        if (android.os.Build.VERSION.SDK_INT >= 33 &&
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                ctx, android.Manifest.permission.POST_NOTIFICATIONS,
+            ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            throw java.io.IOException("notification permission denied")
+        }
+        val requestedChannel = request.optString("Channel").ifBlank { "napplets" }
+        val channelId = "napplet." + requestedChannel.replace(Regex("[^A-Za-z0-9._-]"), "_")
+        val manager = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.createNotificationChannel(
+            NotificationChannel(channelId, "Napplet notifications", NotificationManager.IMPORTANCE_DEFAULT),
+        )
+        val id = request.getString("ID")
+        val title = request.optString("NappName").ifBlank { "Napplet" } + ": " +
+            request.getString("Title")
+        val notification = NotificationCompat.Builder(ctx, channelId)
+            .setSmallIcon(com.verdana.app.R.mipmap.ic_launcher)
+            .setContentTitle(title)
+            .setContentText(request.optString("Body"))
+            .setStyle(NotificationCompat.BigTextStyle().bigText(request.optString("Body")))
+            .setAutoCancel(true)
+            .build()
+        NotificationManagerCompat.from(ctx).notify(id, id.hashCode(), notification)
+    }
+
+    override fun requestNotificationPermission(): Boolean {
+        val ctx = appContext ?: return false
+        if (android.os.Build.VERSION.SDK_INT < 33 ||
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                ctx, android.Manifest.permission.POST_NOTIFICATIONS,
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) return true
+
+        synchronized(notificationPermissionLock) {
+            val owner = windows.values.firstOrNull { it.onScreen() } ?: return false
+            val done = java.util.concurrent.Semaphore(0)
+            var granted = false
+            owner.requestNotificationPermission {
+                granted = it
+                done.release()
+            }
+            if (!done.tryAcquire(60, java.util.concurrent.TimeUnit.SECONDS)) return false
+            return granted
+        }
+    }
+
+    override fun dismissSystemNotification(id: String) {
+        appContext?.let { NotificationManagerCompat.from(it).cancel(id, id.hashCode()) }
     }
 
     // playMedia hands a napplet's shell-owned media session to whatever

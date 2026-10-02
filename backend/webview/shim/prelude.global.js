@@ -539,6 +539,7 @@ var NappletShimPrelude = (() => {
   var clickedHandlers = /* @__PURE__ */ new Set();
   var dismissedHandlers = /* @__PURE__ */ new Set();
   var controlsHandlers2 = /* @__PURE__ */ new Set();
+  var lastNotifyControls;
   var installed3 = false;
   function isMessageType3(msg, type) {
     return msg.type === type;
@@ -579,6 +580,7 @@ var NappletShimPrelude = (() => {
     }
   }
   function handleControls2(msg) {
+    lastNotifyControls = msg.controls;
     for (const cb of controlsHandlers2) {
       cb(msg.controls);
     }
@@ -679,6 +681,9 @@ var NappletShimPrelude = (() => {
   }
   function onControls2(callback) {
     controlsHandlers2.add(callback);
+    if (lastNotifyControls !== void 0) {
+      callback(lastNotifyControls);
+    }
     return {
       close() {
         controlsHandlers2.delete(callback);
@@ -697,6 +702,7 @@ var NappletShimPrelude = (() => {
       clickedHandlers.clear();
       dismissedHandlers.clear();
       controlsHandlers2.clear();
+      lastNotifyControls = void 0;
       installed3 = false;
     };
   }

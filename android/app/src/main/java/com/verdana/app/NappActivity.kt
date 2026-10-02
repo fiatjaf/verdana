@@ -61,6 +61,12 @@ class NappActivity : ComponentActivity() {
     private val amberLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { Amber.handle(it) }
 
+    private var notificationPermissionCallback: ((Boolean) -> Unit)? = null
+    private val notificationPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            notificationPermissionCallback?.also { notificationPermissionCallback = null }?.invoke(granted)
+        }
+
     override fun onResume() {
         super.onResume()
         visible = true
@@ -162,6 +168,13 @@ class NappActivity : ComponentActivity() {
 
     // onScreen says whether the user is looking at this window right now.
     fun onScreen(): Boolean = !isFinishing && !isDestroyed && visible
+
+    fun requestNotificationPermission(callback: (Boolean) -> Unit) {
+        runOnUiThread {
+            notificationPermissionCallback = callback
+            notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
 
     // finishWindow is the close path from either side: the napp asking to go
     // away, or the backend closing the window.

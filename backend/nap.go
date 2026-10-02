@@ -35,7 +35,7 @@ import (
 var napDomains = []string{
 	"relay", "identity", "storage", "resource", "common",
 	"theme", "inc", "intent", "link", "upload", "outbox", "media",
-	"config",
+	"config", "notify",
 }
 
 // napSession is what one napplet window has going: the subscriptions and
@@ -69,6 +69,14 @@ type napSession struct {
 	// grantMu makes concurrent requests wait for that one question
 	grantMu sync.Mutex
 	grants  map[Permission]bool
+	// notifications are the OS notifications created by this document. The
+	// handles are session-owned so a reload or closed iframe dismisses them.
+	notifications     map[string]NotificationHandle
+	notifySeq         int
+	notifyChannels    map[string]notificationChannel
+	notifyBadge       uint
+	notifyTimes       []time.Time
+	urgentNotifyTimes []time.Time
 	// media sessions by canonical id; shell-owned ones hold a player that a
 	// reset stops. mediaSeq numbers ids and is never reset, so an id from an
 	// old document never names a session in a new one.
@@ -118,6 +126,14 @@ func (s *napSession) resetLocked() {
 	}
 	s.uploads = make(map[string]*napUploadStatus)
 	s.grants = make(map[Permission]bool)
+	for _, n := range s.notifications {
+		_ = n.Dismiss()
+	}
+	s.notifications = make(map[string]NotificationHandle)
+	s.notifyChannels = make(map[string]notificationChannel)
+	s.notifyBadge = 0
+	s.notifyTimes = nil
+	s.urgentNotifyTimes = nil
 	for _, ms := range s.media {
 		ms.stop()
 	}
@@ -352,7 +368,7 @@ func (ci *Instance) napReady() {
 		"type":         "shell.init",
 		"capabilities": map[string]any{"domains": napDomains},
 		"services":     []any{},
-	})
+	}, map[string]any{"type": "notify.controls", "controls": host.NotificationControls()})
 	log.Info().Str("napplet", ci.napp.ID).Str("instance", ci.instance).Msg("napplet session started")
 }
 
