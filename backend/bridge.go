@@ -822,12 +822,12 @@ func publishEvent(ci *Instance, evt nostr.Event, requested []string) (any, error
 		return nil, errors.New("invalid event id or signature")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	targetsCtx, cancelTargets := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelTargets()
 
 	log.Println("gathering targets")
 
-	targets := publishTargets(ctx, evt, requested)
+	targets := publishTargets(targetsCtx, evt, requested)
 	if len(targets) == 0 {
 		return nil, errors.New("no relays to publish to")
 	}
@@ -851,6 +851,11 @@ func publishEvent(ci *Instance, evt nostr.Event, requested []string) (any, error
 	invalidateList(evt.Kind, evt.PubKey)
 
 	log.Info().Uint16("kind", uint16(evt.Kind)).Strs("relays", targets).Msg("publishing event")
+
+	// the approval prompt may have taken a while: publishing gets its own
+	// deadline rather than whatever is left of the one for gathering targets
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
 
 	relayResults := make(map[string]any, len(targets))
 	published, failed := 0, 0
