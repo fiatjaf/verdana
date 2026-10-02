@@ -4,8 +4,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
+	"time"
 	"verdana/backend"
 
 	"gioui.org/app"
@@ -20,7 +22,8 @@ import (
 	"github.com/rs/zerolog"
 )
 
-// This is the desktop launcher: a Gio window, and nothing else. Everything it
+// This is the desktop launcher: a resident backend and tray, plus a Gio
+// manager window that may be closed and recreated. Everything the manager
 // shows comes from backend.Snapshot(), everything it does is a backend call,
 // and every napp window is a child process (see childproc.go).
 
@@ -28,6 +31,10 @@ import (
 type gioState struct {
 	mu  sync.Mutex
 	tab int
+
+	// discoveryArchetype is set by an intent dispatch off the UI thread and
+	// consumed by the next frame.
+	discoveryArchetype string
 
 	// confirmLogout parks the "log out?" dialog over the main screen until
 	// the user answers it: logging out closes every napp.
@@ -67,16 +74,42 @@ type shortcutEditEntry struct {
 var bundleChecks = make(map[string]*widget.Bool)
 
 var (
-	ui     gioState
-	gioWin *app.Window
-	log    zerolog.Logger
+	ui  gioState
+	log zerolog.Logger
 
 	// filterEd and installedFilterEd are the discovery and installed tabs'
-	// filter boxes (one window, so one of each is enough; relaysEd stays
-	// with the window's other widgets).
+	// filter boxes (one window, so one of each is enough).
 	filterEd          widget.Editor
 	installedFilterEd widget.Editor
+
+	// discoKind is which apps the discovery tab lists (one of the
+	// discoKind* constants), switched by discoKindBtns.
+	discoKind     int
+	discoKindBtns [3]widget.Clickable
+	// discoCols and installedCols are how many napps a row of the
+	// discovery and installed tabs held last frame (see nappGrid).
+	discoCols, installedCols int
 )
+
+const (
+	discoKindAll = iota
+	discoKindNapps
+	discoKindNapplets
+)
+
+// discoKindLabels name the discovery tab's kind buttons, in discoKind order.
+var discoKindLabels = [3]string{"All", "Napps", "Napplets"}
+
+// matchesKind says whether a napp belongs under a discovery kind tab.
+func matchesKind(n backend.Napp, kind int) bool {
+	switch kind {
+	case discoKindNapps:
+		return !n.IsNapplet()
+	case discoKindNapplets:
+		return n.IsNapplet()
+	}
+	return true
+}
 
 const APP_TITLE = "Verdana"
 
@@ -97,28 +130,49 @@ func main() {
 	// a launcher is already running they were forwarded there and we never
 	// got this far; with none running, this process serves it. Tool and
 	// toolkit flags are left for gio and friends to chew on.
-	var tokenArgs []string
-	for _, arg := range os.Args[1:] {
-		if strings.HasPrefix(arg, "-") {
-			continue
-		}
-		tokenArgs = append(tokenArgs, arg)
-	}
-	startupToken := strings.Join(tokenArgs, " ")
+	background, startupToken := startupArgs(os.Args[1:])
 
 	verdanaDir := filepath.Join(dataDir, "Verdana")
+	if err := os.MkdirAll(verdanaDir, 0700); err != nil {
+		log.Fatal().Err(err).Msg("could not create data directory")
+	}
 
-	if startupToken != "" && forwardToInstance(verdanaDir, startupToken) {
-		log.Info().Str("token", previewToken(startupToken)).
-			Msg("forwarded a bundle invocation to the running launcher")
+	forwarded := instanceCommand{Command: commandOpenManager}
+	if startupToken != "" {
+		forwarded.Command = commandRunShortcut
+		forwarded.Token = startupToken
+	} else if background {
+		forwarded.Command = commandEnsureRunning
+	}
+	if forwardToInstance(verdanaDir, forwarded) {
+		log.Info().Str("command", forwarded.Command).Msg("forwarded invocation to the running launcher")
 		return
 	}
+	releaseInstanceLock, acquired, err := acquireInstanceLock(verdanaDir)
+	if err != nil {
+		log.Fatal().Err(err).Msg("could not acquire the launcher instance lock")
+	}
+	if !acquired {
+		// The lock holder may be between acquiring the lock and publishing its
+		// forwarding port. Give that cold-start window time to finish.
+		deadline := time.Now().Add(3 * time.Second)
+		for time.Now().Before(deadline) {
+			if forwardToInstance(verdanaDir, forwarded) {
+				return
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		log.Warn().Msg("another Verdana launcher is starting; leaving it as the sole instance")
+		return
+	}
+	defer releaseInstanceLock()
 
 	// the listener goes up before the backend, so a shortcut clicked while
 	// this launcher is still starting finds someone to forward to instead of
 	// starting a second one; the tokens it accepts meanwhile wait for the
 	// backend to be up (see runBundleToken).
-	startInstanceListener(verdanaDir)
+	stopInstanceListener := startInstanceListener(verdanaDir)
+	defer stopInstanceListener()
 
 	closeStores, err := backend.Start(backend.Options{
 		DataDir: verdanaDir,
@@ -138,8 +192,10 @@ func main() {
 		go runBundleToken(startupToken)
 	}
 
-	// the palette the user last chose, and its CSS tokens for napps
-	applyStoredTheme()
+	// Resolve the user's system/light/dark preference and keep system mode in
+	// sync with OS appearance changes for the lifetime of the launcher.
+	stopTheme := startThemeController()
+	defer stopTheme()
 
 	// startup tab: installed if any napps, else discovery
 	if len(backend.Snapshot().Installed) > 0 {
@@ -148,10 +204,32 @@ func main() {
 		ui.tab = 2
 	}
 
-	gioMain()
+	runDesktop(background)
 
 	backend.CloseAllWindows()
+	backend.CloseAllSettings()
 	killAllChildren()
+}
+
+func startupArgs(args []string) (background bool, token string) {
+	var tokenArgs []string
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--background" {
+			background = true
+			continue
+		}
+		if arg == "--launch-napp" && i+1 < len(args) {
+			i++
+			tokenArgs = append(tokenArgs, args[i])
+			continue
+		}
+		if strings.HasPrefix(arg, "-") {
+			continue
+		}
+		tokenArgs = append(tokenArgs, arg)
+	}
+	return background, strings.Join(tokenArgs, " ")
 }
 
 func setTab(t int) {
@@ -159,15 +237,15 @@ func setTab(t int) {
 	if t != tabExtra {
 		clearExtraTab()
 	}
-	if gioWin != nil {
-		gioWin.Invalidate()
+	if w := managerWindow(); w != nil {
+		w.Invalidate()
 	}
 }
 
 func setConfirmLogout(v bool) {
 	ui.confirmLogout = v
-	if gioWin != nil {
-		gioWin.Invalidate()
+	if w := managerWindow(); w != nil {
+		w.Invalidate()
 	}
 }
 
@@ -175,8 +253,8 @@ func setShortcutErr(msg string) {
 	ui.mu.Lock()
 	ui.shortcutErr = msg
 	ui.mu.Unlock()
-	if gioWin != nil {
-		gioWin.Invalidate()
+	if w := managerWindow(); w != nil {
+		w.Invalidate()
 	}
 }
 
@@ -193,8 +271,8 @@ func setShortcutEdit(edit *shortcutEditState) {
 	ui.mu.Lock()
 	ui.shortcutEditing = edit
 	ui.mu.Unlock()
-	if gioWin != nil {
-		gioWin.Invalidate()
+	if w := managerWindow(); w != nil {
+		w.Invalidate()
 	}
 }
 
@@ -202,9 +280,37 @@ func setShortcutEdit(edit *shortcutEditState) {
 // editor's text: a case-insensitive substring on name, description, author
 // pubkey and author name. Clicks and rendering both walk this same index
 // list, so buttons stay glued to their napp no matter what the filter hides.
-func discoveryFilter(st backend.State) []int {
+//
+// A napp address (an naddr, a nostr: link) typed there is looked up on
+// relays too; once found, it is listed and it alone passes the filter.
+//
+// The kind tabs narrow it further to napps or napplets, except for an
+// address: that names one app, whatever its kind.
+func discoveryFilter(st backend.State, archetype string) []int {
 	q := strings.ToLower(strings.TrimSpace(filterEd.Text()))
-	return nappFilter(st.Discovery, q)
+	if role, ok := strings.CutPrefix(q, "archetype:"); ok {
+		archetype = strings.TrimSpace(role)
+		q = ""
+		backend.LookupAddress("")
+	} else {
+		backend.LookupAddress(filterEd.Text())
+	}
+	vis := nappFilter(st.Discovery, q)
+	if archetype != "" {
+		vis = slices.DeleteFunc(vis, func(i int) bool {
+			return !st.Discovery[i].HandlesArchetype(archetype)
+		})
+	}
+	if discoKind == discoKindAll || backend.IsNappAddress(q) {
+		return vis
+	}
+	out := vis[:0]
+	for _, i := range vis {
+		if matchesKind(st.Discovery[i], discoKind) {
+			out = append(out, i)
+		}
+	}
+	return out
 }
 
 // installedFilter is the same thing for the installed list.
@@ -230,58 +336,60 @@ func gioMain() {
 
 	w := new(app.Window)
 	w.Option(app.Title(APP_TITLE), app.Size(unit.Dp(560), unit.Dp(640)))
-	gioWin = w
+	setManagerWindow(w)
+	defer setManagerWindow(nil)
 
 	var (
-		loginEd             widget.Editor
-		loginBtn            widget.Clickable
-		relaysEd            widget.Editor
-		fetchBtn            widget.Clickable
-		tabNappsBtn         widget.Clickable
-		tabDiscoBtn         widget.Clickable
-		tabDevBtn           widget.Clickable
-		tabWindowsBtn       widget.Clickable
-		themeBtn            widget.Clickable
-		logoutBtn           widget.Clickable
-		confirmYesBtn       widget.Clickable
-		confirmNoBtn        widget.Clickable
-		installedList       widget.List
-		discoveryList       widget.List
-		devList             widget.List
-		windowsList         widget.List
-		devURLed            widget.Editor
-		devPathEd           widget.Editor
-		loadURLBtn          widget.Clickable
-		browseBtn           widget.Clickable
-		loadFolderBtn       widget.Clickable
-		devOpenBtns         []widget.Clickable
-		devUnloadBtns       []widget.Clickable
-		devPublishBtns      []widget.Clickable
-		closeBtns           []widget.Clickable
-		reopenBtns          []widget.Clickable
-		cardBtns            []widget.Clickable
-		uninstBtns          []widget.Clickable
-		installedUpdateBtns []widget.Clickable
-		installedOpenBtns   []widget.Clickable
-		installedAuthorBtns []widget.Clickable
-		actionBtns          []widget.Clickable
-		updateBtns          []widget.Clickable
-		discoCardBtns       []widget.Clickable
-		discoOpenBtns       []widget.Clickable
-		discoAuthorBtns     []widget.Clickable
-		checkUpdBtn         widget.Clickable
-		tabExtraBtn         widget.Clickable
-		detailOpenBtn       widget.Clickable
-		detailPrimaryBtn    widget.Clickable
-		detailUpdateBtn     widget.Clickable
-		detailAuthorBtn     widget.Clickable
-		profileList         widget.List
-		profileCardBtns     []widget.Clickable
-		profileOpenBtns     []widget.Clickable
-		profileActionBtns   []widget.Clickable
-		profileUpdateBtns   []widget.Clickable
-		promptBtns          promptButtons
-		optBtns             []widget.Clickable
+		fetchBtn              widget.Clickable
+		tabNappsBtn           widget.Clickable
+		tabDiscoBtn           widget.Clickable
+		tabDevBtn             widget.Clickable
+		tabWindowsBtn         widget.Clickable
+		themeBtn              widget.Clickable
+		settingsBtn           widget.Clickable
+		logoutBtn             widget.Clickable
+		confirmYesBtn         widget.Clickable
+		confirmNoBtn          widget.Clickable
+		installedList         widget.List
+		discoveryList         widget.List
+		devList               widget.List
+		windowsList           widget.List
+		devURLed              widget.Editor
+		devPathEd             widget.Editor
+		loadURLBtn            widget.Clickable
+		browseBtn             widget.Clickable
+		loadFolderBtn         widget.Clickable
+		devOpenBtns           []widget.Clickable
+		devUnloadBtns         []widget.Clickable
+		devPublishBtns        []widget.Clickable
+		closeBtns             []widget.Clickable
+		reopenBtns            []widget.Clickable
+		cardBtns              []widget.Clickable
+		uninstBtns            []widget.Clickable
+		installedUpdateBtns   []widget.Clickable
+		installedOpenBtns     []widget.Clickable
+		installedAuthorBtns   []widget.Clickable
+		installedSettingsBtns []widget.Clickable
+		actionBtns            []widget.Clickable
+		updateBtns            []widget.Clickable
+		discoCardBtns         []widget.Clickable
+		discoOpenBtns         []widget.Clickable
+		discoAuthorBtns       []widget.Clickable
+		checkUpdBtn           widget.Clickable
+		tabExtraBtn           widget.Clickable
+		detailOpenBtn         widget.Clickable
+		detailPrimaryBtn      widget.Clickable
+		detailUpdateBtn       widget.Clickable
+		detailAuthorBtn       widget.Clickable
+		detailCopyAddrBtn     widget.Clickable
+		detailSettingsBtn     widget.Clickable
+		profileList           widget.List
+		profileCardBtns       []widget.Clickable
+		profileOpenBtns       []widget.Clickable
+		profileActionBtns     []widget.Clickable
+		profileUpdateBtns     []widget.Clickable
+		promptBtns            promptButtons
+		optBtns               []widget.Clickable
 
 		bundleNameEd      widget.Editor
 		createShortcutBtn widget.Clickable
@@ -290,8 +398,7 @@ func gioMain() {
 		shortcutDelBtns   []widget.Clickable
 		shortcutEditBtns  []widget.Clickable
 	)
-	loginEd.SingleLine = true
-	relaysEd.SingleLine = false
+	loginScr := newLoginScreen()
 	filterEd.SingleLine = true
 	installedFilterEd.SingleLine = true
 	devURLed.SingleLine = true
@@ -301,13 +408,15 @@ func gioMain() {
 	devList.Axis = layout.Vertical
 	windowsList.Axis = layout.Vertical
 	profileList.Axis = layout.Vertical
-	relaysEd.SetText(strings.Join(backend.Relays(), "\n"))
 
 	var ops op.Ops
 	for {
 		switch e := w.Event(); e := e.(type) {
 		case app.FrameEvent:
 			gtx := app.NewContext(&ops, e)
+			if backend.ThemeMode() != appliedThemeMode() {
+				applyThemeMode()
+			}
 
 			// the palette is re-read every frame, so a theme switch (which can
 			// come from any goroutine) never touches th concurrently
@@ -320,9 +429,15 @@ func gioMain() {
 
 			ui.mu.Lock()
 			tab := ui.tab
+			discoveryArchetype := ui.discoveryArchetype
+			ui.discoveryArchetype = ""
 			pendingCopies := ui.clipboard
 			ui.clipboard = nil
 			ui.mu.Unlock()
+			if discoveryArchetype != "" {
+				filterEd.SetText("archetype:" + discoveryArchetype)
+				discoKind = discoKindNapplets
+			}
 
 			installedSet := make(map[string]bool, len(st.Installed))
 			for _, n := range st.Installed {
@@ -388,13 +503,7 @@ func gioMain() {
 
 				switch st.Phase {
 				case backend.PhaseLogin:
-					if loginBtn.Clicked(gtx) {
-						input := strings.TrimSpace(loginEd.Text())
-						if input != "" {
-							go backend.Login(input)
-						}
-					}
-					return layoutLogin(gtx, th, &loginEd, &loginBtn, st.LoginErr)
+					return loginScr.layout(gtx, th, st)
 				case backend.PhaseMain:
 					if tabWindowsBtn.Clicked(gtx) {
 						setTab(tabWindows)
@@ -414,12 +523,23 @@ func gioMain() {
 					if themeBtn.Clicked(gtx) {
 						toggleTheme()
 					}
+					if settingsBtn.Clicked(gtx) {
+						go func() {
+							if err := backend.OpenLauncherSettings(); err != nil {
+								log.Warn().Err(err).Msg("could not open settings")
+							}
+						}()
+					}
 					if logoutBtn.Clicked(gtx) {
 						setConfirmLogout(true)
 					}
 					if fetchBtn.Clicked(gtx) {
-						backend.SetRelays(parseRelays(relaysEd.Text()))
 						go backend.Discover()
+					}
+					for k := range discoKindBtns {
+						if discoKindBtns[k].Clicked(gtx) {
+							discoKind = k
+						}
 					}
 					for len(cardBtns) < len(st.Installed) {
 						cardBtns = append(cardBtns, widget.Clickable{})
@@ -435,6 +555,9 @@ func gioMain() {
 					}
 					for len(installedAuthorBtns) < len(st.Installed) {
 						installedAuthorBtns = append(installedAuthorBtns, widget.Clickable{})
+					}
+					for len(installedSettingsBtns) < len(st.Installed) {
+						installedSettingsBtns = append(installedSettingsBtns, widget.Clickable{})
 					}
 					for len(actionBtns) < len(st.Discovery) {
 						actionBtns = append(actionBtns, widget.Clickable{})
@@ -474,7 +597,7 @@ func gioMain() {
 							bundleChecks[w.Instance] = new(widget.Bool)
 						}
 					}
-					vis := discoveryFilter(st)
+					vis := discoveryFilter(st, discoveryArchetype)
 					instVis := installedFilter(st)
 					if tab == 0 {
 						for i, w := range st.ManagedWindows {
@@ -542,6 +665,16 @@ func gioMain() {
 						}
 						if !acted {
 							for _, i := range instVis {
+								if st.Installed[i].IsNapplet() && installedSettingsBtns[i].Clicked(gtx) {
+									if err := backend.OpenSettings(st.Installed[i].ID); err != nil {
+										log.Warn().Err(err).Str("napp", st.Installed[i].ID).Msg("could not open settings")
+									}
+									acted = true
+								}
+							}
+						}
+						if !acted {
+							for _, i := range instVis {
 								if installedOpenBtns[i].Clicked(gtx) {
 									backend.Launch(st.Installed[i])
 									acted = true
@@ -584,11 +717,11 @@ func gioMain() {
 						}
 						if !acted {
 							for _, i := range vis {
-								if installedSet[st.Discovery[i].ID] && discoOpenBtns[i].Clicked(gtx) {
+								if (installedSet[st.Discovery[i].ID] || st.Discovery[i].IsNapplet()) && discoOpenBtns[i].Clicked(gtx) {
 									if n, ok := backend.InstalledNapp(st.Discovery[i].ID); ok {
 										backend.Launch(n)
 									} else {
-										backend.Launch(st.Discovery[i])
+										backend.TryNapplet(st.Discovery[i])
 									}
 									acted = true
 								}
@@ -631,11 +764,11 @@ func gioMain() {
 							n := detailNapp(extraTabState)
 							if detailAuthorBtn.Clicked(gtx) && n.Author.Hex() != "" {
 								openProfileTab(n.Author.Hex())
-							} else if detailOpenBtn.Clicked(gtx) && installedSet[n.ID] {
+							} else if detailOpenBtn.Clicked(gtx) && (installedSet[n.ID] || n.IsNapplet()) {
 								if in, ok := backend.InstalledNapp(n.ID); ok {
 									backend.Launch(in)
 								} else {
-									backend.Launch(n)
+									backend.TryNapplet(n)
 								}
 							} else if detailPrimaryBtn.Clicked(gtx) {
 								if busy[n.ID] {
@@ -648,6 +781,15 @@ func gioMain() {
 								}
 							} else if detailUpdateBtn.Clicked(gtx) {
 								go backend.Update(n.ID)
+							} else if detailCopyAddrBtn.Clicked(gtx) && n.Naddr() != "" {
+								gioHost{}.CopyText(n.Naddr())
+							} else if detailSettingsBtn.Clicked(gtx) && installedSet[n.ID] {
+								id := n.ID
+								go func() {
+									if err := backend.OpenSettings(id); err != nil {
+										log.Warn().Err(err).Str("napp", id).Msg("could not open settings")
+									}
+								}()
 							}
 						} else {
 							// profile tab: size buttons to its napps list
@@ -663,11 +805,11 @@ func gioMain() {
 								if i >= len(profileOpenBtns) {
 									break
 								}
-								if installedSet[pn.ID] && profileOpenBtns[i].Clicked(gtx) {
+								if (installedSet[pn.ID] || pn.IsNapplet()) && profileOpenBtns[i].Clicked(gtx) {
 									if in, ok := backend.InstalledNapp(pn.ID); ok {
 										backend.Launch(in)
 									} else {
-										backend.Launch(pn)
+										backend.TryNapplet(pn)
 									}
 									pacted = true
 								}
@@ -752,6 +894,7 @@ func gioMain() {
 						&tabDiscoBtn,
 						devBtn,
 						&themeBtn,
+						&settingsBtn,
 						&logoutBtn,
 						tab,
 
@@ -759,7 +902,6 @@ func gioMain() {
 						&installedList,
 						&discoveryList,
 						&devList,
-						&relaysEd,
 						&filterEd,
 						&installedFilterEd,
 
@@ -799,6 +941,7 @@ func gioMain() {
 						&tabExtraBtn,
 						installedOpenBtns,
 						installedAuthorBtns,
+						installedSettingsBtns,
 						discoCardBtns,
 						discoOpenBtns,
 						discoAuthorBtns,
@@ -806,6 +949,8 @@ func gioMain() {
 						&detailPrimaryBtn,
 						&detailUpdateBtn,
 						&detailAuthorBtn,
+						&detailCopyAddrBtn,
+						&detailSettingsBtn,
 						&profileList,
 						profileCardBtns,
 						profileOpenBtns,

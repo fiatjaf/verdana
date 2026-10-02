@@ -19,6 +19,9 @@ import (
 type childTransport struct {
 	instance string
 	cmd      *exec.Cmd
+	// settings is a napp's settings window rather than a napp: instance is
+	// then its backend.SettingsSpec.Window
+	settings bool
 
 	mu  sync.Mutex
 	enc *json.Encoder
@@ -46,9 +49,43 @@ func startChild(spec backend.WindowSpec) (backend.Transport, error) {
 		"VERDANA_WINDOW_WIDTH="+strconv.Itoa(spec.Width),
 		"VERDANA_WINDOW_HEIGHT="+strconv.Itoa(spec.Height),
 		"VERDANA_NAPP_REQUIRES="+strings.Join(spec.Requires, ","),
+		"VERDANA_NAPP_FORMAT="+spec.Format,
 		"VERDANA_THEME="+spec.Theme,
 		"VERDANA_THEME_VARS="+spec.ThemeVars,
 	)
+	ct, err := spawnChild(cmd, spec.Instance, false)
+	if err != nil {
+		return nil, err
+	}
+	log.Info().Str("napp", spec.NappID).Str("instance", spec.Instance).
+		Int("pid", cmd.Process.Pid).Msg("napp window started")
+	return ct, nil
+}
+
+// startSettingsChild spawns the webview process for a napp's settings window:
+// the same child, in its settings mode, serving the launcher's settings page.
+func startSettingsChild(spec backend.SettingsSpec) (backend.Transport, error) {
+	cmd := exec.Command(childExePath())
+	cmd.Env = append(os.Environ(),
+		"VERDANA_WINDOW_KIND=settings",
+		"VERDANA_NAPP_ID="+spec.NappID,
+		"VERDANA_NAPP_NAME="+spec.Name,
+		"VERDANA_INSTANCE_ID="+spec.Window,
+		"VERDANA_WINDOW_WIDTH=560",
+		"VERDANA_WINDOW_HEIGHT=640",
+		"VERDANA_THEME="+spec.Theme,
+		"VERDANA_THEME_VARS="+spec.ThemeVars,
+	)
+	ct, err := spawnChild(cmd, spec.Window, true)
+	if err != nil {
+		return nil, err
+	}
+	log.Info().Str("napp", spec.NappID).Str("window", spec.Window).
+		Int("pid", cmd.Process.Pid).Msg("settings window started")
+	return ct, nil
+}
+
+func spawnChild(cmd *exec.Cmd, instance string, settings bool) (*childTransport, error) {
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err
@@ -62,14 +99,11 @@ func startChild(spec backend.WindowSpec) (backend.Transport, error) {
 		return nil, err
 	}
 
-	ct := &childTransport{instance: spec.Instance, cmd: cmd, enc: json.NewEncoder(stdin)}
+	ct := &childTransport{instance: instance, cmd: cmd, settings: settings, enc: json.NewEncoder(stdin)}
 
 	childrenMu.Lock()
 	children = append(children, ct)
 	childrenMu.Unlock()
-
-	log.Info().Str("napp", spec.NappID).Str("instance", spec.Instance).
-		Int("pid", cmd.Process.Pid).Msg("napp window started")
 
 	go readChild(ct, stdout)
 	return ct, nil
@@ -87,6 +121,11 @@ func (ct *childTransport) Close() {
 	ct.Send(backend.WireMsg{T: "close"})
 }
 
+// The child webview library has no cross-platform raise operation. Dispatch
+// still reaches the existing window; compositors that prevent focus stealing
+// are allowed to leave this hint unfulfilled.
+func (ct *childTransport) Focus() {}
+
 // readChild hands everything the child says to the backend, until it exits.
 func readChild(ct *childTransport, stdout io.ReadCloser) {
 	dec := json.NewDecoder(stdout)
@@ -96,10 +135,18 @@ func readChild(ct *childTransport, stdout io.ReadCloser) {
 			log.Debug().Str("instance", ct.instance).Err(err).Msg("child stdout ended")
 			break
 		}
-		backend.HandleMessage(ct.instance, m)
+		if ct.settings {
+			backend.HandleSettingsMessage(ct.instance, m)
+		} else {
+			backend.HandleMessage(ct.instance, m)
+		}
 	}
 
-	backend.WindowClosed(ct.instance)
+	if ct.settings {
+		backend.SettingsClosed(ct.instance)
+	} else {
+		backend.WindowClosed(ct.instance)
+	}
 	ct.cmd.Wait()
 
 	childrenMu.Lock()

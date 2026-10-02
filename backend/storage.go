@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -31,6 +32,11 @@ var (
 // "<16hex>~<d-tag>" or "dev~<id>": the d-tag is author-controlled and may
 // contain slashes, so anything outside a safe alphabet is escaped.
 func storageFileFor(nappID string) string {
+	return filepath.Join(dataDir, "storage", safeFileName(nappID)+".json")
+}
+
+// safeFileName is a napp id as a file name, without any path tricks.
+func safeFileName(nappID string) string {
 	var b strings.Builder
 	for _, r := range nappID {
 		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' ||
@@ -45,8 +51,7 @@ func storageFileFor(nappID string) string {
 		name = "_"
 	}
 	// belt and suspenders against ".." tricks: filepath.Base strips separators
-	name = filepath.Base(name)
-	return filepath.Join(dataDir, "storage", name+".json")
+	return filepath.Base(name)
 }
 
 // StorageFile is the path of a napp's localStorage file, so platforms that
@@ -92,6 +97,16 @@ func storageSnapshot(nappID string) map[string]string {
 	return out
 }
 
+// storageSeed is what a window's localStorage shim starts from: the napp's
+// snapshot, or nothing at all for a napplet, which has no localStorage (its
+// sandboxed frame has no origin to keep one) and goes through NAP-STORAGE.
+func storageSeed(napp Napp) string {
+	if napp.IsNapplet() {
+		return ""
+	}
+	return StorageSnapshotJSON(napp.ID)
+}
+
 // StorageSnapshotJSON is the snapshot as a JSON object string, for WindowSpec.
 func StorageSnapshotJSON(nappID string) string {
 	raw, err := json.Marshal(storageSnapshot(nappID))
@@ -101,42 +116,50 @@ func StorageSnapshotJSON(nappID string) string {
 	return string(raw)
 }
 
-func storagePersistLocked(nappID string, data map[string]string) {
+func storagePersistLocked(nappID string, data map[string]string) error {
 	dir := filepath.Join(dataDir, "storage")
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		log.Error().Err(err).Msg("could not create storage dir")
-		return
+		return err
 	}
 	raw, err := json.Marshal(data)
 	if err != nil {
 		log.Error().Err(err).Msg("could not marshal napp storage")
-		return
+		return err
 	}
 	// write to disk on writes, atomically: temp file + rename
 	tmp, err := os.CreateTemp(dir, ".tmp-*")
 	if err != nil {
 		log.Error().Err(err).Msg("could not write napp storage")
-		return
+		return err
 	}
 	tmpName := tmp.Name()
 	if _, err := tmp.Write(raw); err != nil {
 		tmp.Close()
 		os.Remove(tmpName)
-		return
+		return err
 	}
 	if err := tmp.Close(); err != nil {
 		os.Remove(tmpName)
-		return
+		return err
 	}
 	if err := os.Rename(tmpName, storageFileFor(nappID)); err != nil {
 		os.Remove(tmpName)
 		log.Error().Err(err).Msg("could not persist napp storage")
+		return err
 	}
+	return nil
 }
 
 var errQuotaExceeded = errors.New("localStorage quota exceeded (5MB)")
 
 func storageSet(nappID, key, value string) error {
+	return storageSetQuota(nappID, key, value, localStorageQuota, errQuotaExceeded)
+}
+
+// storageSetQuota is storageSet under a quota of the caller's choosing: napps
+// get localStorage's 5MB, napplets NAP-STORAGE's smaller one.
+func storageSetQuota(nappID, key, value string, quota int, errQuota error) error {
 	s := storageFor(nappID)
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -145,39 +168,78 @@ func storageSet(nappID, key, value string) error {
 	if ok {
 		delta -= len(key) + len(old)
 	}
-	if s.size+delta > localStorageQuota {
-		return errQuotaExceeded
+	if s.size+delta > quota {
+		return errQuota
 	}
-	s.data[key] = value
+	next := make(map[string]string, len(s.data)+1)
+	for k, v := range s.data {
+		next[k] = v
+	}
+	next[key] = value
+	if err := storagePersistLocked(nappID, next); err != nil {
+		return err
+	}
+	s.data = next
 	s.size += delta
-	storagePersistLocked(nappID, s.data)
 	return nil
 }
 
-func storageRemove(nappID, key string) bool {
+func storageGet(nappID, key string) (string, bool) {
+	s := storageFor(nappID)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	v, ok := s.data[key]
+	return v, ok
+}
+
+// storageKeys lists a store's keys, sorted so the answer is stable.
+func storageKeys(nappID string) []string {
+	s := storageFor(nappID)
+	s.mu.Lock()
+	keys := make([]string, 0, len(s.data))
+	for k := range s.data {
+		keys = append(keys, k)
+	}
+	s.mu.Unlock()
+	sort.Strings(keys)
+	return keys
+}
+
+func storageRemove(nappID, key string) (bool, error) {
 	s := storageFor(nappID)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if old, ok := s.data[key]; ok {
-		delete(s.data, key)
+		next := make(map[string]string, len(s.data)-1)
+		for k, v := range s.data {
+			if k != key {
+				next[k] = v
+			}
+		}
+		if err := storagePersistLocked(nappID, next); err != nil {
+			return false, err
+		}
+		s.data = next
 		s.size -= len(key) + len(old)
-		storagePersistLocked(nappID, s.data)
-		return true
+		return true, nil
 	}
-	return false
+	return false, nil
 }
 
-func storageClear(nappID string) bool {
+func storageClear(nappID string) (bool, error) {
 	s := storageFor(nappID)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if len(s.data) == 0 {
-		return false
+		return false, nil
 	}
-	s.data = make(map[string]string)
+	next := make(map[string]string)
+	if err := storagePersistLocked(nappID, next); err != nil {
+		return false, err
+	}
+	s.data = next
 	s.size = 0
-	storagePersistLocked(nappID, s.data)
-	return true
+	return true, nil
 }
 
 // broadcastStorage tells every other open window of the same napp about a

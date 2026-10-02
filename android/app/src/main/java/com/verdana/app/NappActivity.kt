@@ -31,8 +31,8 @@ import mobile.Mobile
 // instead of opening a second.
 //
 // A window carries no launcher chrome: it is a napp, not a tab inside a
-// browser. Back walks the napp's own history and then leaves the window; the
-// only thing that ever covers a napp is a prompt it has to answer.
+// browser. Back walks the napp's own history and then leaves the window;
+// the only thing that ever covers a napp is a prompt it has to answer.
 class NappActivity : ComponentActivity() {
 
     lateinit var instance: String
@@ -47,6 +47,12 @@ class NappActivity : ComponentActivity() {
     // requests, whatever napp asked for them
     private val amberLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { Amber.handle(it) }
+
+    private var notificationPermissionCallback: ((Boolean) -> Unit)? = null
+    private val notificationPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            notificationPermissionCallback?.also { notificationPermissionCallback = null }?.invoke(granted)
+        }
 
     override fun onResume() {
         super.onResume()
@@ -149,6 +155,13 @@ class NappActivity : ComponentActivity() {
 
     // onScreen says whether the user is looking at this window right now.
     fun onScreen(): Boolean = !isFinishing && !isDestroyed && visible
+
+    fun requestNotificationPermission(callback: (Boolean) -> Unit) {
+        runOnUiThread {
+            notificationPermissionCallback = callback
+            notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
 
     // finishWindow is the close path from either side: the napp asking to go
     // away, or the backend closing the window.

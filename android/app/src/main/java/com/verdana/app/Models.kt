@@ -22,7 +22,14 @@ data class Napp(
     val createdAt: Long = 0,
     val paths: List<NappPath>,
     val updateAvailable: Boolean = false,
-)
+    // "napplet" for a kind:35129 napplet, "" for a napp
+    val format: String = "",
+    // a napplet's icon is a bare blob hash, not one of its paths
+    val iconSha: String = "",
+    val archetypes: List<String> = listOf(),
+) {
+    val isNapplet: Boolean get() = format == "napplet"
+}
 
 data class ProfileDetail(
     val pubkey: String,
@@ -72,12 +79,27 @@ data class LauncherState(
     val fetchErr: String,
     val fetching: Boolean,
     val theme: String,
+    val themeMode: String,
     val relays: List<String>,
     val installed: List<Napp>,
     val discovery: List<Napp>,
     val busy: List<String>,
     val windows: List<WindowInfo>,
     val updateCheckRunning: Boolean = false,
+    val lookup: AddressLookup? = null,
+    // nostrConnectUri is the nostrconnect:// uri the login screen shows as a
+    // QR code for a NIP-46 signer, nostrConnectRelay the relay it names.
+    val nostrConnectUri: String = "",
+    val nostrConnectRelay: String = "",
+)
+
+// AddressLookup is the napp address typed into the discovery filter being
+// looked up on relays: pending, found (nappId, also in discovery) or failed.
+data class AddressLookup(
+    val query: String,
+    val pending: Boolean,
+    val nappId: String,
+    val err: String,
 )
 
 fun parseState(json: String): LauncherState {
@@ -111,6 +133,12 @@ fun parseState(json: String): LauncherState {
                     val p = pathsArr.getJSONObject(it)
                     NappPath(p.optString("path"), p.optString("sha256"))
                 },
+                format = n.optString("format"),
+                iconSha = n.optString("iconSha"),
+                archetypes = (0 until (n.optJSONArray("conventions")?.length() ?: 0)).mapNotNull {
+                    n.optJSONArray("conventions")?.optJSONObject(it)?.optString("id")
+                        ?.removePrefix("napplet:")?.substringBefore('/')?.takeIf(String::isNotBlank)
+                }.distinct(),
             )
         }
     }
@@ -127,11 +155,22 @@ fun parseState(json: String): LauncherState {
         fetchErr = o.optString("fetchErr"),
         fetching = o.optBoolean("fetching"),
         theme = o.optString("theme", "light"),
+        themeMode = o.optString("themeMode", "system"),
         relays = (0 until relaysArr.length()).map { relaysArr.getString(it) },
         installed = napps("installed"),
         discovery = napps("discovery"),
         busy = (0 until busyArr.length()).map { busyArr.getString(it) },
         updateCheckRunning = o.optBoolean("updateCheckRunning"),
+        nostrConnectUri = o.optString("nostrConnectUri"),
+        nostrConnectRelay = o.optString("nostrConnectRelay"),
+        lookup = o.optJSONObject("lookup")?.let { l ->
+            AddressLookup(
+                query = l.optString("query"),
+                pending = l.optBoolean("pending"),
+                nappId = l.optString("nappId"),
+                err = l.optString("err"),
+            )
+        },
         windows = (0 until windowsArr.length()).map { i ->
             val w = windowsArr.getJSONObject(i)
             WindowInfo(
@@ -176,6 +215,8 @@ class WindowSpec(json: String) {
     val description: String
     val dir: String
     val requires: List<String>
+    // "napplet": the window loads the napplet host page, not the napp's files
+    val format: String
     val theme: String
     val themeVars: String
     val storage: String
@@ -190,10 +231,13 @@ class WindowSpec(json: String) {
         requires = (0 until (o.optJSONArray("requires")?.length() ?: 0)).map {
             o.optJSONArray("requires")!!.getString(it)
         }
+        format = o.optString("format")
         theme = o.optString("theme", "light")
         themeVars = o.optString("themeVars", "{}")
         storage = o.optString("storage", "{}").ifBlank { "{}" }
     }
+
+    val isNapplet: Boolean get() = format == "napplet"
 }
 
 fun parseProfile(json: String): ProfileDetail? {
@@ -244,6 +288,8 @@ fun parseNapps(json: String): List<Napp> {
                     val q = pathsArr.getJSONObject(it)
                     NappPath(q.optString("path"), q.optString("sha256"))
                 },
+                format = n.optString("format"),
+                iconSha = n.optString("iconSha"),
             )
         }
     } catch (_: Exception) { listOf() }

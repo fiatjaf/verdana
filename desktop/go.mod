@@ -44,10 +44,10 @@ require (
 	golang.org/x/crypto v0.57.0 // indirect
 	golang.org/x/exp v0.0.0-20250408133849-7e4ce0ab07d0 // indirect
 	golang.org/x/exp/shiny v0.0.0-20260824195058-e88cd73687aa // indirect
-	golang.org/x/image v0.46.0 // indirect
+	golang.org/x/image v0.46.0
 	golang.org/x/net v0.59.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
-	golang.org/x/sys v0.48.0 // indirect
+	golang.org/x/sys v0.48.0
 	golang.org/x/text v0.42.0 // indirect
 )
 
@@ -56,21 +56,36 @@ require (
 	github.com/ebitengine/purego v0.8.2 // indirect
 )
 
-require verdana/backend v0.0.0
+require (
+	github.com/gen2brain/beeep v0.11.2
+	github.com/godbus/dbus/v5 v5.2.2
+	github.com/gogpu/systray v0.3.0
+	github.com/jackmordaunt/icns/v3 v3.0.1
+	github.com/sergeymakinen/go-ico v1.0.0-beta.0
+	verdana/backend v0.0.0
+)
 
 require (
+	git.sr.ht/~jackmordaunt/go-toast v1.1.2 // indirect
 	github.com/RoaringBitmap/roaring v1.9.4 // indirect
 	github.com/andybalholm/brotli v1.1.1 // indirect
 	github.com/bits-and-blooms/bitset v1.17.0 // indirect
+	github.com/esiqveland/notify v0.13.3 // indirect
+	github.com/go-ole/go-ole v1.3.0 // indirect
+	github.com/go-webgpu/goffi v0.6.3 // indirect
 	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/kljensen/snowball v0.10.0 // indirect
 	github.com/mschoch/smat v0.2.0 // indirect
+	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646 // indirect
+	github.com/sergeymakinen/go-bmp v1.0.0 // indirect
+	github.com/tadvi/systray v0.0.0-20190226123456-11a2b8fa57af // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasthttp v1.59.0 // indirect
 	github.com/wizenheimer/blaze v0.0.0-20251014083344-98727d655839 // indirect
 	golang.org/x/mobile v0.0.0-20260908204917-8b95e45f8d3e // indirect
 	golang.org/x/mod v0.41.0 // indirect
 	golang.org/x/tools v0.50.0 // indirect
+	rsc.io/qr v0.2.0 // indirect
 )
 
 replace verdana/backend => ../backend

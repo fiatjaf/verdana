@@ -30,6 +30,20 @@ const (
 	PermOpenLink Permission = "open_link"
 	PermSaveFile Permission = "save_file"
 	PermCopyText Permission = "copy_text"
+	// PermUpload lets a napplet publish bytes to the signed-in user's
+	// Blossom servers (NAP-UPLOAD). It is separate from publishing a Nostr
+	// event: the identity linkage and public network egress deserve their own
+	// remembered decision.
+	PermUpload Permission = "upload"
+	// PermFetch is a napplet having the launcher download from the web for
+	// it (NAP-RESOURCE): napplets have no network of their own.
+	PermFetch Permission = "fetch"
+	// PermNotify lets a napplet put user-facing text in the system's
+	// notification UI (NAP-NOTIFY).
+	PermNotify Permission = "notify"
+	// PermMedia is a napplet having the launcher play media in the system's
+	// player for it (NAP-MEDIA shell-owned sessions).
+	PermMedia Permission = "media"
 
 	// PermDispatch is the one permission no napp asks for out loud: it is
 	// which napp should handle an action, a question only a rule can settle
@@ -306,7 +320,34 @@ func ForgetPermission(napp string, perm Permission) {
 	if dropped || saved {
 		log.Info().Str("napp", napp).Str("permission", string(perm)).Msg("forgot a remembered answer")
 		notifyState()
+		if perm == "" || perm == PermDispatch {
+			go broadcastIntentChanges()
+		}
 	}
+}
+
+// forgetDispatchTarget removes defaults that point at an app which is no
+// longer installed. Leaving one behind would turn a missing handler into a
+// stale-rule failure instead of allowing discovery or another user choice.
+func forgetDispatchTarget(target string) {
+	for id, rule := range sessionRules.Range {
+		if rule.Target == target {
+			sessionRules.Delete(id)
+		}
+	}
+
+	stateMu.Lock()
+	changed := false
+	for id, rule := range state.Rules {
+		if rule.Target == target {
+			delete(state.Rules, id)
+			changed = true
+		}
+	}
+	if changed {
+		saveState()
+	}
+	stateMu.Unlock()
 }
 
 // ─── the installed configuration ──────────────────────────────────

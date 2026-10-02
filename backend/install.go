@@ -25,12 +25,22 @@ func refreshInstalled() {
 	ls.sortDiscovery()
 	ls.mu.Unlock()
 	notifyState()
+	go broadcastIntentChanges()
+	go syncAppShortcuts()
 }
 
 // Install downloads a napp's files and records it as installed. Blocking:
 // call it from a goroutine (progress shows up as IsBusy). It also takes
-// updates: an already-installed napp is simply re-downloaded over.
+// updates: an already-installed napp is simply re-downloaded over. A failure
+// is shown in the launcher.
 func Install(n Napp) {
+	if err := InstallNapp(n); err != nil {
+		SetFetchErr("install failed: " + err.Error())
+	}
+}
+
+// InstallNapp is Install for a caller that handles the failure itself.
+func InstallNapp(n Napp) error {
 	log.Info().Str("napp", n.ID).Str("name", n.Name).Msg("installing napp")
 	setBusy(n.ID, true)
 	defer setBusy(n.ID, false)
@@ -43,8 +53,7 @@ func Install(n Napp) {
 	if err := fetchNappAssets(ctx, n, base, servers); err != nil {
 		log.Error().Err(err).Str("napp", n.ID).Msg("install failed")
 		os.RemoveAll(base)
-		SetFetchErr("install failed: " + err.Error())
-		return
+		return err
 	}
 
 	stateMu.Lock()
@@ -57,6 +66,7 @@ func Install(n Napp) {
 
 	refreshInstalled()
 	log.Info().Str("napp", n.ID).Str("name", n.Name).Msg("install complete")
+	return nil
 }
 
 // Uninstall removes a napp's files and forgets it. Installed-only by
@@ -77,6 +87,7 @@ func Uninstall(id string) {
 	// a napp that isn't installed can't be anyone's habitual handler, and
 	// whatever the next one installed under that id shouldn't inherit it
 	forgetActionUsage(id)
+	forgetDispatchTarget(id)
 
 	refreshInstalled()
 	log.Info().Str("napp", id).Msg("uninstall complete")
@@ -91,6 +102,56 @@ func InstallFromDiscovery(id string) bool {
 	}
 	if n, ok := DiscoveredNapp(id); ok {
 		go Install(n)
+		return true
+	}
+	return false
+}
+
+// TryNapplet downloads, verifies and opens a napplet without installing it.
+// Its document stays in memory for the lifetime of the window and the napp is
+// never added to InstalledNapps.
+func TryNapplet(n Napp) {
+	go func() {
+		if err := tryNapplet(context.Background(), n); err != nil {
+			log.Error().Err(err).Str("napp", n.ID).Msg("napplet preview failed")
+			SetFetchErr("try failed: " + err.Error())
+		}
+	}()
+}
+
+func tryNapplet(ctx context.Context, n Napp) error {
+	if !n.IsNapplet() {
+		return errors.New("only napplets can be tried without installing")
+	}
+	if n.ID == "" {
+		return errors.New("napplet has no id")
+	}
+	want := n.IndexHash()
+	if want == "" {
+		return errors.New("napplet has no index document")
+	}
+	setBusy(n.ID, true)
+	defer setBusy(n.ID, false)
+
+	fetchCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
+	defer cancel()
+	document, err := downloadBlob(fetchCtx, n.BlossomServers(fetchCtx), want)
+	if err != nil {
+		return err
+	}
+	_, err = launchWithDocument(ctx, n, "", document)
+	return err
+}
+
+// TryNappletFromDiscovery resolves an uninstalled discovery result and opens
+// it ephemerally. Installed napplets are opened normally.
+func TryNappletFromDiscovery(id string) bool {
+	if n, ok := InstalledNapp(id); ok {
+		Launch(n)
+		return true
+	}
+	if n, ok := DiscoveredNapp(id); ok && n.IsNapplet() {
+		TryNapplet(n)
 		return true
 	}
 	return false
@@ -159,7 +220,17 @@ func fetchNappAsset(ctx context.Context, servers []string, base string, p NappPa
 		// say which of the napp's files nobody could serve
 		return fmt.Errorf("%s: %w", p.Path, err)
 	}
-	dest := filepath.Join(base, filepath.FromSlash(strings.TrimPrefix(p.Path, "/")))
+	rel := strings.TrimPrefix(p.Path, "/")
+	if rel == "" {
+		// NIP-5D lets a napplet name its index "/"
+		rel = "index.html"
+	}
+	dest := filepath.Join(base, filepath.FromSlash(rel))
+	// manifest paths are author input: nothing may land outside the napp's
+	// own directory ("../" segments, absolute paths)
+	if r, err := filepath.Rel(base, dest); err != nil || r == ".." || strings.HasPrefix(r, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("%s: path escapes the napp directory", p.Path)
+	}
 	if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
 		return fmt.Errorf("%s: %w", p.Path, err)
 	}

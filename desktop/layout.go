@@ -2,6 +2,7 @@ package main
 
 import (
 	"image"
+	"strconv"
 	"strings"
 	"verdana/backend"
 
@@ -21,21 +22,6 @@ import (
 func emph(l material.LabelStyle) material.LabelStyle {
 	l.Font.Style = font.Italic
 	return l
-}
-
-func parseRelays(text string) []string {
-	var out []string
-	for _, line := range strings.Split(text, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		if !strings.Contains(line, "://") {
-			line = "wss://" + line
-		}
-		out = append(out, line)
-	}
-	return out
 }
 
 // promptButtons are the six answers an approval prompt can get: allow and
@@ -241,47 +227,6 @@ func layoutPrompt(
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
 }
 
-func layoutLogin(
-	gtx layout.Context,
-	th *material.Theme,
-	ed *widget.Editor,
-	btn *widget.Clickable,
-	loginErr string,
-) layout.Dimensions {
-	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			t := material.H5(th, "Log in to Verdana")
-			t.Font.Weight = font.Bold
-			return t.Layout(gtx)
-		}),
-		layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			l := emph(material.Body2(th, "Paste your nsec or a bunker:// URL"))
-			l.Color = currentTheme().subtle
-			return l.Layout(gtx)
-		}),
-		layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return editorBox(gtx, th, ed, "nsec1... or bunker://...")
-		}),
-		layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			pointer.CursorPointer.Add(gtx.Ops)
-			return material.Button(th, btn, "Log in").Layout(gtx)
-		}),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			if loginErr == "" {
-				return layout.Dimensions{}
-			}
-			return layout.Inset{Top: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				l := material.Body2(th, loginErr)
-				l.Color = currentTheme().danger
-				return l.Layout(gtx)
-			})
-		}),
-	)
-}
-
 func layoutMain(
 	gtx layout.Context,
 	th *material.Theme,
@@ -290,13 +235,13 @@ func layoutMain(
 	tabDiscoBtn,
 	tabDevBtn,
 	themeBtn,
+	settingsBtn,
 	logoutBtn *widget.Clickable,
 	tab int,
 	windowsList,
 	installedList,
 	discoveryList,
 	devList *widget.List,
-	relaysEd,
 	filterEd,
 	installedFilterEd,
 	devURLed,
@@ -334,13 +279,16 @@ func layoutMain(
 	extraBtn *widget.Clickable,
 	installedOpenBtns,
 	installedAuthorBtns,
+	installedSettingsBtns,
 	discoCardBtns,
 	discoOpenBtns,
 	discoAuthorBtns []widget.Clickable,
 	detailOpenBtn,
 	detailPrimaryBtn,
 	detailUpdateBtn,
-	detailAuthorBtn *widget.Clickable,
+	detailAuthorBtn,
+	detailCopyAddrBtn *widget.Clickable,
+	detailSettingsBtn *widget.Clickable,
 	profileList *widget.List,
 	profileCardBtns,
 	profileOpenBtns,
@@ -349,7 +297,7 @@ func layoutMain(
 ) layout.Dimensions {
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layoutProfile(gtx, th, themeBtn, logoutBtn, st.ProfileName, st.ProfilePicture)
+			return layoutProfile(gtx, th, themeBtn, settingsBtn, logoutBtn, st.ProfileName, st.ProfilePicture)
 		}),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -366,15 +314,15 @@ func layoutMain(
 					shortcutDelBtns, shortcutEditBtns, st)
 			}
 			if tab == 1 {
-				return layoutNappsTab(gtx, th, installedList, installedFilterEd, cardBtns, uninstBtns, installedUpdateBtns, installedOpenBtns, installedAuthorBtns, checkUpdBtn, instVis, st)
+				return layoutNappsTab(gtx, th, installedList, installedFilterEd, cardBtns, uninstBtns, installedUpdateBtns, installedOpenBtns, installedAuthorBtns, installedSettingsBtns, checkUpdBtn, instVis, st)
 			}
 			if tab == 2 {
-				return layoutDiscoveryTab(gtx, th, discoveryList, relaysEd, filterEd, fetchBtn, actionBtns,
-					updateBtns, discoCardBtns, discoOpenBtns, discoAuthorBtns, vis, st.FetchErr, st.Fetching, st.Discovery, installedSet, busy)
+				return layoutDiscoveryTab(gtx, th, discoveryList, filterEd, fetchBtn, actionBtns,
+					updateBtns, discoCardBtns, discoOpenBtns, discoAuthorBtns, vis, st.FetchErr, st.Fetching, st.Discovery, st.Lookup, installedSet, busy)
 			}
 			if tab == 4 && extra != nil {
 				if extra.kind == "napp" {
-					return layoutNappDetail(gtx, th, extra, detailOpenBtn, detailPrimaryBtn, detailUpdateBtn, detailAuthorBtn, installedSet, busy, st)
+					return layoutNappDetail(gtx, th, extra, detailOpenBtn, detailPrimaryBtn, detailUpdateBtn, detailAuthorBtn, detailCopyAddrBtn, detailSettingsBtn, installedSet, busy, st)
 				}
 				return layoutProfileDetail(gtx, th, extra, profileList, profileCardBtns, profileOpenBtns, profileActionBtns, profileUpdateBtns, installedSet, busy)
 			}
@@ -386,9 +334,13 @@ func layoutMain(
 
 // truncate keeps a label short enough for a dialog line.
 func truncate(s string, max int) string {
-	s = strings.Join(strings.Fields(s), " ")
-	if len(s) > max {
-		return s[:max] + "…"
+	return capRunes(strings.Join(strings.Fields(s), " "), max)
+}
+
+// capRunes cuts s to at most max characters, marking the cut with "…".
+func capRunes(s string, max int) string {
+	if r := []rune(s); len(r) > max {
+		return strings.TrimRight(string(r[:max]), " \t\n") + "…"
 	}
 	return s
 }
@@ -750,7 +702,8 @@ func layoutNappsTab(
 	uninstBtns []widget.Clickable,
 	installedUpdateBtns []widget.Clickable,
 	openBtns,
-	authorBtns []widget.Clickable,
+	authorBtns,
+	settingsBtns []widget.Clickable,
 	checkUpdBtn *widget.Clickable,
 	vis []int,
 	st backend.State,
@@ -792,8 +745,9 @@ func layoutNappsTab(
 				l.Color = currentTheme().muted
 				return l.Layout(gtx)
 			}
-			return material.List(th, list).Layout(gtx, len(vis), func(gtx layout.Context, i int) layout.Dimensions {
-				row := vis[i]
+			// a grid of tiles, as many across as the window fits; a narrow
+			// window gets the one-per-row cards instead
+			return nappGrid(gtx, th, list, &installedCols, vis, func(gtx layout.Context, row int, tile bool) layout.Dimensions {
 				var cardBtn, uninstBtn *widget.Clickable
 				if row < len(cardBtns) {
 					cardBtn = &cardBtns[row]
@@ -802,7 +756,7 @@ func layoutNappsTab(
 					uninstBtn = &uninstBtns[row]
 				}
 				// the card opens the napp page; Open launches it
-				var updateBtn, openBtn, authorBtn *widget.Clickable
+				var updateBtn, openBtn, authorBtn, settingsBtn *widget.Clickable
 				if row < len(installedUpdateBtns) && st.Installed[row].UpdateAvailable != nil {
 					updateBtn = &installedUpdateBtns[row]
 				}
@@ -812,7 +766,13 @@ func layoutNappsTab(
 				if row < len(authorBtns) {
 					authorBtn = &authorBtns[row]
 				}
-				return renderNappCard(gtx, th, cardBtn, authorBtn, openBtn, uninstBtn, updateBtn, "Uninstall", "Update", st.Installed[row])
+				if row < len(settingsBtns) && st.Installed[row].IsNapplet() {
+					settingsBtn = &settingsBtns[row]
+				}
+				if tile {
+					return renderNappTile(gtx, th, cardBtn, authorBtn, openBtn, settingsBtn, uninstBtn, updateBtn, "Open", "Uninstall", "Update", false, st.Installed[row])
+				}
+				return renderNappCard(gtx, th, cardBtn, authorBtn, openBtn, settingsBtn, uninstBtn, updateBtn, "Open", "Uninstall", "Update", false, st.Installed[row])
 			})
 		}),
 	)
@@ -822,7 +782,6 @@ func layoutDiscoveryTab(
 	gtx layout.Context,
 	th *material.Theme,
 	list *widget.List,
-	relaysEd,
 	filterEd *widget.Editor,
 	fetchBtn *widget.Clickable,
 	actionBtns,
@@ -834,68 +793,105 @@ func layoutDiscoveryTab(
 	fetchErr string,
 	fetching bool,
 	discovery []backend.Napp,
+	lookup *backend.AddressLookup,
 	installedSet,
 	busy map[string]bool,
 ) layout.Dimensions {
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		// the filter box comes first, narrowing the entries below by name,
-		// author, author name or description.
+		// author, author name or description, or naming one by its address.
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return editorBox(gtx, th, filterEd, "filter by name, author or description")
+			return editorBox(gtx, th, filterEd, "filter by name, author or description, or paste an naddr")
 		}),
-		layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
-		// then the relays editor
+		layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
+		// the kind tabs (all, napps, napplets) and, at the other end, the
+		// refresh button that asks the relays again
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					l := emph(material.Body2(th, "Relays (one per line)"))
-					l.Color = currentTheme().subtle
-					return l.Layout(gtx)
-				}),
-				layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return editorBox(gtx, th, relaysEd, "relay.example.com")
-				}),
-			)
-		}),
-		layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			counts := [3]int{len(discovery)}
+			for _, n := range discovery {
+				if matchesKind(n, discoKindNapplets) {
+					counts[discoKindNapplets]++
+				} else {
+					counts[discoKindNapps]++
+				}
+			}
+			kindBtn := func(k int) layout.FlexChild {
+				return layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return layout.Inset{Right: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						pointer.CursorPointer.Add(gtx.Ops)
+						label := discoKindLabels[k]
+						if counts[k] > 0 {
+							label += " (" + strconv.Itoa(counts[k]) + ")"
+						}
+						b := material.Button(th, &discoKindBtns[k], label)
+						b.TextSize = unit.Sp(13)
+						b.Inset = layout.Inset{Top: unit.Dp(6), Bottom: unit.Dp(6), Left: unit.Dp(12), Right: unit.Dp(12)}
+						if discoKind == k {
+							b.Background = th.Palette.ContrastBg
+						} else {
+							b.Background = currentTheme().chipBg
+							b.Color = currentTheme().chipFg
+						}
+						return b.Layout(gtx)
+					})
+				})
+			}
 			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+				kindBtn(discoKindAll),
+				kindBtn(discoKindNapps),
+				kindBtn(discoKindNapplets),
+				layout.Flexed(1, layout.Spacer{}.Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					pointer.CursorPointer.Add(gtx.Ops)
-					label := "Fetch napps"
+					label := "Refresh"
 					if fetching {
-						label = "Fetching\u2026"
+						label = "Refreshing\u2026"
 					}
-					return material.Button(th, fetchBtn, label).Layout(gtx)
-				}),
-				layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					if fetchErr == "" {
-						return layout.Dimensions{}
-					}
-					l := material.Body2(th, fetchErr)
-					l.Color = currentTheme().danger
-					return l.Layout(gtx)
+					b := material.Button(th, fetchBtn, label)
+					b.TextSize = unit.Sp(13)
+					b.Inset = layout.Inset{Top: unit.Dp(6), Bottom: unit.Dp(6), Left: unit.Dp(12), Right: unit.Dp(12)}
+					return b.Layout(gtx)
 				}),
 			)
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if fetchErr == "" {
+				return layout.Dimensions{}
+			}
+			return layout.Inset{Top: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				l := material.Body2(th, fetchErr)
+				l.Color = currentTheme().danger
+				return l.Layout(gtx)
+			})
 		}),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			if len(vis) == 0 {
-				msg := "No napps yet. Pick some good relays and click \"Fetch napps\"."
+				msg := "No napps yet. Pick some good relays in Settings and click \"Refresh\"."
 				if fetching {
 					msg = "Searching relays\u2026"
 				}
 				if len(discovery) > 0 {
 					msg = "Nothing matches the filter."
+					if strings.TrimSpace(filterEd.Text()) == "" {
+						msg = "No " + strings.ToLower(discoKindLabels[discoKind]) + " found on these relays."
+					}
+				}
+				if lookup != nil {
+					switch {
+					case lookup.Pending:
+						msg = "Looking up that address\u2026"
+					case lookup.Err != "":
+						msg = "Couldn't open that address: " + lookup.Err + "."
+					}
 				}
 				l := material.Body2(th, msg)
 				l.Color = currentTheme().muted
 				return l.Layout(gtx)
 			}
-			return material.List(th, list).Layout(gtx, len(vis), func(gtx layout.Context, i int) layout.Dimensions {
-				row := vis[i]
+			// a grid of tiles, as many across as the window fits; a narrow
+			// window gets the one-per-row cards instead
+			card := func(gtx layout.Context, row int, tile bool) layout.Dimensions {
 				var btn, updBtn *widget.Clickable
 				if row < len(actionBtns) {
 					btn = &actionBtns[row]
@@ -919,14 +915,22 @@ func layoutDiscoveryTab(
 				if row < len(cardBtns) {
 					cardBtn = &cardBtns[row]
 				}
-				if row < len(openBtns) && installedSet[n.ID] {
+				if row < len(openBtns) && (installedSet[n.ID] || n.IsNapplet()) {
 					openBtn = &openBtns[row]
+				}
+				openLabel := "Open"
+				if !installedSet[n.ID] && n.IsNapplet() {
+					openLabel = "Try"
 				}
 				if row < len(authorBtns) {
 					authorBtn = &authorBtns[row]
 				}
-				return renderNappCard(gtx, th, cardBtn, authorBtn, openBtn, btn, updBtn, label, updLabel, n)
-			})
+				if tile {
+					return renderNappTile(gtx, th, cardBtn, authorBtn, openBtn, nil, btn, updBtn, openLabel, label, updLabel, false, n)
+				}
+				return renderNappCard(gtx, th, cardBtn, authorBtn, openBtn, nil, btn, updBtn, openLabel, label, updLabel, false, n)
+			}
+			return nappGrid(gtx, th, list, &discoCols, vis, card)
 		}),
 	)
 }
@@ -1034,7 +1038,7 @@ func layoutDevTab(
 				if i < len(publishBtns) && backend.DevSourceKind(st.Dev[i].ID) == "folder" {
 					publishBtn = &publishBtns[i]
 				}
-				return renderNappCard(gtx, th, openBtn, nil, nil, publishBtn, unloadBtn, "Publish", "Unload", st.Dev[i])
+				return renderNappCard(gtx, th, openBtn, nil, nil, nil, publishBtn, unloadBtn, "", "Publish", "Unload", true, st.Dev[i])
 			})
 		}),
 	)
@@ -1103,6 +1107,7 @@ func layoutProfile(
 	gtx layout.Context,
 	th *material.Theme,
 	themeBtn,
+	settingsBtn,
 	logoutBtn *widget.Clickable,
 	name,
 	pic string,
@@ -1123,9 +1128,12 @@ func layoutProfile(
 			}
 			pointer.CursorPointer.Add(gtx.Ops)
 			p := currentTheme()
-			label := "\u263e Dark"
-			if p.name == "dark" {
+			label := "\u2699 System"
+			switch backend.ThemeMode() {
+			case backend.ThemeSystem:
 				label = "\u2600 Light"
+			case backend.ThemeLight:
+				label = "\u263e Dark"
 			}
 			b := material.Button(th, themeBtn, label)
 			b.Background = p.chipBg
@@ -1135,6 +1143,20 @@ func layoutProfile(
 			return b.Layout(gtx)
 		}),
 		layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+		// the launcher's own settings window: relays, Blossom servers
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if settingsBtn == nil {
+				return layout.Dimensions{}
+			}
+			pointer.CursorPointer.Add(gtx.Ops)
+			p := currentTheme()
+			b := material.Button(th, settingsBtn, "\u2699 Settings")
+			b.Background = p.chipBg
+			b.Color = p.chipFg
+			b.TextSize = unit.Sp(13)
+			b.Inset = layout.UniformInset(unit.Dp(8))
+			return layout.Inset{Right: unit.Dp(8)}.Layout(gtx, b.Layout)
+		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			if logoutBtn == nil {
 				return layout.Dimensions{}
@@ -1191,6 +1213,7 @@ func actionChip(gtx layout.Context, th *material.Theme, action string) layout.Di
 	macro := op.Record(gtx.Ops)
 	label := material.Caption(th, action)
 	label.Color = p.chipFg
+	label.MaxLines = 1
 	dims := layout.UniformInset(unit.Dp(4)).Layout(gtx, label.Layout)
 	call := macro.Stop()
 	bg := clip.RRect{Rect: image.Rectangle{Max: dims.Size}, NW: 5, NE: 5, SW: 5, SE: 5}
@@ -1215,9 +1238,29 @@ func editorBox(gtx layout.Context, th *material.Theme, ed *widget.Editor, hint s
 	})
 }
 
-// renderNappCard draws one napp row: icon, name, description, author and the
-// action buttons. When cardBtn is not nil the whole card is clickable (it
-// opens the napp's page); authorBtn alone opens the author's profile page.
+// nappAuthor is the name and picture a napp's author is shown with: their
+// profile's once it is cached, else the napp's own hint or a short pubkey.
+func nappAuthor(napp backend.Napp) (name, picture string) {
+	if napp.Author.Hex() == "" {
+		return "", ""
+	}
+	if p := cachedProfile(napp.Author.Hex()); p != nil && p.ShortName != "" {
+		return p.ShortName, p.Picture
+	}
+	name = napp.AuthorShortName()
+	if name == "" {
+		name = napp.Author.Hex()
+		if len(name) > 16 {
+			name = name[:16] + "…"
+		}
+	}
+	return name, ""
+}
+
+// renderNappCard draws one napp row: icon, name, description, author, optional
+// handled actions, and action buttons. When cardBtn is not nil the whole card
+// is clickable (it opens the napp's page); authorBtn alone opens the author's
+// profile page.
 // Buttons drawn on top of the card's area keep working, so the frame handler
 // must check which of them fired before acting on the card itself.
 func renderNappCard(
@@ -1226,26 +1269,16 @@ func renderNappCard(
 	cardBtn,
 	authorBtn,
 	openBtn,
+	settingsBtn,
 	btn,
 	secondBtn *widget.Clickable,
+	openLabel,
 	btnLabel,
 	secondLabel string,
+	showActions bool,
 	napp backend.Napp,
 ) layout.Dimensions {
-	authorName, authorPic := "", ""
-	if napp.Author.Hex() != "" {
-		if p := cachedProfile(napp.Author.Hex()); p != nil && p.ShortName != "" {
-			authorName, authorPic = p.ShortName, p.Picture
-		} else {
-			authorName = napp.AuthorShortName()
-			if authorName == "" {
-				authorName = napp.Author.Hex()
-				if len(authorName) > 16 {
-					authorName = authorName[:16] + "…"
-				}
-			}
-		}
-	}
+	authorName, authorPic := nappAuthor(napp)
 	return layout.Inset{Bottom: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		sz := gtx.Constraints.Max
 		macro := op.Record(gtx.Ops)
@@ -1264,29 +1297,30 @@ func renderNappCard(
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 							label := material.Body1(th, napp.Name)
 							label.Font.Weight = font.Bold
-							return label.Layout(gtx)
+							label.MaxLines = 2
+							if !napp.IsNapplet() {
+								return label.Layout(gtx)
+							}
+							// napplets run sandboxed, through a different runtime:
+							// worth telling apart at a glance
+							return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+								layout.Rigid(label.Layout),
+								layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									return actionChip(gtx, th, "napplet")
+								}),
+							)
 						}),
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							actions := make([]string, 0, len(napp.Actions))
-							for _, action := range napp.Actions {
-								if strings.TrimSpace(action) != "" {
-									actions = append(actions, action)
-								}
+							if !showActions {
+								return layout.Dimensions{}
 							}
-							if len(actions) == 0 {
+							chips := actionChips(th, napp)
+							if len(chips) == 0 {
 								return layout.Dimensions{}
 							}
 							return layout.Inset{Top: unit.Dp(5)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-								children := make([]layout.FlexChild, 0, len(actions)*2)
-								for i, action := range actions {
-									if i > 0 {
-										children = append(children, layout.Rigid(layout.Spacer{Width: unit.Dp(4)}.Layout))
-									}
-									children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-										return actionChip(gtx, th, action)
-									}))
-								}
-								return layout.Flex{Axis: layout.Horizontal}.Layout(gtx, children...)
+								return wrapFlow(gtx, unit.Dp(4), false, chips)
 							})
 						}),
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -1294,8 +1328,9 @@ func renderNappCard(
 								return layout.Dimensions{}
 							}
 							return layout.Inset{Top: unit.Dp(2)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-								l := material.Body2(th, napp.Description)
+								l := material.Body2(th, cardDescription(napp.Description))
 								l.Color = currentTheme().subtle
+								l.MaxLines = 3
 								return l.Layout(gtx)
 							})
 						}),
@@ -1332,9 +1367,23 @@ func renderNappCard(
 					}
 					return layout.Inset{Left: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 						pointer.CursorPointer.Add(gtx.Ops)
-						b := material.Button(th, openBtn, "Open")
+						b := material.Button(th, openBtn, openLabel)
 						b.Background = currentTheme().suggestBg
 						b.Color = currentTheme().suggestFg
+						b.TextSize = unit.Sp(13)
+						b.Inset = layout.UniformInset(unit.Dp(8))
+						return b.Layout(gtx)
+					})
+				}),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					if settingsBtn == nil {
+						return layout.Dimensions{}
+					}
+					return layout.Inset{Left: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						pointer.CursorPointer.Add(gtx.Ops)
+						b := material.Button(th, settingsBtn, "Settings")
+						b.Background = currentTheme().chipBg
+						b.Color = currentTheme().chipFg
 						b.TextSize = unit.Sp(13)
 						b.Inset = layout.UniformInset(unit.Dp(8))
 						return b.Layout(gtx)

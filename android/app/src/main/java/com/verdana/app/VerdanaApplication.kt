@@ -1,6 +1,7 @@
 package com.verdana.app
 
 import android.app.Application
+import android.content.res.Configuration
 import go.Seq
 
 // The gomobile runtime wants a Context before anything else touches the
@@ -14,5 +15,10 @@ class VerdanaApplication : Application() {
         super.onCreate()
         Seq.setContext(this)
         VerdanaHost.start(this)
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        VerdanaHost.systemThemeChanged(this)
     }
 }

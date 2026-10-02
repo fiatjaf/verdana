@@ -2,6 +2,7 @@ package com.verdana.app
 
 import android.app.Activity
 import android.content.Intent
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -19,6 +20,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -152,6 +154,9 @@ fun LoadingScreen() {
     }
 }
 
+// LoginScreen asks for an nsec or bunker:// url, with "Connect signer"
+// leading to the nostrconnect QR code. Which of the two shows follows the
+// backend: the QR view is up while a nostrconnect uri is on offer.
 @Composable
 fun LoginScreen(activity: MainActivity, st: LauncherState) {
     val theme = themeByName(st.theme)
@@ -164,41 +169,129 @@ fun LoginScreen(activity: MainActivity, st: LauncherState) {
             .padding(20.dp),
         verticalArrangement = Arrangement.Center,
     ) {
-        Text("Log in to Verdana", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = theme.fg)
-        Spacer(Modifier.height(6.dp))
-        Text(
-            "Paste your nsec or a bunker:// URL",
-            style = MaterialTheme.typography.bodyMedium,
-            color = theme.subtle,
-        )
-        Spacer(Modifier.height(16.dp))
+        if (st.nostrConnectUri.isNotBlank()) {
+            ConnectSigner(activity, st, theme)
+        } else {
+            Text("Log in to Verdana", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = theme.fg)
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "Paste your nsec or a bunker:// URL",
+                style = MaterialTheme.typography.bodyMedium,
+                color = theme.subtle,
+            )
+            Spacer(Modifier.height(16.dp))
+            OutlinedTextField(
+                value = input,
+                onValueChange = { input = it },
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("nsec1... or bunker://...", color = theme.inputHint) },
+                singleLine = true,
+                colors = outlinedColors(theme),
+            )
+            Spacer(Modifier.height(12.dp))
+            Button(onClick = { activity.login(input.trim()) }, modifier = Modifier.fillMaxWidth()) {
+                Text("Log in")
+            }
+            Spacer(Modifier.height(8.dp))
+            Text("— or —", style = MaterialTheme.typography.bodyMedium, color = theme.subtle)
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(onClick = { activity.startNostrConnect() }, modifier = Modifier.fillMaxWidth()) {
+                Text("Connect signer")
+            }
+            if (Amber.installed(activity)) {
+                Spacer(Modifier.height(8.dp))
+                var amberErr by remember { mutableStateOf("") }
+                AmberLogin(activity, theme) { amberErr = it }
+                if (amberErr.isNotBlank()) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(amberErr, color = theme.danger, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            if (st.loginErr.isNotBlank()) {
+                Spacer(Modifier.height(12.dp))
+                Text(st.loginErr, color = theme.danger, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+    }
+}
+
+// ConnectSigner is the nostrconnect view: the QR code for a signer on
+// another device, a button handing the uri to one on this phone, and the
+// relay the uri points to.
+@Composable
+private fun ColumnScope.ConnectSigner(activity: MainActivity, st: LauncherState, theme: Theme) {
+    // the relay field follows the backend's relay, unless the user is typing
+    var relay by remember(st.nostrConnectRelay) { mutableStateOf(st.nostrConnectRelay) }
+    var signerErr by remember(st.nostrConnectUri) { mutableStateOf("") }
+    BackHandler { activity.cancelNostrConnect() }
+    val qr = remember(st.nostrConnectUri) {
+        Mobile.nostrConnectQR(st.nostrConnectUri)?.let {
+            BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap()
+        }
+    }
+
+    Text("Connect a signer", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = theme.fg)
+    Spacer(Modifier.height(6.dp))
+    Text(
+        "Scan with your signer app, or open one on this phone",
+        style = MaterialTheme.typography.bodyMedium,
+        color = theme.subtle,
+    )
+    Spacer(Modifier.height(16.dp))
+    // white whatever the theme: scanners want dark modules on light
+    Box(
+        Modifier
+            .align(Alignment.CenterHorizontally)
+            .size(240.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(Color.White),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (qr != null) {
+            Image(
+                bitmap = qr,
+                contentDescription = "nostrconnect QR code",
+                modifier = Modifier.fillMaxSize(),
+                filterQuality = FilterQuality.None,
+            )
+        }
+    }
+    Spacer(Modifier.height(12.dp))
+    Button(
+        onClick = {
+            signerErr = if (activity.openSigner(st.nostrConnectUri)) "" else "No signer app found on this phone"
+        },
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Text("Open signer app")
+    }
+    if (signerErr.isNotBlank()) {
+        Spacer(Modifier.height(8.dp))
+        Text(signerErr, color = theme.danger, style = MaterialTheme.typography.bodySmall)
+    }
+    Spacer(Modifier.height(12.dp))
+    Row(verticalAlignment = Alignment.CenterVertically) {
         OutlinedTextField(
-            value = input,
-            onValueChange = { input = it },
-            modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text("nsec1... or bunker://...", color = theme.inputHint) },
+            value = relay,
+            onValueChange = { relay = it },
+            modifier = Modifier.weight(1f),
+            label = { Text("Relay") },
+            placeholder = { Text("wss://…", color = theme.inputHint) },
             singleLine = true,
             colors = outlinedColors(theme),
         )
+        Spacer(Modifier.width(8.dp))
+        OutlinedButton(onClick = { activity.setNostrConnectRelay(relay.trim()) }) {
+            Text("Change")
+        }
+    }
+    if (st.loginErr.isNotBlank()) {
         Spacer(Modifier.height(12.dp))
-        Button(onClick = { activity.login(input.trim()) }, modifier = Modifier.fillMaxWidth()) {
-            Text("Log in")
-        }
-        Spacer(Modifier.height(8.dp))
-        Text("— or —", style = MaterialTheme.typography.bodyMedium, color = theme.subtle)
-        Spacer(Modifier.height(16.dp))
-        if (Amber.installed(activity)) {
-            var amberErr by remember { mutableStateOf("") }
-            AmberLogin(activity, theme) { amberErr = it }
-            if (amberErr.isNotBlank()) {
-                Spacer(Modifier.height(8.dp))
-                Text(amberErr, color = theme.danger, style = MaterialTheme.typography.bodySmall)
-            }
-        }
-        if (st.loginErr.isNotBlank()) {
-            Spacer(Modifier.height(12.dp))
-            Text(st.loginErr, color = theme.danger, style = MaterialTheme.typography.bodySmall)
-        }
+        Text(st.loginErr, color = theme.danger, style = MaterialTheme.typography.bodySmall)
+    }
+    Spacer(Modifier.height(16.dp))
+    TextButton(onClick = { activity.cancelNostrConnect() }) {
+        Text("Back")
     }
 }
 
@@ -206,12 +299,24 @@ fun LoginScreen(activity: MainActivity, st: LauncherState) {
 fun LauncherScreen(activity: MainActivity, st: LauncherState) {
     val theme = themeByName(st.theme)
     var tab by remember { mutableStateOf(if (st.installed.isNotEmpty()) 0 else 1) }
-    var relaysEd by remember(st.relays.hashCode()) { mutableStateOf(st.relays.joinToString("\n")) }
     var discoveryFilter by remember { mutableStateOf("") }
+    var discoveryKind by remember { mutableStateOf(DiscoveryKind.All) }
     var installedFilter by remember { mutableStateOf("") }
     // ephemeral detail tabs: vanish the moment any other tab is picked
     var detailNapp by remember { mutableStateOf<Napp?>(null) }
     var detailProfile by remember { mutableStateOf<String?>(null) }
+
+    val requestedArchetype = VerdanaHost.discoveryArchetype
+    androidx.compose.runtime.LaunchedEffect(requestedArchetype) {
+        if (requestedArchetype.isNotBlank()) {
+            tab = 1
+            discoveryFilter = "archetype:$requestedArchetype"
+            discoveryKind = DiscoveryKind.Napplets
+            detailNapp = null
+            detailProfile = null
+            VerdanaHost.consumeDiscoveryArchetype()
+        }
+    }
 
     fun pickTab(t: Int) {
         tab = t
@@ -264,7 +369,8 @@ fun LauncherScreen(activity: MainActivity, st: LauncherState) {
                 onOpenNapp = { openNapp(it) })
             tab == 0 -> InstalledTab(activity, st, theme, installedFilter, { installedFilter = it },
                 onDetail = { openNapp(it) }, onAuthor = { openProfile(it) })
-            else -> DiscoveryTab(activity, st, theme, relaysEd, { relaysEd = it }, discoveryFilter, { discoveryFilter = it },
+            else -> DiscoveryTab(activity, st, theme, discoveryFilter, { discoveryFilter = it },
+                discoveryKind, { discoveryKind = it },
                 onDetail = { openNapp(it) }, onAuthor = { openProfile(it) })
         }
     }
@@ -313,7 +419,18 @@ fun ProfileScreen(activity: MainActivity, st: LauncherState, onBack: () -> Unit)
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Theme", color = theme.fg, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
             TextButton(onClick = { activity.toggleTheme() }) {
-                Text(if (theme.name == "dark") "Light" else "Dark", color = theme.chipFg, fontSize = 13.sp)
+                val next = when (st.themeMode) {
+                    "system" -> "Light"
+                    "light" -> "Dark"
+                    else -> "System"
+                }
+                Text(next, color = theme.chipFg, fontSize = 13.sp)
+            }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Relays & servers", color = theme.fg, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            TextButton(onClick = { VerdanaHost.openLauncherSettings() }) {
+                Text("Settings", color = theme.chipFg, fontSize = 13.sp)
             }
         }
         Spacer(Modifier.height(8.dp))
@@ -386,6 +503,19 @@ private fun LogoutConfirmDialog(theme: Theme, onConfirm: () -> Unit, onDismiss: 
     }
 }
 
+// DiscoveryKind is which apps the discovery tab lists.
+enum class DiscoveryKind(val label: String) {
+    All("All"),
+    Napps("Napps"),
+    Napplets("Napplets");
+
+    fun matches(n: Napp): Boolean = when (this) {
+        All -> true
+        Napps -> !n.isNapplet
+        Napplets -> n.isNapplet
+    }
+}
+
 @Composable
 private fun TabChip(label: String, active: Boolean, theme: Theme, onClick: () -> Unit) {
     Button(
@@ -437,10 +567,12 @@ private fun InstalledTab(activity: MainActivity, st: LauncherState, theme: Theme
                 val busy = st.busy.contains(napp.id)
                 NappCard(
                     activity, napp, theme,
+                    showActions = false,
                     onDetail = { onDetail(napp) },
                     onAuthor = { onAuthor(napp.author) },
                     onLaunch = { activity.launch(napp.id) },
                     showOpen = true,
+                    onSettings = if (napp.isNapplet) ({ VerdanaHost.openNappSettings(napp.id) }) else null,
                     primaryLabel = if (busy) "Working…" else "Uninstall",
                     onPrimary = { activity.uninstall(napp.id) },
                     secondaryLabel = if (napp.updateAvailable) "Update" else null,
@@ -465,17 +597,29 @@ private fun DiscoveryTab(
     activity: MainActivity,
     st: LauncherState,
     theme: Theme,
-    relaysEd: String,
-    setRelaysEd: (String) -> Unit,
     filter: String,
     setFilter: (String) -> Unit,
+    kind: DiscoveryKind,
+    setKind: (DiscoveryKind) -> Unit,
     onDetail: (Napp) -> Unit,
     onAuthor: (String) -> Unit,
 ) {
     // the filter matches on name, description, author pubkey and author
     // name (see matchesQuery); applied to the snapshot's list, cards stay
-    // keyed by id either way
-    val visible = st.discovery.matching(filter)
+    // keyed by id either way. A napp address (naddr, nostr: link) is looked
+    // up on relays instead, and only what it names is listed.
+    val isArchetypeFilter = filter.trim().startsWith("archetype:")
+    LaunchedEffect(filter) { activity.lookupAddress(if (isArchetypeFilter) "" else filter) }
+    val lookup = st.lookup?.takeIf { !isArchetypeFilter && it.query == filter.trim() }
+    // The kind tabs narrow the list to napps or napplets, except for an
+    // address, which names one app whatever its kind.
+    val requestedArchetype = filter.trim().removePrefix("archetype:").takeIf {
+        filter.trim().startsWith("archetype:") && it.isNotBlank()
+    }
+    val visible = if (lookup != null) st.discovery.filter { it.id == lookup.nappId }
+    else st.discovery
+        .matching(if (requestedArchetype == null) filter else "")
+        .filter { kind.matches(it) && (requestedArchetype == null || requestedArchetype in it.archetypes) }
     LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
             // the filter comes first
@@ -483,45 +627,42 @@ private fun DiscoveryTab(
                 value = filter,
                 onValueChange = setFilter,
                 modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("filter by name, author or description", color = theme.inputHint) },
+                placeholder = { Text("filter by name, author or description, or paste an naddr", color = theme.inputHint) },
                 colors = outlinedColors(theme),
                 singleLine = true,
             )
             Spacer(Modifier.height(10.dp))
-            Column {
-                Text("Relays (one per line)", color = theme.subtle, fontSize = 13.sp)
-                Spacer(Modifier.height(6.dp))
-                OutlinedTextField(
-                    value = relaysEd,
-                    onValueChange = setRelaysEd,
-                    modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("relay.example.com", color = theme.inputHint) },
-                    colors = outlinedColors(theme),
-                    minLines = 2,
-                )
-            }
-            Spacer(Modifier.height(8.dp))
+            // the kind tabs, and at the other end the refresh button that
+            // asks the relays again
             Row(verticalAlignment = Alignment.CenterVertically) {
+                DiscoveryKind.entries.forEach { k ->
+                    val count = st.discovery.count { k.matches(it) }
+                    TabChip(if (count > 0) "${k.label} ($count)" else k.label, kind == k, theme) { setKind(k) }
+                    Spacer(Modifier.width(6.dp))
+                }
+                Spacer(Modifier.weight(1f))
                 Button(
-                    onClick = {
-                        activity.saveRelays(relaysEd)
-                        activity.fetchNapps()
-                    },
+                    onClick = { activity.fetchNapps() },
                     enabled = !st.fetching,
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
                 ) {
-                    Text(if (st.fetching) "Fetching…" else "Fetch napps")
+                    Text(if (st.fetching) "Refreshing…" else "Refresh", fontSize = 13.sp)
                 }
-                if (st.fetchErr.isNotBlank()) {
-                    Spacer(Modifier.width(12.dp))
-                    Text(st.fetchErr, color = theme.danger, fontSize = 12.sp, modifier = Modifier.weight(1f))
-                }
+            }
+            if (st.fetchErr.isNotBlank()) {
+                Spacer(Modifier.height(6.dp))
+                Text(st.fetchErr, color = theme.danger, fontSize = 12.sp)
             }
             Spacer(Modifier.height(12.dp))
             if (visible.isEmpty()) {
                 Text(
                     when {
+                        lookup?.pending == true -> "Looking up that address…"
+                        lookup != null && lookup.err.isNotBlank() -> "Couldn't open that address: ${lookup.err}."
                         st.fetching -> "Searching relays…"
-                        st.discovery.isNotEmpty() -> "Nothing matches the filter."                        else -> "No napps yet. Tap \"Fetch napps\"."
+                        st.discovery.isNotEmpty() && filter.isBlank() -> "No ${kind.label.lowercase()} found on these relays."
+                        st.discovery.isNotEmpty() -> "Nothing matches the filter."
+                        else -> "No napps yet. Pick some good relays in Settings and tap \"Refresh\"."
                     },
                     color = theme.muted,
                 )
@@ -532,10 +673,12 @@ private fun DiscoveryTab(
             val busy = st.busy.contains(napp.id)
             NappCard(
                 activity, napp, theme,
+                showActions = false,
                 onDetail = { onDetail(napp) },
                 onAuthor = { onAuthor(napp.author) },
-                onLaunch = { activity.launch(napp.id) },
-                showOpen = installed,
+                onLaunch = { if (installed) activity.launch(napp.id) else activity.tryNapplet(napp.id) },
+                showOpen = installed || napp.isNapplet,
+                openLabel = if (installed) "Open" else "Try",
                 primaryLabel = when {
                     busy -> "Working…"
                     installed -> "Uninstall"
@@ -564,7 +707,10 @@ private fun NappCard(
     onDetail: (() -> Unit)? = null,
     onAuthor: (() -> Unit)? = null,
     onLaunch: (() -> Unit)? = null,
+    onSettings: (() -> Unit)? = null,
     showOpen: Boolean = false,
+    openLabel: String = "Open",
+    showActions: Boolean = true,
 ) {
     // icons load off the main thread, keyed by blob hash like the desktop
     val hash = napp.iconHash()
@@ -592,11 +738,17 @@ private fun NappCard(
         NappIcon(bitmap, theme, 40)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(napp.name.ifBlank { napp.id }, fontWeight = FontWeight.Bold, color = theme.fg)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(napp.name.ifBlank { napp.id }, fontWeight = FontWeight.Bold, color = theme.fg)
+                if (napp.isNapplet) {
+                    Spacer(Modifier.width(6.dp))
+                    NappletBadge(theme)
+                }
+            }
             if (napp.description.isNotBlank()) {
                 Text(napp.description, color = theme.subtle, fontSize = 13.sp, maxLines = 2)
             }
-            if (napp.actions.any { it.isNotBlank() }) {
+            if (showActions && napp.actions.any { it.isNotBlank() }) {
                 Row(
                     Modifier
                         .padding(top = 5.dp)
@@ -642,7 +794,18 @@ private fun NappCard(
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = theme.suggestBg, contentColor = theme.suggestFg),
             ) {
-                Text("Open", fontSize = 13.sp)
+                Text(openLabel, fontSize = 13.sp)
+            }
+            Spacer(Modifier.width(6.dp))
+        }
+        if (onSettings != null) {
+            Button(
+                onClick = onSettings,
+                enabled = primaryLabel != "Working…",
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = theme.chipBg, contentColor = theme.chipFg),
+            ) {
+                Text("Settings", fontSize = 13.sp)
             }
             Spacer(Modifier.width(6.dp))
         }
@@ -668,9 +831,23 @@ private fun NappCard(
 }
 
 // iconHash mirrors backend.Napp.IconHash: the icon's blob sha256.
-private fun Napp.iconHash(): String = paths.firstOrNull { p ->
+private fun Napp.iconHash(): String = if (isNapplet) iconSha else paths.firstOrNull { p ->
     icon.isNotBlank() && p.path.trimStart('/') == icon.trimStart('/')
 }?.sha256 ?: ""
+
+// NappletBadge marks a sandboxed kind:35129 napplet in the lists.
+@Composable
+private fun NappletBadge(theme: Theme) {
+    Text(
+        "napplet",
+        color = theme.chipFg,
+        fontSize = 11.sp,
+        modifier = Modifier
+            .clip(RoundedCornerShape(5.dp))
+            .background(theme.chipBg)
+            .padding(horizontal = 4.dp, vertical = 1.dp),
+    )
+}
 
 private fun ByteArray.decodeBitmap(): ImageBitmap? =
     BitmapFactory.decodeByteArray(this, 0, size)?.asImageBitmap()
@@ -1050,11 +1227,11 @@ fun NappDetailScreen(
         }
         Spacer(Modifier.height(12.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            if (installed) {
+            if (installed || napp.isNapplet) {
                 Button(
-                    onClick = { activity.launch(napp.id) },
+                    onClick = { if (installed) activity.launch(napp.id) else activity.tryNapplet(napp.id) },
                     colors = ButtonDefaults.buttonColors(containerColor = theme.suggestBg, contentColor = theme.suggestFg),
-                ) { Text("Open") }
+                ) { Text(if (installed) "Open" else "Try") }
                 Spacer(Modifier.width(8.dp))
             }
             Button(
@@ -1068,8 +1245,26 @@ fun NappDetailScreen(
                 Button(onClick = { activity.update(napp.id) }) { Text("Update") }
             }
         }
+        // its settings window: what it declared (NAP-CONFIG) and what the
+        // user let it do; a line of its own, the row above is full on a phone
+        if (installed) {
+            Spacer(Modifier.height(8.dp))
+            Button(
+                onClick = { VerdanaHost.openNappSettings(napp.id) },
+                colors = ButtonDefaults.buttonColors(containerColor = theme.chipBg, contentColor = theme.chipFg),
+            ) { Text("Settings") }
+        }
         Spacer(Modifier.height(12.dp))
         DetailRow("ID", napp.id, theme)
+        // the naddr is how a napp is shared; a tap copies it
+        val address = remember(napp.id) { Mobile.nappAddress(napp.id) }
+        if (address.isNotBlank()) {
+            Spacer(Modifier.height(4.dp))
+            Row(Modifier.clickable { VerdanaHost.copyText(address) }) {
+                Text("Address: ", color = theme.subtle, fontSize = 13.sp)
+                Text(address, color = theme.fg, fontSize = 13.sp, modifier = Modifier.weight(1f))
+            }
+        }
         if (napp.d.isNotBlank()) DetailRow("d", napp.d, theme)
         DetailRow("Author", napp.author, theme)
         if (napp.actions.any { it.isNotBlank() }) DetailRow("Actions", napp.actions.filter { it.isNotBlank() }.joinToString(", "), theme)
@@ -1143,8 +1338,9 @@ fun AuthorProfileDetailScreen(
                         activity, n, theme,
                         onDetail = { onOpenNapp(n) },
                         onAuthor = null,
-                        onLaunch = { activity.launch(n.id) },
-                        showOpen = installed,
+                        onLaunch = { if (installed) activity.launch(n.id) else activity.tryNapplet(n.id) },
+                        showOpen = installed || n.isNapplet,
+                        openLabel = if (installed) "Open" else "Try",
                         primaryLabel = if (busy) "Working…" else if (installed) "Uninstall" else "Install",
                         onPrimary = { if (installed) activity.uninstall(n.id) else activity.install(n.id) },
                         secondaryLabel = if (installed && n.updateAvailable) "Update" else null,

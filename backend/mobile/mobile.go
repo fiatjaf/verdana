@@ -25,11 +25,13 @@ type UI interface {
 	// The dir is where the napp's files are: serve them to the WebView, inject
 	// BridgeJS(), and send everything the page posts up to HandleMessage.
 	OpenWindow(instance string, specJSON string) error
+	OpenDiscovery(archetype string)
 
 	// SendToWindow delivers one wire message to a napp's shell. It is a JSON
 	// object with a "t": "resp" answers an rpc, "eval" runs code, "action"
 	// dispatches an action, "theme" changes the theme, "close" closes it.
 	SendToWindow(instance string, msgJSON string)
+	FocusWindow(instance string)
 
 	// CloseWindow gets rid of a napp's window (its tab). WindowClosed must be
 	// called once it is really gone.
@@ -53,6 +55,25 @@ type UI interface {
 	// deliver the answer back to AnswerAmber carrying the same id. False
 	// when no signer could be launched at all.
 	AmberRequest(id, op, payload, pubkey, counterpart, pkg string) bool
+
+	// SystemNotification shows a native notification described by requestJSON.
+	// DismissSystemNotification removes it when the platform supports removal.
+	SystemNotification(requestJSON string) error
+	DismissSystemNotification(id string)
+	RequestNotificationPermission() bool
+
+	// PlayMedia hands an https media url to whatever app on the phone plays
+	// it (an ACTION_VIEW intent). Already approved. mime may be empty. False
+	// when no app could take it.
+	PlayMedia(url, mime, title string) bool
+
+	// OpenSettings puts a napp's settings window on screen. spec is a JSON
+	// object: { window, nappId, name, section, theme, themeVars }. The page
+	// is SettingsHTML() with SettingsJS() injected; what it posts goes to
+	// HandleMessage under window, like a napp window's. SendToWindow,
+	// FocusWindow and CloseWindow then address it by that same id, and
+	// WindowClosed must be called once it is gone.
+	OpenSettings(window string, specJSON string) error
 }
 
 // ─── host adapter ────────────────────────────────────────────────
@@ -68,6 +89,7 @@ func (h mobileHost) OpenWindow(spec backend.WindowSpec) (backend.Transport, erro
 		"dir":         spec.Dir,
 		"url":         spec.URL,
 		"requires":    spec.Requires,
+		"format":      spec.Format,
 		"theme":       spec.Theme,
 		"themeVars":   spec.ThemeVars,
 		"width":       spec.Width,
@@ -83,7 +105,26 @@ func (h mobileHost) OpenWindow(spec backend.WindowSpec) (backend.Transport, erro
 	return mobileTransport{ui: h.ui, instance: spec.Instance}, nil
 }
 
+func (h mobileHost) OpenSettings(spec backend.SettingsSpec) (backend.Transport, error) {
+	payload, err := json.Marshal(map[string]any{
+		"window":    spec.Window,
+		"nappId":    spec.NappID,
+		"name":      spec.Name,
+		"section":   spec.Section,
+		"theme":     spec.Theme,
+		"themeVars": spec.ThemeVars,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := h.ui.OpenSettings(spec.Window, string(payload)); err != nil {
+		return nil, err
+	}
+	return mobileTransport{ui: h.ui, instance: spec.Window}, nil
+}
+
 func (h mobileHost) StateChanged()                               { h.ui.StateChanged() }
+func (h mobileHost) OpenDiscovery(archetype string)              { h.ui.OpenDiscovery(archetype) }
 func (h mobileHost) PromptsChanged()                             { h.ui.PromptsChanged() }
 func (h mobileHost) CopyText(text string) error                  { return h.ui.CopyText(text) }
 func (h mobileHost) SaveFileTarget() string                      { return h.ui.SaveFileTarget() }
@@ -92,6 +133,50 @@ func (h mobileHost) SaveFile(n string, d []byte) (string, error) { return h.ui.S
 func (h mobileHost) AmberRequest(id, op, payload, pubkey, counterpart, pkg string) bool {
 	return h.ui.AmberRequest(id, op, payload, pubkey, counterpart, pkg)
 }
+func (h mobileHost) NotificationControls() []string { return []string{"system"} }
+func (h mobileHost) RequestNotificationPermission() bool {
+	return h.ui.RequestNotificationPermission()
+}
+func (h mobileHost) SendNotification(req backend.NotificationRequest) (backend.NotificationHandle, error) {
+	raw, err := json.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+	if err := h.ui.SystemNotification(string(raw)); err != nil {
+		return nil, err
+	}
+	return mobileNotification{ui: h.ui, id: req.ID}, nil
+}
+
+type mobileNotification struct {
+	ui UI
+	id string
+}
+
+func (n mobileNotification) Dismiss() error {
+	n.ui.DismissSystemNotification(n.id)
+	return nil
+}
+
+// MediaPlay hands the url to another app. Once it has, the launcher can't
+// see or steer that app's playback: the session reports "playing" once and
+// ignores every command.
+func (h mobileHost) MediaPlay(req backend.MediaRequest, onState func(backend.MediaState)) (backend.MediaPlayer, error) {
+	if !h.ui.PlayMedia(req.URL, req.MimeType, req.Title) {
+		return nil, errors.New("no app plays this media")
+	}
+	go onState(backend.MediaState{Status: "playing"})
+	return handedOffPlayer{}, nil
+}
+
+type handedOffPlayer struct{}
+
+func (handedOffPlayer) Play() error             { return nil }
+func (handedOffPlayer) Pause() error            { return nil }
+func (handedOffPlayer) Stop() error             { return nil }
+func (handedOffPlayer) Seek(float64) error      { return nil }
+func (handedOffPlayer) SetVolume(float64) error { return nil }
+func (handedOffPlayer) SetTitle(string) error   { return nil }
 
 // AnswerAmber delivers one NIP-55 signer app answer back to whoever on the
 // backend is waiting for the request with that id. Called by the UI when
@@ -105,8 +190,13 @@ func AnswerAmber(id string, answer string, ok bool) {
 func (h mobileHost) CreateShortcutFile(string, string) (string, error) {
 	return "", errors.New("shortcut files are a desktop concept")
 }
-func (h mobileHost) DeleteShortcutFile(string) error           { return nil }
-func (h mobileHost) ListShortcutFiles() []backend.ShortcutFile { return nil }
+func (h mobileHost) DeleteShortcutFile(string) error              { return nil }
+func (h mobileHost) ListShortcutFiles() []backend.ShortcutFile    { return nil }
+func (h mobileHost) AutostartSupported() bool                     { return false }
+func (h mobileHost) AutostartEnabled() bool                       { return false }
+func (h mobileHost) SetAutostart(bool) error                      { return errors.New("autostart is a desktop feature") }
+func (h mobileHost) AppShortcutsSupported() bool                  { return false }
+func (h mobileHost) SyncAppShortcuts([]backend.AppShortcut) error { return nil }
 
 type mobileTransport struct {
 	ui       UI
@@ -114,6 +204,7 @@ type mobileTransport struct {
 }
 
 func (t mobileTransport) Send(msg backend.WireMsg) { t.ui.SendToWindow(t.instance, msg.JSON()) }
+func (t mobileTransport) Focus()                   { t.ui.FocusWindow(t.instance) }
 func (t mobileTransport) Close()                   { t.ui.CloseWindow(t.instance) }
 
 // ─── lifecycle ───────────────────────────────────────────────────
@@ -135,6 +226,7 @@ func Start(dataDir string, ui UI) error {
 // without ever calling this, which is fine — the stores are crash-safe.
 func Stop() {
 	backend.CloseAllWindows()
+	backend.CloseAllSettings()
 	if closeStores != nil {
 		closeStores()
 		closeStores = nil
@@ -144,6 +236,20 @@ func Stop() {
 // BridgeJS is the script that has to run before a napp's page does, on every
 // navigation: it installs window.nostr, window.nostrdb and window.napp.
 func BridgeJS() string { return webview.JS() }
+
+// NappletHostHTML is the page a napplet window loads as its main frame.
+func NappletHostHTML() string { return webview.NappletHostHTML() }
+
+// NappletHostJS is the host page's script, injected in place of bridge.js in
+// a napplet window: it puts the napplet in its sandboxed iframe and carries
+// NAP envelopes to the backend.
+func NappletHostJS() string { return webview.NappletHostJS() }
+
+// SettingsHTML is the page a settings window loads.
+func SettingsHTML() string { return webview.SettingsHTML() }
+
+// SettingsJS is the settings page's script, injected at document start.
+func SettingsJS() string { return webview.SettingsJS() }
 
 // UIKit is the script that puts the napp-ui kit in the page, for the napps
 // whose metadata.json asks for it with `requires: ["ui"]`, and "" for the
@@ -197,6 +303,25 @@ func AnswerPrompt(id int, ok bool, index int, scope string) {
 // state's phase and loginErr for the outcome.
 func Login(input string) { go backend.Login(input) }
 
+// StartNostrConnect puts up the nostrconnect uri for the login screen's
+// "connect signer" view; CancelNostrConnect withdraws it.
+func StartNostrConnect()  { backend.StartNostrConnect() }
+func CancelNostrConnect() { backend.CancelNostrConnect() }
+
+// SetNostrConnectRelay changes the relay the login screen's nostrconnect QR
+// code points signers to, and puts up a new code for it.
+func SetNostrConnectRelay(relay string) { go backend.SetNostrConnectRelay(relay) }
+
+// NostrConnectQR is the QR code for a nostrconnect uri as a PNG, or nil when
+// the uri doesn't fit in one.
+func NostrConnectQR(uri string) []byte {
+	png, err := backend.QRCodePNG(uri, 8)
+	if err != nil {
+		return nil
+	}
+	return png
+}
+
 // Logout forgets the key and closes every napp.
 func Logout() { backend.Logout() }
 
@@ -218,6 +343,39 @@ func Install(id string) {
 	}
 }
 
+// TryNapplet opens a discovered napplet without installing it.
+func TryNapplet(id string) {
+	if !backend.TryNappletFromDiscovery(id) {
+		backend.SetFetchErr("nothing known about napplet " + id)
+	}
+}
+
+// LookupAddress looks up a napp address (naddr, nostr: link) typed into the
+// discovery filter; anything else clears the lookup. The outcome shows in
+// the state's lookup, and the napp found joins its discovery list. Cheap to
+// call on every keystroke.
+func LookupAddress(input string) { backend.LookupAddress(input) }
+
+// OpenAddress opens the napp or napplet a nostr: link names: launched when
+// installed, and otherwise installed first once the user agrees in a
+// launcher prompt. It returns immediately.
+func OpenAddress(input string) {
+	go func() {
+		if err := backend.OpenAddress(input); err != nil {
+			backend.SetFetchErr("couldn't open that address: " + err.Error())
+		}
+	}()
+}
+
+// NappAddress is the naddr of a napp the launcher knows, for sharing it, or
+// "" when it doesn't know it.
+func NappAddress(id string) string {
+	if n, ok := backend.LookupNapp(id); ok {
+		return n.Naddr()
+	}
+	return ""
+}
+
 // Update applies newer event already found by update check.
 func Update(id string) { go backend.Update(id) }
 
@@ -237,6 +395,13 @@ func Launch(id string) { backend.LaunchByID(id) }
 // leading dashes: {"surface":"#fff","text":"#000",…}.
 func SetTheme(name string, varsJSON string) { backend.SetTheme(name, varsJSON) }
 
+// ThemeMode is the user's system/light/dark preference.
+func ThemeMode() string { return backend.ThemeMode() }
+
+// SetThemeMode stores the user's system/light/dark preference. The Android
+// host resolves system mode against the current Configuration.
+func SetThemeMode(mode string) { backend.SetThemeMode(mode) }
+
 // Profile returns what the launcher knows about a pubkey as JSON:
 // pubkey, npub, name, displayName, shortName, about, picture, nip05,
 // website. Blocks with its own timeout; call it off the main thread.
@@ -248,7 +413,7 @@ func Profile(pubkeyHex string) string {
 	return string(data)
 }
 
-// AuthorNapps lists the kind:35130 napps an author published as JSON: from
+// AuthorNapps lists the kind:35130/35129 napps and napplets an author published as JSON: from
 // the author's own write relays plus the launcher's discovery relays.
 // Blocks with its own timeout; call it off the main thread.
 func AuthorNapps(pubkeyHex string) string {
@@ -280,14 +445,40 @@ func (e errNoNapp) Error() string { return "no napp " + string(e) }
 
 // ─── napp windows ────────────────────────────────────────────────
 
-// HandleMessage takes a wire message a napp's page posted up (an rpc).
+// HandleMessage takes a wire message a napp's page posted up (an rpc), or
+// a settings window's.
 func HandleMessage(instance string, msgJSON string) {
+	if backend.IsSettingsWindow(instance) {
+		backend.HandleSettingsWireMessage(instance, msgJSON)
+		return
+	}
 	backend.HandleWireMessage(instance, msgJSON)
 }
 
-// WindowClosed says a napp's window is gone, so whatever was waiting on it
-// stops waiting.
-func WindowClosed(instance string) { backend.WindowClosed(instance) }
+// WindowClosed says a napp's window (or a settings window) is gone, so
+// whatever was waiting on it stops waiting.
+func WindowClosed(instance string) {
+	if backend.IsSettingsWindow(instance) {
+		backend.SettingsClosed(instance)
+		return
+	}
+	backend.WindowClosed(instance)
+}
+
+// OpenSettings opens a napp's settings window (its detail page's button).
+func OpenSettings(id string) error { return backend.OpenSettings(id) }
+
+// IsSettingsWindow says whether the backend has a settings window by that
+// id: a task Android restored after the process died has none, and closes.
+func IsSettingsWindow(window string) bool { return backend.IsSettingsWindow(window) }
+
+// OpenLauncherSettings opens the launcher's own settings window (relays,
+// Blossom servers).
+func OpenLauncherSettings() error { return backend.OpenLauncherSettings() }
+
+// OpenSettingsFor opens the settings of the napp in a window (the gear in
+// the window's bar).
+func OpenSettingsFor(instance string) error { return backend.OpenSettingsFor(instance) }
 
 // CloseWindow asks a napp to close (the user swiped its tab away).
 func CloseWindow(instance string) { backend.CloseWindow(instance) }

@@ -31,6 +31,13 @@ type State struct {
 	// LoginErr is why the last login attempt failed, if it did.
 	LoginErr string `json:"loginErr"`
 
+	// NostrConnectURI is the nostrconnect:// uri the login screen shows as
+	// a QR code for a NIP-46 signer to scan, "" until the user asks to
+	// connect a signer (StartNostrConnect) and outside the login phase.
+	// NostrConnectRelay is the relay it names, for the relay field under it.
+	NostrConnectURI   string `json:"nostrConnectUri"`
+	NostrConnectRelay string `json:"nostrConnectRelay"`
+
 	// ProfileName and ProfilePicture describe the logged-in user.
 	ProfileName    string `json:"profileName"`
 	ProfilePicture string `json:"profilePicture"`
@@ -42,8 +49,10 @@ type State struct {
 	// Fetching is true while discovery is running.
 	Fetching bool `json:"fetching"`
 
-	// Theme is "light" or "dark".
-	Theme string `json:"theme"`
+	// Theme is the resolved "light" or "dark" palette. ThemeMode is the
+	// persisted "system", "light" or "dark" preference.
+	Theme     string `json:"theme"`
+	ThemeMode string `json:"themeMode"`
 
 	// Relays are the discovery relays.
 	Relays []string `json:"relays"`
@@ -53,6 +62,10 @@ type State struct {
 	// sortDiscovery.
 	Installed []Napp `json:"installed"`
 	Discovery []Napp `json:"discovery"`
+
+	// Lookup is the address typed into the discovery filter being looked
+	// up, or nil when the filter holds no address (see LookupAddress).
+	Lookup *AddressLookup `json:"lookup,omitempty"`
 
 	// Dev napps are the ephemeral in-memory ones loaded from a folder or a
 	// dev-server url (see dev.go): shown on the launcher's dev tab, never
@@ -120,6 +133,12 @@ type launcherState struct {
 	devLoading bool
 	busy       map[string]bool
 
+	// lookup is the address typed into the discovery filter, and resolved
+	// the napps found by address so far: they stay listed in discovery
+	// across refreshes (see address.go).
+	lookup   *AddressLookup
+	resolved map[string]Napp
+
 	// changed is closed and replaced on every phase change, so a waiter can
 	// block until the launcher is out of PhaseLoading.
 	changed chan struct{}
@@ -166,8 +185,10 @@ func Snapshot() State {
 		FetchErr:       ls.fetchErr,
 		Fetching:       ls.fetching,
 		Theme:          name,
+		ThemeMode:      ThemeMode(),
 		Installed:      append([]Napp(nil), ls.installed...),
 		Discovery:      append([]Napp(nil), ls.discovery...),
+		Lookup:         ls.lookup,
 		Dev:            append([]Napp(nil), ls.dev...),
 		DevErr:         ls.devErr,
 		DevLoading:     ls.devLoading,
@@ -179,6 +200,8 @@ func Snapshot() State {
 	ls.mu.Unlock()
 
 	s.Relays = Relays()
+	s.NostrConnectURI = nostrConnectURI()
+	s.NostrConnectRelay = NostrConnectRelay()
 	s.Windows = OpenWindows()
 	s.ManagedWindows = ManagedWindows()
 	s.Shortcuts = shortcuts()
@@ -217,8 +240,12 @@ func notifyState() {
 }
 
 // setPhase moves the launcher to a phase and wakes whoever is waiting for it
-// to change. ls.mu must be held.
+// to change. Leaving the login phase withdraws the nostrconnect uri, if one
+// was on offer. ls.mu must be held.
 func setPhaseLocked(phase string) {
+	if phase != PhaseLogin && ls.phase == PhaseLogin {
+		stopNostrConnect()
+	}
 	ls.phase = phase
 	if ls.changed != nil {
 		close(ls.changed)
@@ -300,7 +327,7 @@ func setFetching(fetching bool) {
 	ls.fetching = fetching
 	if fetching {
 		ls.fetchErr = ""
-		ls.discovery = nil
+		ls.discovery = ls.withResolved(nil)
 	}
 	ls.mu.Unlock()
 	notifyState()
@@ -308,7 +335,7 @@ func setFetching(fetching bool) {
 
 func setDiscovery(list []Napp) {
 	ls.mu.Lock()
-	ls.discovery = list
+	ls.discovery = ls.withResolved(list)
 	ls.sortDiscovery()
 	ls.mu.Unlock()
 	notifyState()

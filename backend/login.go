@@ -8,6 +8,8 @@ import (
 
 	"fiatjaf.com/nostr"
 	"fiatjaf.com/nostr/keyer"
+	"fiatjaf.com/nostr/nip05"
+	"fiatjaf.com/nostr/nip46"
 )
 
 var (
@@ -42,6 +44,7 @@ func loginAmber(input string) {
 	userKeyer = AmberSigner{PubKey: pk, Package: pkg}
 	userPubkey = pk
 	sessionCancel = nil
+	go pushIdentityChanged()
 
 	stateMu.Lock()
 	if state.Login != input {
@@ -55,10 +58,15 @@ func loginAmber(input string) {
 	setProfileFromUser(ctx, pk)
 }
 
-// setProfileFromUser is the tail every login shares: fetch the metadata of// Login takes an nsec, a bunker:// URL or an "amber:<pkg>:<pubkeyhex>" NIP-55
+// Login takes an nsec, a bunker:// URL or an "amber:<pkg>:<pubkeyhex>" NIP-55
 // signer url, resolves the signer and moves the launcher to its main phase.
 // Blocking: call it from a goroutine.
-func Login(input string) {
+func Login(input string) { login(input, false) }
+
+// resumeLogin is Login for the input stored by a previous run.
+func resumeLogin(input string) { login(input, true) }
+
+func login(input string, resume bool) {
 	if strings.HasPrefix(input, "amber:") {
 		loginAmber(input)
 		return
@@ -70,6 +78,7 @@ func Login(input string) {
 	}
 
 	log.Info().Msg("starting login")
+	stopNostrConnect()
 	setPhase(PhaseLoading)
 
 	// A new login ends any previous session first.
@@ -77,7 +86,13 @@ func Login(input string) {
 		sessionCancel()
 		sessionCancel = nil
 	}
-	userKeyer = nil
+	if userKeyer != nil {
+		// the old identity is gone even if this login fails, so napplets
+		// hear "" now rather than keep a key we no longer hold. Synchronous,
+		// so it can't land after the new key's push.
+		userKeyer = nil
+		pushIdentityChanged()
+	}
 
 	// The keyer outlives the handshake: a bunker signer listens for its
 	// responses on a subscription tied to this ctx, so it stays open
@@ -87,7 +102,7 @@ func Login(input string) {
 
 	clientKey := state.ClientKey
 
-	// keyer.New blocks on the bunker's "connect" answer, so race it
+	// a fresh bunker login blocks on the bunker's "connect" answer, so race it
 	// against the login deadline instead of handing it a ctx that dies
 	// on return (that would kill the response subscription too).
 	type keyerResult struct {
@@ -95,13 +110,16 @@ func Login(input string) {
 		err error
 	}
 	keyerDone := make(chan keyerResult, 1)
+	onAuth := func(url string) {
+		log.Info().Str("url", url).Msg("bunker auth")
+	}
 	go func() {
-		k, err := keyer.New(sessionCtx, sys.Pool, input, &keyer.SignerOptions{
-			BunkerClientSecretKey: clientKey,
-			BunkerAuthHandler: func(url string) {
-				log.Info().Str("url", url).Msg("bunker auth")
-			},
-		})
+		if nip46.IsValidBunkerURL(input) || nip05.IsValidIdentifier(input) {
+			k, err := loginBunker(sessionCtx, clientKey, input, resume, onAuth)
+			keyerDone <- keyerResult{k, err}
+			return
+		}
+		k, err := keyer.New(sessionCtx, sys.Pool, input, &keyer.SignerOptions{})
 		keyerDone <- keyerResult{k, err}
 	}()
 
@@ -138,6 +156,7 @@ func Login(input string) {
 
 	userKeyer = k
 	userPubkey = pk
+	go pushIdentityChanged()
 
 	stateMu.Lock()
 	if state.Login != input {
@@ -147,6 +166,29 @@ func Login(input string) {
 	stateMu.Unlock()
 
 	setProfileFromUser(ctx, pk)
+}
+
+// loginBunker reaches a NIP-46 signer from a bunker:// url or a NIP-05
+// address. The client key is persisted, so on resume the bunker already
+// knows us: NIP-46 only wants "connect" once, and its secret is single-use,
+// so replaying it on every launch makes a signer like Amber prompt for a new
+// connection (or ignore it) while the login times out. The first RPC
+// (get_public_key) then tells whether the bunker still knows us.
+func loginBunker(ctx context.Context, clientKey nostr.SecretKey, input string, resume bool, onAuth func(string)) (nostr.Keyer, error) {
+	parsed, err := nip46.ParseBunkerInput(ctx, input)
+	if err != nil {
+		return nil, err
+	}
+	b, err := newBunkerSigner(ctx, sys.Pool, clientKey, parsed.HostPubKey, parsed.Relays, onAuth)
+	if err != nil {
+		return nil, err
+	}
+	if !resume {
+		if err := b.connect(ctx, parsed.Secret); err != nil {
+			return nil, err
+		}
+	}
+	return b, nil
 }
 
 // setProfileFromUser is the tail every login shares: fetch that key's
@@ -177,6 +219,7 @@ func Logout() {
 	}
 	userKeyer = nil
 	userPubkey = nostr.PubKey{}
+	pushIdentityChanged()
 
 	stateMu.Lock()
 	state.Login = ""

@@ -78,6 +78,14 @@ func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 	return func(method string, params string) (any, error) {
 		log.Debug().Str("method", method).Str("instance", ci.instance).Msg("bridge rpc call")
 
+		// a napplet window speaks NAP and nothing else: none of window.napp's
+		// rpcs exist for it, whatever reaches the binding
+		// (napp.dispatchResult stays: the host page answers a stray action
+		// with it, so no dispatch waits on a napplet window)
+		if ci.napp.IsNapplet() && method != "napp.dispatchResult" {
+			return napRPC(ci, method, params)
+		}
+
 		switch method {
 		// ─── window.nostr ────────────────────────────────────────
 		case "getPublicKey":
@@ -699,13 +707,21 @@ func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 			if err := json.Unmarshal([]byte(params), &p); err != nil {
 				return nil, err
 			}
-			if storageRemove(ci.napp.ID, p.Key) {
+			removed, err := storageRemove(ci.napp.ID, p.Key)
+			if err != nil {
+				return nil, err
+			}
+			if removed {
 				broadcastStorage(ci.napp.ID, ci.instance, "remove", p.Key, "")
 			}
 			return nil, nil
 
 		case "napp.storageClear":
-			if storageClear(ci.napp.ID) {
+			cleared, err := storageClear(ci.napp.ID)
+			if err != nil {
+				return nil, err
+			}
+			if cleared {
 				broadcastStorage(ci.napp.ID, ci.instance, "clear", "", "")
 			}
 			return nil, nil
@@ -831,6 +847,12 @@ func publishEvent(ci *Instance, evt nostr.Event, requested []string) (any, error
 		return nil, errors.New("denied by the user")
 	}
 
+	return publishSigned(ctx, evt, targets), nil
+}
+
+// publishSigned sends an already approved, signed event to its targets:
+// the local store first, then the relays. It reports per relay.
+func publishSigned(ctx context.Context, evt nostr.Event, targets []string) map[string]any {
 	// keep it locally first, so the napp can query it back right away
 	if _, err := sys.Store.ReplaceEvent(evt); err != nil {
 		if err := sys.Store.SaveEvent(evt); err != nil {
@@ -860,7 +882,7 @@ func publishEvent(ci *Instance, evt nostr.Event, requested []string) (any, error
 		"relays":    relayResults,
 		"published": published,
 		"failed":    failed,
-	}, nil
+	}
 }
 
 func stripSchemes(urls []string) []string {

@@ -1,0 +1,201 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>settings</title>
+    <style>
+      :root {
+        --surface: #ffffff;
+        --surface-alt: #f2f2f2;
+        --text: #000000;
+        --text-muted: #666666;
+        --text-faint: #999999;
+        --border: #cccccc;
+        --chip: #e8e8e8;
+        --accent: #3f51b5;
+        --accent-text: #ffffff;
+        --danger: #cc2222;
+        --dev: #ffe5b4;
+        --dev-text: #704000;
+      }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: var(--surface);
+        color: var(--text);
+        font: 14px/1.4 Verdana, system-ui, sans-serif;
+      }
+      main {
+        max-width: 640px;
+        margin: 0 auto;
+        padding: 16px;
+      }
+      h1 {
+        font-size: 18px;
+        margin: 0 0 4px;
+      }
+      h2 {
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--text-muted);
+        margin: 24px 0 8px;
+      }
+      section {
+        border-radius: 8px;
+        transition: background 0.6s;
+      }
+      section.highlight {
+        background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+      }
+      .tabs {
+        display: flex;
+        gap: 4px;
+        margin: 12px 0 4px;
+        border-bottom: 1px solid var(--border);
+      }
+      button.tab {
+        background: none;
+        border-radius: 5px 5px 0 0;
+        border-bottom: 2px solid transparent;
+        color: var(--text-muted);
+        max-width: 50%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      button.tab.active {
+        color: var(--text);
+        border-bottom-color: var(--accent);
+        font-weight: bold;
+      }
+      .muted {
+        color: var(--text-muted);
+      }
+      .field {
+        padding: 12px 0;
+        border-bottom: 1px solid var(--chip);
+      }
+      .field > label,
+      .field > .label {
+        display: block;
+        font-weight: bold;
+        margin-bottom: 4px;
+      }
+      .field.check > label {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        padding: 2px 0;
+      }
+      .hint {
+        color: var(--text-muted);
+        font-size: 12px;
+        margin-top: 4px;
+        white-space: pre-wrap;
+      }
+      .deprecated {
+        background: var(--dev);
+        color: var(--dev-text);
+        border-radius: 5px;
+        padding: 2px 6px;
+        font-size: 12px;
+        margin-top: 4px;
+        display: inline-block;
+      }
+      .field.invalid input,
+      .field.invalid select {
+        border-color: var(--danger);
+      }
+      input,
+      select {
+        font: inherit;
+        color: var(--text);
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 5px 8px;
+        box-sizing: border-box;
+      }
+      input[type="text"],
+      input[type="password"],
+      input[type="email"],
+      input[type="url"],
+      input[type="number"],
+      select {
+        width: 100%;
+      }
+      input[type="checkbox"] {
+        width: auto;
+      }
+      fieldset {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        margin: 8px 0 0;
+        padding: 0 12px;
+      }
+      legend {
+        font-weight: bold;
+        padding: 0 4px;
+      }
+      .row {
+        display: flex;
+        gap: 6px;
+        margin-bottom: 4px;
+      }
+      button {
+        font: inherit;
+        color: var(--text);
+        background: var(--chip);
+        border: 0;
+        border-radius: 5px;
+        padding: 5px 10px;
+        cursor: pointer;
+      }
+      button.primary {
+        background: var(--accent);
+        color: var(--accent-text);
+      }
+      button.danger {
+        color: var(--danger);
+      }
+      button:disabled {
+        opacity: 0.6;
+        cursor: default;
+      }
+      .actions {
+        position: sticky;
+        bottom: 0;
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        padding: 12px 0;
+        background: var(--surface);
+      }
+      .status {
+        flex: 1;
+        font-size: 12px;
+      }
+      .status.error {
+        color: var(--danger);
+      }
+      .perm {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        padding: 6px 0;
+        border-bottom: 1px solid var(--chip);
+      }
+      .perm > div {
+        flex: 1;
+        min-width: 0;
+        overflow-wrap: anywhere;
+      }
+    </style>
+  </head>
+  <body>
+    <main id="app"><p class="muted">Loading…</p></main>
+  </body>
+</html>

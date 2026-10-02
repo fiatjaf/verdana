@@ -1,6 +1,8 @@
 package com.verdana.app
 
 import android.app.ActivityManager
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -11,9 +13,12 @@ import android.widget.Toast
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import mobile.Mobile
 import mobile.UI
 import java.util.concurrent.ConcurrentHashMap
+import org.json.JSONObject
 
 // VerdanaHost is the process-wide implementation of the backend's mobile.UI
 // interface: the one place the Go side talks to. It deliberately outlives
@@ -34,18 +39,26 @@ object VerdanaHost : UI {
     var prompt by mutableStateOf<Prompt?>(null)
         private set
 
+    var discoveryArchetype by mutableStateOf("")
+        private set
+
     // the napp windows that are alive right now, by instance id
     private val windows = ConcurrentHashMap<String, NappActivity>()
+
+    // the settings windows that are alive, by their window id (the backend
+    // addresses them through the same SendToWindow/FocusWindow/CloseWindow)
+    private val settingsWindows = ConcurrentHashMap<String, SettingsActivity>()
 
     // messages that got here before their window's activity finished starting
     private val outbox = ConcurrentHashMap<String, ArrayDeque<String>>()
 
     private var started = false
     private var appContext: Context? = null
+    private val notificationPermissionLock = Any()
 
     private fun emptyState() = LauncherState(
         phase = "loading", loginErr = "", profileName = "", profilePicture = "",
-        pubkey = "", fetchErr = "", fetching = false, theme = "light",
+        pubkey = "", fetchErr = "", fetching = false, theme = "light", themeMode = "system",
         relays = emptyList(), installed = emptyList(), discovery = emptyList(),
         busy = emptyList(), windows = emptyList(),
     )
@@ -64,16 +77,30 @@ object VerdanaHost : UI {
             Log.e("Verdana", "backend failed to start", e)
         }
 
-        // napps follow the system dark mode from day one
+        applyThemeMode(context)
+    }
+
+    private fun applyThemeMode(context: Context) {
         val mode = context.resources.configuration.uiMode and
             android.content.res.Configuration.UI_MODE_NIGHT_MASK
-        val initial = if (mode == android.content.res.Configuration.UI_MODE_NIGHT_YES) {
+        val systemName = if (mode == android.content.res.Configuration.UI_MODE_NIGHT_YES) {
             "dark"
         } else {
             "light"
         }
-        setCurrentThemeName(initial)
-        Mobile.setTheme(initial, themeVarsJSON(themeByName(initial)))
+        val preference = Mobile.themeMode()
+        val name = when (preference) {
+            "light" -> "light"
+            "dark" -> "dark"
+            else -> systemName
+        }
+        val theme = resolveTheme(context, name, preference == "system")
+        setCurrentThemeName(name)
+        Mobile.setTheme(name, themeVarsJSON(theme))
+    }
+
+    fun systemThemeChanged(context: Context) {
+        if (started && Mobile.themeMode() == "system") applyThemeMode(context)
     }
 
     // ─── windows ─────────────────────────────────────────────────────
@@ -118,11 +145,48 @@ object VerdanaHost : UI {
         outbox.remove(instance)
     }
 
+    fun settingsUri(window: String): Uri = Uri.parse("$WINDOW_SCHEME://settings/$window")
+
+    internal fun claimSettings(window: SettingsActivity): Boolean {
+        synchronized(settingsWindows) {
+            val existing = settingsWindows[window.windowId]
+            if (existing != null && existing != window) return false
+            settingsWindows[window.windowId] = window
+        }
+        val queued = outbox.remove(window.windowId)
+        if (queued != null) queued.forEach { window.deliver(it) }
+        return true
+    }
+
+    internal fun unregisterSettings(id: String, window: SettingsActivity) {
+        settingsWindows.remove(id, window)
+        outbox.remove(id)
+    }
+
+    // the three ways into a settings window; the backend opens it (or brings
+    // the open one back) through openSettings below
+    fun openSettingsFor(instance: String) = settingsCall { Mobile.openSettingsFor(instance) }
+    fun openNappSettings(nappId: String) = settingsCall { Mobile.openSettings(nappId) }
+    fun openLauncherSettings() = settingsCall { Mobile.openLauncherSettings() }
+
+    private fun settingsCall(call: () -> Unit) {
+        try {
+            call()
+        } catch (e: Exception) {
+            Log.e("Verdana", "could not open settings", e)
+            appContext?.let { Toast.makeText(it, "Could not open settings", Toast.LENGTH_SHORT).show() }
+        }
+    }
+
     // surface brings an open napp's task back to the front. The system does
     // the switching; all this does is find the task that window is in.
     fun surface(instance: String) {
         val ctx = appContext ?: return
         val am = ctx.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager ?: return
+        settingsWindows[instance]?.let { w ->
+            am.appTasks.firstOrNull { it.taskInfo.id == w.taskId }?.moveToFront()
+            return
+        }
         // the live window's own task, so this never picks up a duplicate
         // task still on its way out (they share the same intent data)
         val owned = windows[instance]?.taskId
@@ -155,9 +219,17 @@ object VerdanaHost : UI {
     }
 
     fun toggleTheme() {
-        val next = if (state.theme == "dark") "light" else "dark"
-        Mobile.setTheme(next, themeVarsJSON(themeByName(next)))
-        setCurrentThemeName(next)
+        val next = when (Mobile.themeMode()) {
+            "system" -> "light"
+            "light" -> "dark"
+            else -> "system"
+        }
+        Mobile.setThemeMode(next)
+        appContext?.let(::applyThemeMode)
+    }
+
+    fun consumeDiscoveryArchetype() {
+        discoveryArchetype = ""
     }
 
     // ─── mobile.UI ───────────────────────────────────────────────────
@@ -172,8 +244,11 @@ object VerdanaHost : UI {
 
     override fun sendToWindow(instance: String, msgJSON: String) {
         val window = windows[instance]
+        val settings = settingsWindows[instance]
         if (window != null) {
             window.deliver(msgJSON)
+        } else if (settings != null) {
+            settings.deliver(msgJSON)
         } else {
             // the window is on its way up: hold the message until it is up
             synchronized(outbox) {
@@ -182,17 +257,54 @@ object VerdanaHost : UI {
         }
     }
 
+    override fun focusWindow(instance: String) {
+        appContext?.startActivityOnMain { surface(instance) }
+    }
+
     override fun closeWindow(instance: String) {
         // the window is on its way out either way: anything still queued
         // for it is never going to be delivered
         outbox.remove(instance)
         windows[instance]?.finishWindow()
+        settingsWindows[instance]?.finishWindow()
+    }
+
+    override fun openSettings(window: String, specJSON: String) {
+        val ctx = appContext ?: return
+        ctx.startActivityOnMain {
+            val intent = Intent(ctx, SettingsActivity::class.java).apply {
+                data = settingsUri(window)
+                putExtra(SettingsActivity.EXTRA_SPEC, specJSON)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NEW_DOCUMENT)
+            }
+            try {
+                ctx.startActivity(intent)
+            } catch (e: Exception) {
+                Log.e("Verdana", "could not open settings window $window", e)
+                Toast.makeText(ctx, "Could not open settings", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     override fun stateChanged() {
         val snapshot = Mobile.state()
         android.os.Handler(android.os.Looper.getMainLooper()).post {
-            state = parseState(snapshot)
+            val next = parseState(snapshot)
+            val modeChanged = next.themeMode != state.themeMode
+            state = next
+            if (modeChanged) appContext?.let(::applyThemeMode)
+        }
+    }
+
+    override fun openDiscovery(archetype: String) {
+        val ctx = appContext ?: return
+        ctx.startActivityOnMain {
+            discoveryArchetype = archetype
+            ctx.startActivity(
+                Intent(ctx, MainActivity::class.java).addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                )
+            )
         }
     }
 
@@ -273,6 +385,87 @@ object VerdanaHost : UI {
         // startActivityOnMain posts when off the main thread; the Go caller
         // needs the answer of "did it launch", which is the only thing that
         // can be known this early, so wait for just that
+        done.tryAcquire(java.util.concurrent.TimeUnit.SECONDS.toNanos(5), java.util.concurrent.TimeUnit.NANOSECONDS)
+        return went
+    }
+
+    override fun systemNotification(requestJSON: String) {
+        val ctx = appContext ?: throw java.io.IOException("verdana is not started")
+        val request = JSONObject(requestJSON)
+        if (android.os.Build.VERSION.SDK_INT >= 33 &&
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                ctx, android.Manifest.permission.POST_NOTIFICATIONS,
+            ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            throw java.io.IOException("notification permission denied")
+        }
+        val requestedChannel = request.optString("Channel").ifBlank { "napplets" }
+        val channelId = "napplet." + requestedChannel.replace(Regex("[^A-Za-z0-9._-]"), "_")
+        val manager = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.createNotificationChannel(
+            NotificationChannel(channelId, "Napplet notifications", NotificationManager.IMPORTANCE_DEFAULT),
+        )
+        val id = request.getString("ID")
+        val title = request.optString("NappName").ifBlank { "Napplet" } + ": " +
+            request.getString("Title")
+        val notification = NotificationCompat.Builder(ctx, channelId)
+            .setSmallIcon(com.verdana.app.R.mipmap.ic_launcher)
+            .setContentTitle(title)
+            .setContentText(request.optString("Body"))
+            .setStyle(NotificationCompat.BigTextStyle().bigText(request.optString("Body")))
+            .setAutoCancel(true)
+            .build()
+        NotificationManagerCompat.from(ctx).notify(id, id.hashCode(), notification)
+    }
+
+    override fun requestNotificationPermission(): Boolean {
+        val ctx = appContext ?: return false
+        if (android.os.Build.VERSION.SDK_INT < 33 ||
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                ctx, android.Manifest.permission.POST_NOTIFICATIONS,
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) return true
+
+        synchronized(notificationPermissionLock) {
+            val owner = windows.values.firstOrNull { it.onScreen() } ?: return false
+            val done = java.util.concurrent.Semaphore(0)
+            var granted = false
+            owner.requestNotificationPermission {
+                granted = it
+                done.release()
+            }
+            if (!done.tryAcquire(60, java.util.concurrent.TimeUnit.SECONDS)) return false
+            return granted
+        }
+    }
+
+    override fun dismissSystemNotification(id: String) {
+        appContext?.let { NotificationManagerCompat.from(it).cancel(id, id.hashCode()) }
+    }
+
+    // playMedia hands a napplet's shell-owned media session to whatever
+    // player app the phone has. Like amberRequest, it waits on the main
+    // thread only long enough to know whether some app took it.
+    override fun playMedia(url: String, mime: String, title: String): Boolean {
+        val ctx = appContext ?: return false
+        val done = java.util.concurrent.Semaphore(0)
+        var went = false
+        ctx.startActivityOnMain {
+            try {
+                val type = mime.ifBlank { "video/*" }
+                ctx.startActivity(
+                    Intent(Intent.ACTION_VIEW)
+                        .setDataAndType(Uri.parse(url), type)
+                        .putExtra(Intent.EXTRA_TITLE, title)
+                        .putExtra("title", title)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+                went = true
+            } catch (e: android.content.ActivityNotFoundException) {
+                Toast.makeText(ctx, "No app to play this media", Toast.LENGTH_SHORT).show()
+            }
+            done.release()
+        }
         done.tryAcquire(java.util.concurrent.TimeUnit.SECONDS.toNanos(5), java.util.concurrent.TimeUnit.NANOSECONDS)
         return went
     }

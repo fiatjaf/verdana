@@ -36,11 +36,16 @@ type extraTab struct {
 
 var extraTabState *extraTab
 
+// nappDetailList scrolls the napp page, whose description and file list
+// can run past the bottom of the window.
+var nappDetailList = widget.List{List: layout.List{Axis: layout.Vertical}}
+
 func openNappTab(n backend.Napp) {
 	pubkey := ""
 	if n.Author.Hex() != "" {
 		pubkey = n.Author.Hex()
 	}
+	nappDetailList.Position = layout.Position{}
 	extraTabState = &extraTab{kind: "napp", title: truncate(n.Label(), 18), nappID: n.ID, napp: n, pubkey: pubkey}
 	ensureProfile(pubkey)
 	setTab(tabExtra)
@@ -112,8 +117,8 @@ func ensureProfile(pubkeyHex string) {
 		profileCache[pubkeyHex] = p
 		delete(profileBusy, pubkeyHex)
 		profMu.Unlock()
-		if gioWin != nil {
-			gioWin.Invalidate()
+		if w := managerWindow(); w != nil {
+			w.Invalidate()
 		}
 	}()
 }
@@ -147,8 +152,8 @@ func ensureAuthorNapps(pubkeyHex string) {
 		authorNapps[pubkeyHex] = list
 		authorFetching[pubkeyHex] = false
 		authorMu.Unlock()
-		if gioWin != nil {
-			gioWin.Invalidate()
+		if w := managerWindow(); w != nil {
+			w.Invalidate()
 		}
 	}()
 }
@@ -195,7 +200,7 @@ func layoutNappDetail(
 	gtx layout.Context,
 	th *material.Theme,
 	tab *extraTab,
-	openBtn, primaryBtn, updateBtn, authorBtn *widget.Clickable,
+	openBtn, primaryBtn, updateBtn, authorBtn, copyAddrBtn, settingsBtn *widget.Clickable,
 	installedSet map[string]bool,
 	busy map[string]bool,
 	st backend.State,
@@ -208,6 +213,11 @@ func layoutNappDetail(
 	}
 	installed := installedSet[n.ID]
 	working := busy[n.ID]
+	canOpen := installed || n.IsNapplet()
+	openLabel := "Open"
+	if !installed && n.IsNapplet() {
+		openLabel = "Try"
+	}
 	primaryLabel := "Install"
 	if installed {
 		primaryLabel = "Uninstall"
@@ -250,7 +260,7 @@ func layoutNappDetail(
 	if n.Description != "" {
 		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.Inset{Top: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				l := material.Body2(th, n.Description)
+				l := material.Body2(th, capRunes(n.Description, 4000))
 				l.Color = currentTheme().subtle
 				return l.Layout(gtx)
 			})
@@ -285,17 +295,17 @@ func layoutNappDetail(
 		return layout.Inset{Top: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					if !installed || openBtn == nil {
+					if !canOpen || openBtn == nil {
 						return layout.Dimensions{}
 					}
 					pointer.CursorPointer.Add(gtx.Ops)
-					b := material.Button(th, openBtn, "Open")
+					b := material.Button(th, openBtn, openLabel)
 					b.Background = currentTheme().suggestBg
 					b.Color = currentTheme().suggestFg
 					return b.Layout(gtx)
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					if !installed || openBtn == nil {
+					if !canOpen || openBtn == nil {
 						return layout.Dimensions{}
 					}
 					return layout.Spacer{Width: unit.Dp(8)}.Layout(gtx)
@@ -320,6 +330,36 @@ func layoutNappDetail(
 					pointer.CursorPointer.Add(gtx.Ops)
 					return material.Button(th, updateBtn, "Update").Layout(gtx)
 				}),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					if !hasUpdate || updateBtn == nil {
+						return layout.Dimensions{}
+					}
+					return layout.Spacer{Width: unit.Dp(8)}.Layout(gtx)
+				}),
+				// its settings window: what it declared (NAP-CONFIG) and
+				// what the user let it do
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					if !installed || settingsBtn == nil {
+						return layout.Dimensions{}
+					}
+					pointer.CursorPointer.Add(gtx.Ops)
+					b := material.Button(th, settingsBtn, "Settings")
+					b.Background = currentTheme().chipBg
+					b.Color = currentTheme().chipFg
+					return layout.Inset{Right: unit.Dp(8)}.Layout(gtx, b.Layout)
+				}),
+				// the naddr is how a napp is shared: pasted into another
+				// launcher's discovery filter, it finds this one
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					if copyAddrBtn == nil || n.Naddr() == "" {
+						return layout.Dimensions{}
+					}
+					pointer.CursorPointer.Add(gtx.Ops)
+					b := material.Button(th, copyAddrBtn, "Copy address")
+					b.Background = currentTheme().chipBg
+					b.Color = currentTheme().chipFg
+					return b.Layout(gtx)
+				}),
 			)
 		})
 	}))
@@ -334,6 +374,7 @@ func layoutNappDetail(
 	}
 	children = append(children,
 		detailRow(th, "ID", n.ID),
+		detailRow(th, "Address", n.Naddr()),
 		detailRow(th, "d", n.D),
 		detailRow(th, "Author", n.Author.Hex()),
 		detailRow(th, "Created", n.CreatedAt.Time().Format(time.RFC3339)),
@@ -342,6 +383,17 @@ func layoutNappDetail(
 		detailRow(th, "Servers", strings.Join(n.Servers, ", ")),
 		detailRow(th, "Icon", n.Icon),
 	)
+	if n.IsNapplet() {
+		children = append(children,
+			detailRow(th, "Format", nappletFormatLabel(n)),
+			detailRow(th, "Unsupported", strings.Join(n.MissingDomains(), ", ")),
+			detailRow(th, "Artifact", n.ArtifactHash),
+			detailRow(th, "Roles", strings.Join(n.Roles, ", ")),
+			detailRow(th, "Domains", strings.Join(n.RequiredDomains, ", ")),
+			detailRow(th, "Optional domains", strings.Join(n.OptionalDomains, ", ")),
+			detailRow(th, "Source", strings.Join(n.Sources, ", ")),
+		)
+	}
 	if len(n.Paths) > 0 {
 		paths := make([]string, 0, len(n.Paths))
 		for _, p := range n.Paths {
@@ -353,7 +405,9 @@ func layoutNappDetail(
 		}
 		children = append(children, detailRow(th, "Files", strings.Join(paths, ", ")))
 	}
-	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
+	return material.List(th, &nappDetailList).Layout(gtx, 1, func(gtx layout.Context, _ int) layout.Dimensions {
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
+	})
 }
 
 // layoutProfileDetail is the ephemeral profile page: name, about,
@@ -453,7 +507,7 @@ func layoutProfileDetail(
 				if i < len(cardBtns) {
 					cardBtn = &cardBtns[i]
 				}
-				if i < len(openBtns) && installedSet[n.ID] {
+				if i < len(openBtns) && (installedSet[n.ID] || n.IsNapplet()) {
 					openBtn = &openBtns[i]
 				}
 				if i < len(actionBtns) {
@@ -475,8 +529,21 @@ func layoutProfileDetail(
 				}
 				// inside a profile the author row is the profile itself:
 				// no nested author button
-				return renderNappCard(gtx, th, cardBtn, nil, openBtn, actBtn, updBtn, label, updLabel, n)
+				openLabel := "Open"
+				if !installedSet[n.ID] && n.IsNapplet() {
+					openLabel = "Try"
+				}
+				return renderNappCard(gtx, th, cardBtn, nil, openBtn, nil, actBtn, updBtn, openLabel, label, updLabel, true, n)
 			})
 		}),
 	)
+}
+
+// nappletFormatLabel says which napplet manifest an app was read from.
+func nappletFormatLabel(n backend.Napp) string {
+	schema := "NIP-5D manifest"
+	if n.NappletSchema == backend.SchemaWebNapplet {
+		schema = "web napplet"
+	}
+	return fmt.Sprintf("napplet (kind:%d, %s, sandboxed)", n.ManifestKind(), schema)
 }

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -28,8 +29,15 @@ type Instance struct {
 	// instance is what the napp sees as window.napp.instance: a serial,
 	// unique per window.
 	instance string
-	number   int
-	napp     Napp
+	// storageInstance is an opaque, unguessable namespace for NAP-STORAGE's
+	// instance scope. Unlike instance's process-local serial, it is never
+	// reused by a fresh window after a launcher restart.
+	storageInstance string
+	number          int
+	napp            Napp
+	// previewDocument is the verified, in-memory HTML of a napplet opened
+	// with Try. Preview napplets never need an install directory.
+	previewDocument []byte
 
 	sendMu    sync.Mutex
 	transport Transport
@@ -67,11 +75,20 @@ type Instance struct {
 	// (napp.action with auxiliary:true): it closes as soon as its handler
 	// answers a dispatch.
 	auxiliary bool
+
+	// nap is the NAP session of a napplet window (nil for napps): what the
+	// napplet in this window subscribed to and opened, see nap.go.
+	nap *napSession
 }
 
 type actionRequest struct {
 	name    string
 	payload json.RawMessage
+	// sender names who asked, for napplet targets (IntentDelivery.sender): the
+	// calling napp's or napplet's d-tag, or "launcher"
+	sender string
+	accept func(*Instance)
+	focus  bool
 }
 
 // windowRecord is what the launcher remembers about a window it has opened
@@ -81,9 +98,10 @@ type actionRequest struct {
 // actions of that napp. Session state, not persisted: nothing here survives
 // the launcher quitting.
 type windowRecord struct {
-	Instance string
-	NappID   string
-	Actions  []ShortcutAction
+	Instance        string
+	StorageInstance string
+	NappID          string
+	Actions         []ShortcutAction
 }
 
 // maxWindowActions bounds a window's log: the tail is what puts a reopened
@@ -252,6 +270,15 @@ func (ci *Instance) Close() {
 	}
 }
 
+func (ci *Instance) focus() {
+	ci.sendMu.Lock()
+	t := ci.transport
+	ci.sendMu.Unlock()
+	if t != nil {
+		t.Focus()
+	}
+}
+
 // CloseWindow closes an instance by id.
 func CloseWindow(instance string) {
 	if ci := lookupInstance(instance); ci != nil {
@@ -295,6 +322,13 @@ func HandleMessage(instance string, m WireMsg) {
 		// quicky; the window sends nothing else worth racing on.
 		ci.handlePromptAnswer(m)
 	case "rpc":
+		if ci.nap != nil && m.Method == "nap.msg" {
+			// NAP envelopes are queued in the order the napplet sent them,
+			// which only this (sequential) reader still knows; queueing is
+			// quick, the handling happens on the session's worker
+			ci.handleRPC(m)
+			return
+		}
 		go ci.handleRPC(m)
 	default:
 		log.Debug().Str("instance", instance).Str("t", m.T).Msg("ignoring message from napp")
@@ -331,6 +365,8 @@ func WindowClosed(instance string) {
 	ci.subs = make(map[int]context.CancelFunc)
 	ci.subMu.Unlock()
 
+	ci.napClosed()
+
 	ci.goneOnce.Do(func() { close(ci.gone) })
 
 	instancesMu.Lock()
@@ -365,6 +401,14 @@ func (ci *Instance) registerAction(pattern string, idx int) {
 	ci.actionsMu.Unlock()
 	log.Debug().Str("instance", ci.instance).Str("pattern", pattern).Int("idx", idx).
 		Msg("napp registered action")
+}
+
+// unregisterAction drops a registration (a napplet that stopped listening
+// on an inc topic).
+func (ci *Instance) unregisterAction(pattern string) {
+	ci.actionsMu.Lock()
+	delete(ci.actions, pattern)
+	ci.actionsMu.Unlock()
 }
 
 // handlerFor returns the handler index registered for an action name, using
@@ -440,14 +484,26 @@ func launch(ctx context.Context, napp Napp) (*Instance, error) {
 }
 
 func launchWithInstance(ctx context.Context, napp Napp, requestedInstance string) (*Instance, error) {
+	return launchWithDocument(ctx, napp, requestedInstance, nil)
+}
+
+func launchWithDocument(ctx context.Context, napp Napp, requestedInstance string, previewDocument []byte) (*Instance, error) {
 	id := napp.ID
 	if id == "" {
 		return nil, errors.New("napp has no id")
 	}
-
 	appDir := nappBaseDir(id)
 	pageURL := ""
-	if d := devLookup(id); d != nil {
+	if napp.IsNapplet() {
+		// a napplet window never navigates anywhere: the shell loads the
+		// launcher's host page and asks for the verified document (nap.boot),
+		// which comes from the install dir or, for a dev napplet, its folder
+		if previewDocument == nil && devLookup(id) == nil {
+			if _, err := os.Stat(filepath.Join(appDir, "index.html")); err != nil {
+				return nil, fmt.Errorf("napplet %s is not installed", id)
+			}
+		}
+	} else if d := devLookup(id); d != nil {
 		// dev napps live in memory, not on disk: the shell navigates to
 		// the throwaway server (folder napps) or the dev server (url napps)
 		pageURL = d.pageURL()
@@ -469,15 +525,24 @@ func launchWithInstance(ctx context.Context, napp Napp, requestedInstance string
 	if instance == "" {
 		instance = strconv.FormatInt(instanceSerial.Add(1), 10)
 	}
+	storageInstance := randomID()
+	if old := lookupWindow(instance); old != nil && old.StorageInstance != "" {
+		storageInstance = old.StorageInstance
+	}
 	ci := &Instance{
-		instance:   instance,
-		number:     int(windowSerial.Add(1)),
-		napp:       napp,
-		subs:       make(map[int]context.CancelFunc),
-		actions:    make(map[string]int),
-		changed:    make(chan struct{}),
-		dispatches: make(map[int]chan WireMsg),
-		gone:       make(chan struct{}),
+		instance:        instance,
+		storageInstance: storageInstance,
+		number:          int(windowSerial.Add(1)),
+		napp:            napp,
+		previewDocument: previewDocument,
+		subs:            make(map[int]context.CancelFunc),
+		actions:         make(map[string]int),
+		changed:         make(chan struct{}),
+		dispatches:      make(map[int]chan WireMsg),
+		gone:            make(chan struct{}),
+	}
+	if napp.IsNapplet() {
+		ci.nap = newNapSession()
 	}
 
 	// registered before the window exists, so a napp that starts talking
@@ -496,11 +561,12 @@ func launchWithInstance(ctx context.Context, napp Napp, requestedInstance string
 		Dir:         appDir,
 		URL:         pageURL,
 		Requires:    napp.Requires,
+		Format:      napp.Format,
 		Theme:       themeName,
 		ThemeVars:   themeVars,
 		Width:       winW,
 		Height:      winH,
-		StorageJSON: StorageSnapshotJSON(napp.ID),
+		StorageJSON: storageSeed(napp),
 	})
 	if err != nil {
 		WindowClosed(ci.instance)
@@ -547,7 +613,7 @@ func putWindow(w windowRecord) {
 // actions a previous window with the same instance id had reached (a reopen
 // landing on the same id).
 func rememberWindow(ci *Instance) {
-	w := windowRecord{Instance: ci.instance, NappID: ci.napp.ID}
+	w := windowRecord{Instance: ci.instance, StorageInstance: ci.storageInstance, NappID: ci.napp.ID}
 	if old := lookupWindow(ci.instance); old != nil {
 		w.Actions = old.Actions
 	}
@@ -655,6 +721,44 @@ func (ci *Instance) setActionState(req *actionRequest, replace bool) {
 type actionOptions struct {
 	Instance  string `json:"instance"`
 	Auxiliary bool   `json:"auxiliary"`
+
+	// NAP-INTENT's handler choice, never settable from a napp's own options:
+	// Choose always asks the user, even with one candidate; NappID restricts
+	// the routing to one napp (or napplet), as an explicit handler address.
+	Choose bool   `json:"-"`
+	NappID string `json:"-"`
+
+	// Intent routing hints. DefaultKey is launcher-wide and keyed by
+	// archetype, unlike ordinary action permissions which are caller-specific.
+	DefaultKey RuleKey `json:"-"`
+	NewWindow  bool    `json:"-"`
+	Focus      bool    `json:"-"`
+
+	// Accept transfers delivery responsibility to the runtime after a target
+	// has been resolved (and launched, when necessary), but before delivery.
+	// Delivery then continues on a runtime-owned context so it is independent
+	// of the caller's window lifecycle.
+	Accept func(*Instance) `json:"-"`
+}
+
+// dispatchReport is filled with where an action went, for callers that
+// report it (intent.invoke's handler and windowId).
+type dispatchReport struct {
+	mu sync.Mutex
+	ci *Instance
+}
+
+type dispatchReportKey struct{}
+
+func withDispatchReport(ctx context.Context) (context.Context, *dispatchReport) {
+	r := &dispatchReport{}
+	return context.WithValue(ctx, dispatchReportKey{}, r), r
+}
+
+func (r *dispatchReport) target() *Instance {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.ci
 }
 
 // RunAction fires an action from outside any napp (a launcher shortcut, a
@@ -686,11 +790,12 @@ func runNappAction(
 		callerName = caller.napp.Label()
 	}
 
-	req := &actionRequest{name: name, payload: payload}
+	req := &actionRequest{name: name, payload: payload, sender: "launcher", accept: opts.Accept, focus: opts.Focus}
 
 	callerID := ""
 	if caller != nil {
 		callerID = caller.napp.ID
+		req.sender = caller.napp.D
 	}
 
 	// an explicit instance skips every choice: route it straight there
@@ -705,12 +810,32 @@ func runNappAction(
 	}
 
 	candidates, open := findHandlersForAction(name)
+	if opts.NappID != "" {
+		candidates = slices.DeleteFunc(candidates, func(n Napp) bool { return n.ID != opts.NappID })
+		open = slices.DeleteFunc(open, func(ci *Instance) bool { return ci.napp.ID != opts.NappID })
+	}
 	if len(candidates) == 0 && len(open) == 0 {
-		return nil, fmt.Errorf("no installed napp handles %q", name)
+		return nil, fmt.Errorf("%w: no installed napp handles %q", errNoHandler, name)
+	}
+	if opts.NewWindow {
+		open = nil
+	}
+	// A concrete handler dTag is already the resolution decision. Prefer its
+	// existing window unless the caller explicitly requested a new one.
+	if opts.NappID != "" && !opts.Choose {
+		if len(open) > 0 {
+			return dispatchTo(ctx, callerID, name, open[0], req)
+		}
+		ci, err := launch(ctx, candidates[0])
+		if err != nil {
+			return nil, err
+		}
+		return dispatchTo(ctx, callerID, name, ci, req)
 	}
 
-	// exactly one possibility: no need to bother the user
-	if len(candidates)+len(open) == 1 {
+	// exactly one possibility: no need to bother the user (unless they are
+	// to be asked whatever: NAP-INTENT's handler "choose")
+	if len(candidates)+len(open) == 1 && !opts.Choose {
 		if len(open) == 1 {
 			log.Info().Str("from", callerName).Str("action", name).
 				Str("instance", open[0].instance).Msg("dispatching action")
@@ -731,9 +856,12 @@ func runNappAction(
 	// who asked matters to the rules: the same action from another napp is
 	// another question
 	key := RuleKey{Napp: callerID, Permission: PermDispatch, Subject: name}
+	if opts.DefaultKey.valid() {
+		key = opts.DefaultKey
+	}
 
 	var choice PromptOption
-	if rule, ok := lookupRule(key); ok {
+	if rule, ok := lookupRule(key); ok && !opts.Choose {
 		// a rule that names a handler settles it without anyone choosing:
 		// an installed configuration saying which napp it expects to get
 		// its actions, or a user who said to stop asking. A rule that only
@@ -756,6 +884,10 @@ func runNappAction(
 			return nil, errors.New("action handler selection cancelled")
 		}
 		choice = picked
+		if opts.DefaultKey.valid() && !opts.Choose {
+			storeRule(opts.DefaultKey, Rule{Decision: DecisionAllow, Target: choice.NappID})
+			go broadcastIntentChanges()
+		}
 	}
 
 	if choice.Instance != "" {
@@ -790,7 +922,25 @@ func dispatchTo(
 	req *actionRequest,
 ) (any, error) {
 	if ci != nil {
+		if req.focus {
+			ci.focus()
+		}
 		recordActionUse(caller, action, ci.napp.ID)
+		if r, ok := ctx.Value(dispatchReportKey{}).(*dispatchReport); ok {
+			r.mu.Lock()
+			r.ci = ci
+			r.mu.Unlock()
+		}
+	}
+	if accept := req.accept; accept != nil {
+		accept(ci)
+		req.accept = nil
+		go func() {
+			if _, err := dispatchToInstance(context.Background(), ci, req); err != nil {
+				log.Warn().Err(err).Str("action", action).Msg("accepted intent delivery failed")
+			}
+		}()
+		return nil, nil
 	}
 	return dispatchToInstance(ctx, ci, req)
 }
@@ -862,6 +1012,10 @@ func dispatchToInstance(ctx context.Context, ci *Instance, req *actionRequest) (
 	}
 	recordAction(ci, &actionRequest{name: req.name, payload: payload}, false)
 
+	if ci.napp.IsNapplet() {
+		return dispatchToNapplet(ctx, ci, req, payload)
+	}
+
 	waitCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	idx, ok := ci.waitForHandler(waitCtx, req.name)
 	cancel()
@@ -922,6 +1076,46 @@ func dispatchToInstance(ctx context.Context, ci *Instance, req *actionRequest) (
 		return nil, errors.New("action timed out")
 	}
 }
+
+// dispatchToNapplet delivers an accepted convention through NAP-INTENT's
+// carrier-neutral intent.deliver event. The shim buffers the event until the
+// napplet registers onDelivery; the runtime only waits for shell.ready.
+func dispatchToNapplet(ctx context.Context, ci *Instance, req *actionRequest, payload json.RawMessage) (any, error) {
+	for {
+		ci.nap.mu.Lock()
+		ready := ci.nap.ready
+		established := ci.nap.established
+		ci.nap.mu.Unlock()
+		if established {
+			break
+		}
+		select {
+		case <-ready:
+		case <-ci.gone:
+			return nil, errors.New("target closed before intent delivery")
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	ci.lastAction.Store(&actionRequest{name: req.name, payload: payload})
+	notifyState()
+
+	archetype, action, ok := conventionParts(req.name)
+	if !ok {
+		return nil, fmt.Errorf("invalid intent convention %q", req.name)
+	}
+	delivery := map[string]any{
+		"sender": req.sender, "archetype": archetype, "action": action, "convention": req.name,
+	}
+	if len(payload) > 0 && string(payload) != "null" {
+		delivery["payload"] = payload
+	}
+	ci.napPush(map[string]any{"type": "intent.deliver", "delivery": delivery})
+	return nil, nil
+}
+
+// errNoHandler is a dispatch that found nobody to take it.
+var errNoHandler = errors.New("no handler")
 
 // sendAction asks the shell to run the dispatch inside its webview.
 func (ci *Instance) sendAction(id int, name string, payload json.RawMessage, idx *int) {

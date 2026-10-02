@@ -7,12 +7,12 @@ import (
 	"fiatjaf.com/nostr"
 )
 
-// Napp updates are the same kind:35130 event, same author and d-tag, with a
+// Napp updates are the same manifest event (kind:35130, or 35129 for a napplet), same author and d-tag, with a
 // newer created_at: there are no version numbers, only newer publications.
 // Discovery keeps the in-memory list fresh passively; CheckForUpdates goes
 // out and asks the source relays about every installed napp at once.
 
-// CheckForUpdates looks for a newer kind:35130 of every installed napp — on
+// CheckForUpdates looks for a newer manifest of every installed napp — on
 // the discovery relays and on each author's outbox relays — and marks the
 // napps it found new versions for. Non-blocking: watch UpdateCheckRunning and
 // the per-napp UpdateAvailable flags in the state for the outcome.
@@ -68,10 +68,13 @@ func checkAllUpdates(napps []Napp) map[string]Napp {
 	}
 
 	for re := range sys.Pool.FetchMany(ctx, Relays(), nostr.Filter{
-		Kinds: []nostr.Kind{35130},
+		Kinds: napKinds,
 		Tags:  nostr.TagMap{"d": ds},
 	}, nostr.SubscriptionOptions{}) {
-		napp := nappFromEvent(re.Event)
+		napp, ok := nappFromEvent(re.Event)
+		if !ok {
+			continue
+		}
 		if ts, exists := known[napp.ID]; exists && ts < napp.CreatedAt {
 			known[napp.ID] = napp.CreatedAt
 			found[napp.ID] = napp
@@ -79,17 +82,15 @@ func checkAllUpdates(napps []Napp) map[string]Napp {
 	}
 
 	for _, napp := range napps {
-		re := sys.Pool.QuerySingle(ctx, sys.FetchWriteRelays(ctx, napp.Author), nostr.Filter{
-			Kinds:   []nostr.Kind{35130},
-			Authors: []nostr.PubKey{napp.Author},
-			Tags:    nostr.TagMap{"d": []string{napp.D}},
-			Limit:   1,
-		}, nostr.SubscriptionOptions{
+		re := sys.Pool.QuerySingle(ctx, sys.FetchWriteRelays(ctx, napp.Author), manifestFilter(napp), nostr.SubscriptionOptions{
 			Label: "verdana-napp-update",
 		})
 
 		if re != nil {
-			napp := nappFromEvent(re.Event)
+			napp, ok := nappFromEvent(re.Event)
+			if !ok {
+				continue
+			}
 			if ts, exists := known[napp.ID]; exists && ts < napp.CreatedAt {
 				known[napp.ID] = napp.CreatedAt
 				found[napp.ID] = napp
@@ -100,7 +101,7 @@ func checkAllUpdates(napps []Napp) map[string]Napp {
 	return found
 }
 
-// scanRelays queries one relay set for the current kind:35130 of the given
+// scanRelays queries one relay set for the current manifest of the given
 // napps and feeds every event to handle. It returns false when the round was
 // cut short (a relay that never answered), so the caller can keep its old
 // cache instead of narrowing it to what a truncated round saw.
@@ -179,9 +180,8 @@ func newerVersion(n Napp) *Napp {
 	}
 
 	if ts, ok := updateCache.Get(n.ID); ok && ts > n.CreatedAt {
-		if evt := fetchCurrentEvent(n.Author, n.D); evt != nil {
-			nn := nappFromEvent(*evt)
-			if nn.CreatedAt > n.CreatedAt {
+		if evt := fetchCurrentEvent(n); evt != nil {
+			if nn, ok := nappFromEvent(*evt); ok && nn.CreatedAt > n.CreatedAt {
 				return &nn
 			}
 		}
@@ -191,9 +191,8 @@ func newerVersion(n Napp) *Napp {
 	// nothing cached: ask the relays right now
 	if found := checkAllUpdates([]Napp{n}); len(found) > 0 {
 		if ts, ok := updateCache.Get(n.ID); ok && ts > n.CreatedAt {
-			if evt := fetchCurrentEvent(n.Author, n.D); evt != nil {
-				nn := nappFromEvent(*evt)
-				if nn.CreatedAt > n.CreatedAt {
+			if evt := fetchCurrentEvent(n); evt != nil {
+				if nn, ok := nappFromEvent(*evt); ok && nn.CreatedAt > n.CreatedAt {
 					return &nn
 				}
 			}
@@ -202,9 +201,10 @@ func newerVersion(n Napp) *Napp {
 	return nil
 }
 
-// fetchCurrentEvent fetches the current kind:35130 of a napp from its
-// author's outbox relays (falling back to the discovery relays).
-func fetchCurrentEvent(author nostr.PubKey, d string) *nostr.Event {
+// fetchCurrentEvent fetches the current manifest of a napp (or napplet) from
+// its author's outbox relays (falling back to the discovery relays).
+func fetchCurrentEvent(n Napp) *nostr.Event {
+	author := n.Author
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
@@ -213,12 +213,7 @@ func fetchCurrentEvent(author nostr.PubKey, d string) *nostr.Event {
 		urls = Relays()
 	}
 
-	for re := range sys.Pool.FetchMany(ctx, urls, nostr.Filter{
-		Kinds:   []nostr.Kind{35130},
-		Authors: []nostr.PubKey{author},
-		Tags:    nostr.TagMap{"d": []string{d}},
-		Limit:   1,
-	}, nostr.SubscriptionOptions{
+	for re := range sys.Pool.FetchMany(ctx, urls, manifestFilter(n), nostr.SubscriptionOptions{
 		Label: "verdana-napp-update",
 	}) {
 		evt := re.Event
@@ -247,4 +242,19 @@ func nappsByAuthor(napps []Napp, author nostr.PubKey) []Napp {
 		}
 	}
 	return out
+}
+
+// manifestFilter asks for the current manifest of one installed napp or
+// napplet: its own kind only (an author may publish a napp and a napplet
+// under the same d tag), and the d tag when the kind has one.
+func manifestFilter(n Napp) nostr.Filter {
+	f := nostr.Filter{
+		Kinds:   []nostr.Kind{n.ManifestKind()},
+		Authors: []nostr.PubKey{n.Author},
+		Limit:   1,
+	}
+	if addressable(n.ManifestKind()) {
+		f.Tags = nostr.TagMap{"d": []string{n.D}}
+	}
+	return f
 }

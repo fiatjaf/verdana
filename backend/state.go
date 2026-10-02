@@ -19,6 +19,11 @@ type AppState struct {
 	Relays         []string        `json:"relays"`
 	InstalledNapps map[string]Napp `json:"installed_napps"`
 
+	// BlossomServers are the servers napp and napplet files are fetched
+	// from before any the napp or its author names. Nil (never set) means
+	// defaultBlossomServers; an empty list means none of our own.
+	BlossomServers []string `json:"blossom_servers"`
+
 	// LastLaunched records when the user last started a napp from the
 	// launcher's installed list, so it can be shown most-recently-used first.
 	// Launches that happen because another napp dispatched an action don't
@@ -38,9 +43,19 @@ type AppState struct {
 	// "this session" ones are not here either.
 	ActionUsage map[string]int `json:"action_usage"`
 
-	// Theme is "light" or "dark": what the launcher draws with and what
-	// every napp window is told to track.
+	// Theme is the user's preference: "system", "light" or "dark". The
+	// resolved light/dark theme and its colors live in theme.go.
 	Theme string `json:"theme"`
+
+	// ExposeInstalledApps mirrors installed napps and napplets into the
+	// desktop's native application launcher. AppShortcutNameStyle is "plain"
+	// or "hosted" ("Name — Verdana").
+	ExposeInstalledApps  bool   `json:"expose_installed_apps,omitempty"`
+	AppShortcutNameStyle string `json:"app_shortcut_name_style,omitempty"`
+
+	// NostrConnectRelay is the relay the login screen's nostrconnect QR
+	// code sends signers to (see nostrconnect.go).
+	NostrConnectRelay string `json:"nostrconnect_relay"`
 }
 
 var (
@@ -69,6 +84,9 @@ func loadState() {
 			"relay.nostrapps.com/public",
 		}
 	}
+	if state.NostrConnectRelay == "" {
+		state.NostrConnectRelay = defaultNostrConnectRelay
+	}
 	if state.InstalledNapps == nil {
 		state.InstalledNapps = make(map[string]Napp)
 	}
@@ -81,10 +99,19 @@ func loadState() {
 	if state.ActionUsage == nil {
 		state.ActionUsage = make(map[string]int)
 	}
-	if state.Theme != "light" && state.Theme != "dark" {
-		state.Theme = "light"
+	if state.Theme != ThemeSystem && state.Theme != ThemeLight && state.Theme != ThemeDark {
+		state.Theme = ThemeSystem
 	}
-	themeName = state.Theme
+	if state.AppShortcutNameStyle != AppShortcutNameHosted {
+		state.AppShortcutNameStyle = AppShortcutNamePlain
+	}
+	themeMu.Lock()
+	if state.Theme == ThemeDark {
+		themeName = ThemeDark
+	} else {
+		themeName = ThemeLight
+	}
+	themeMu.Unlock()
 	saveState()
 	log.Info().Int("napps", len(state.InstalledNapps)).Msg("state loaded")
 }

@@ -49,6 +49,13 @@ type devMetadata struct {
 	// camelCase accepted too) {width, height} object.
 	InitialSize   *NappInitialSize `json:"initial_size"`
 	InitialSizeCC *NappInitialSize `json:"initialSize"`
+
+	// A napplet folder says "format": "napplet" and holds one self-contained
+	// index.html (a single-file build). Roles and conventions are its z and i
+	// tags: what intents it handles.
+	Format      string              `json:"format"`
+	Roles       []string            `json:"roles"`
+	Conventions []NappletConvention `json:"conventions"`
 }
 
 var devIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._~-]*$`)
@@ -107,6 +114,7 @@ func refreshDev() {
 	ls.dev = DevNapps()
 	ls.mu.Unlock()
 	notifyState()
+	go broadcastIntentChanges()
 }
 
 func nappFromDevMetadata(meta devMetadata) (Napp, error) {
@@ -128,7 +136,7 @@ func nappFromDevMetadata(meta devMetadata) (Napp, error) {
 			initial = nil
 		}
 	}
-	return Napp{
+	n := Napp{
 		ID:          "dev~" + meta.ID,
 		D:           meta.ID,
 		Name:        name,
@@ -137,7 +145,42 @@ func nappFromDevMetadata(meta devMetadata) (Napp, error) {
 		InitialSize: initial,
 		Requires:    append([]string(nil), meta.Requires...),
 		Actions:     append([]string(nil), meta.Actions...),
-	}, nil
+	}
+	switch meta.Format {
+	case "", "napp":
+		return n, nil
+	case FormatNapplet:
+	default:
+		return Napp{}, fmt.Errorf("unknown format %q in metadata.json", meta.Format)
+	}
+
+	// a napplet's actions are what its roles and conventions say, exactly as
+	// for a published one (see nappletFromEvent)
+	n.Format, n.Kind = FormatNapplet, KindNapplet
+	n.Requires, n.Actions = nil, nil
+	roles := map[string]bool{}
+	for _, r := range meta.Roles {
+		if !domainToken.MatchString(r) {
+			return Napp{}, fmt.Errorf("bad role %q in metadata.json", r)
+		}
+		if !roles[r] {
+			roles[r] = true
+			n.Roles = append(n.Roles, r)
+			n.Actions = append(n.Actions, "napplet:"+r+"/open")
+		}
+	}
+	for _, c := range meta.Conventions {
+		parsed, err := parseConvention(append([]string{"i", c.ID}, c.Params...))
+		if err != nil {
+			return Napp{}, fmt.Errorf("metadata.json: %w", err)
+		}
+		if !roles[conventionRole(parsed.ID)] {
+			return Napp{}, fmt.Errorf("metadata.json: convention %s has no matching role", parsed.ID)
+		}
+		n.Conventions = append(n.Conventions, parsed)
+		n.Actions = appendUniqueString(n.Actions, parsed.ID)
+	}
+	return n, nil
 }
 
 // ─── loading ─────────────────────────────────────────────────────
@@ -195,6 +238,12 @@ func DevLoadURL(rawurl string) {
 		setDevErr(err.Error())
 		return
 	}
+	if napp.IsNapplet() {
+		// a dev server's page is a module graph, not one file: it could not
+		// run under the napplet CSP anyway
+		setDevErr("napplets load from a folder holding a single-file build, not a dev server")
+		return
+	}
 	devNapps.Store(napp.ID, &devNapp{napp: napp, source: "url", target: target})
 	setDevErr("")
 	refreshDev()
@@ -213,6 +262,15 @@ func DevReload(id string) {
 		return
 	}
 	DevLoadFolder(d.dir)
+
+	// open napplet windows take the new bytes in place: a fresh session and
+	// a fresh document (napps reload themselves through their dev server)
+	if nd := devLookup(id); nd != nil && nd.napp.IsNapplet() {
+		for _, ci := range runningForNapp(id) {
+			ci.napReset()
+			ci.eval("window.__nap_reload && window.__nap_reload()")
+		}
+	}
 }
 
 // DevUnload forgets a dev napp, closing its windows first.
@@ -221,6 +279,7 @@ func DevUnload(id string) {
 		ci.Close()
 	}
 	devNapps.Delete(id)
+	forgetDispatchTarget(id)
 	refreshDev()
 	log.Info().Str("napp", id).Msg("dev napp unloaded")
 }
@@ -305,6 +364,13 @@ func readDevFolder(dir string) (Napp, error) {
 		return Napp{}, fmt.Errorf("no index.html in %s", dir)
 	}
 	sort.Slice(napp.Paths, func(i, j int) bool { return napp.Paths[i].Path < napp.Paths[j].Path })
+	if napp.IsNapplet() {
+		for _, p := range napp.Paths {
+			if p.Path == nappletEntry {
+				napp.ArtifactHash = p.Sha256
+			}
+		}
+	}
 	return napp, nil
 }
 

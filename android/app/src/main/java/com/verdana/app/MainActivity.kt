@@ -57,19 +57,51 @@ class MainActivity : ComponentActivity() {
         VerdanaHost.start(this)
 
         setContent { Launcher() }
+
+        // a recreated activity already handled the link it was started with
+        if (savedInstanceState == null) openLink(intent)
+    }
+
+    // singleTask: a link tapped while the launcher is running arrives here
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        openLink(intent)
+    }
+
+    // openLink opens the napp a nostr:naddr1… link names; the backend asks
+    // before installing one that isn't installed yet.
+    private fun openLink(intent: Intent?) {
+        if (intent?.action != Intent.ACTION_VIEW) return
+        val link = intent.dataString ?: return
+        Mobile.openAddress(link)
     }
 
     // ─── launcher actions (called from composables) ──────────────────
 
     fun login(input: String) = Mobile.login(input)
+    fun startNostrConnect() = Mobile.startNostrConnect()
+    fun cancelNostrConnect() = Mobile.cancelNostrConnect()
+    fun setNostrConnectRelay(relay: String) = Mobile.setNostrConnectRelay(relay)
+
+    // openSigner hands the nostrconnect:// uri to a signer app on this phone
+    // (Amber and the like register the scheme). False when none is installed.
+    fun openSigner(uri: String): Boolean =
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(uri)))
+            true
+        } catch (e: android.content.ActivityNotFoundException) {
+            false
+        }
     fun logout() = Mobile.logout()
     fun fetchNapps() = Mobile.fetch()
-    fun saveRelays(text: String) = Mobile.setRelays(text)
     fun install(id: String) = Mobile.install(id)
     fun update(id: String) = Mobile.update(id)
     fun uninstall(id: String) = Mobile.uninstall(id)
     fun launch(id: String) = Mobile.launch(id)
+    fun tryNapplet(id: String) = Mobile.tryNapplet(id)
     fun checkForUpdates() = Mobile.checkForUpdates()
+    fun lookupAddress(input: String) = Mobile.lookupAddress(input)
     fun toggleTheme() = VerdanaHost.toggleTheme()
 
     // bringWindow puts an open napp's task in front — the launcher cannot

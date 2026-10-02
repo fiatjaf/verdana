@@ -1,0 +1,48 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$version": 2,
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "theme": {
+      "type": "string",
+      "title": "Theme",
+      "enum": ["light", "dark"],
+      "enumDescriptions": ["Bright", "Dim"],
+      "default": "dark",
+      "x-napplet-section": "appearance",
+      "x-napplet-order": 1
+    },
+    "fontSize": {
+      "type": "integer",
+      "minimum": 8,
+      "maximum": 32,
+      "default": 14,
+      "x-napplet-section": "appearance",
+      "x-napplet-order": 2
+    },
+    "relays": {
+      "type": "array",
+      "items": { "type": "string", "format": "uri", "minLength": 6 },
+      "maxItems": 3,
+      "default": ["wss://relay.example"]
+    },
+    "apiKey": {
+      "type": "string",
+      "title": "API key",
+      "x-napplet-secret": true,
+      "minLength": 4
+    },
+    "notifications": {
+      "type": "object",
+      "x-napplet-section": "notifications",
+      "default": { "sound": false, "volume": 0.5 },
+      "properties": {
+        "enabled": { "type": "boolean", "default": true },
+        "sound": { "type": "boolean" },
+        "volume": { "type": "number", "minimum": 0, "maximum": 1 },
+        "email": { "type": "string", "format": "email" }
+      }
+    }
+  }
+}
