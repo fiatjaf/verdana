@@ -478,7 +478,7 @@ func napOutboxPublish(c *napCall) {
 			return
 		}
 
-		evt, res, err := napApprovePublish(ctx, c, r.Event.event(user), nostr.ZeroPK, "", targets)
+		evt, res, err := napApprovePublish(ctx, c, r.Event.event(user), nostr.ZeroPK, "", targets, nil)
 		if err != nil {
 			if err.Error() == "user-denied" {
 				// NAP-OUTBOX's name for it

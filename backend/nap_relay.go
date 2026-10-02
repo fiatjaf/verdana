@@ -355,6 +355,16 @@ type napTemplate struct {
 	Content   string          `json:"content"`
 	Tags      nostr.Tags      `json:"tags"`
 	CreatedAt nostr.Timestamp `json:"created_at"`
+
+	// ask, when set, is what the approval prompt says instead of the generic
+	// "sign and publish an event": the launcher built this event, so it can
+	// name the action (NAP-COMMON's follow, react, report).
+	ask *napAsk
+}
+
+// napAsk is an approval prompt's wording for a launcher-built event.
+type napAsk struct {
+	Title, Detail, Code string
 }
 
 func (t napTemplate) event(author nostr.PubKey) nostr.Event {
@@ -457,7 +467,7 @@ func napSignAndPublish(ctx context.Context, c *napCall, t napTemplate, recipient
 		return nostr.Event{}, errors.New("no relays to publish to")
 	}
 
-	evt, res, err := napApprovePublish(ctx, c, evt, to, encryption, targets)
+	evt, res, err := napApprovePublish(ctx, c, evt, to, encryption, targets, t.ask)
 	if err != nil {
 		return evt, err
 	}
@@ -469,16 +479,21 @@ func napSignAndPublish(ctx context.Context, c *napCall, t napTemplate, recipient
 
 // napApprovePublish asks once, then encrypts (when encryption is set), signs
 // and publishes evt to targets, reporting per relay as publishSigned does.
-func napApprovePublish(ctx context.Context, c *napCall, evt nostr.Event, to nostr.PubKey, encryption string, targets []string) (nostr.Event, map[string]any, error) {
+func napApprovePublish(ctx context.Context, c *napCall, evt nostr.Event, to nostr.PubKey, encryption string, targets []string, ask *napAsk) (nostr.Event, map[string]any, error) {
 	title := "sign and publish an event"
 	detail := fmt.Sprintf("Kind %d to %d relay(s): %s", evt.Kind, len(targets),
 		preview(strings.Join(stripSchemes(targets), ", "), 160))
-	if encryption != "" {
+	code := preview(evt.Content, 200)
+	switch {
+	case encryption != "":
 		title = "encrypt, sign and publish a message"
 		detail = fmt.Sprintf("Kind %d, encrypted (%s) for %s, to %d relay(s).",
 			evt.Kind, encryption, nip19.EncodeNpub(to), len(targets))
+	case ask != nil:
+		title, code = ask.Title, ask.Code
+		detail = fmt.Sprintf("%s (kind %d, to %d relay(s))", ask.Detail, evt.Kind, len(targets))
 	}
-	if !askApproval(c.ci, PermPublish, title, detail, preview(evt.Content, 200)) {
+	if !askApproval(c.ci, PermPublish, title, detail, code) {
 		return nostr.Event{}, nil, errors.New("user-denied")
 	}
 
