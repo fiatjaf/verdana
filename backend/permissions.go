@@ -314,6 +314,9 @@ func ForgetPermission(napp string, perm Permission) {
 	if dropped || saved {
 		log.Info().Str("napp", napp).Str("permission", string(perm)).Msg("forgot a remembered answer")
 		notifyState()
+		if perm == "" || perm == PermDispatch {
+			go broadcastIntentChanges()
+		}
 	}
 }
 

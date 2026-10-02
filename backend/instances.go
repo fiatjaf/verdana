@@ -878,6 +878,7 @@ func runNappAction(
 		choice = picked
 		if opts.DefaultKey.valid() && !opts.Choose {
 			storeRule(opts.DefaultKey, Rule{Decision: DecisionAllow, Target: choice.NappID})
+			go broadcastIntentChanges()
 		}
 	}
 
