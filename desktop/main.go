@@ -181,6 +181,7 @@ func main() {
 	gioMain()
 
 	backend.CloseAllWindows()
+	backend.CloseAllSettings()
 	killAllChildren()
 }
 
@@ -334,6 +335,7 @@ func gioMain() {
 		detailUpdateBtn     widget.Clickable
 		detailAuthorBtn     widget.Clickable
 		detailCopyAddrBtn   widget.Clickable
+		detailSettingsBtn   widget.Clickable
 		profileList         widget.List
 		profileCardBtns     []widget.Clickable
 		profileOpenBtns     []widget.Clickable
@@ -720,6 +722,13 @@ func gioMain() {
 								go backend.Update(n.ID)
 							} else if detailCopyAddrBtn.Clicked(gtx) && n.Naddr() != "" {
 								gioHost{}.CopyText(n.Naddr())
+							} else if detailSettingsBtn.Clicked(gtx) && installedSet[n.ID] {
+								id := n.ID
+								go func() {
+									if err := backend.OpenSettings(id); err != nil {
+										log.Warn().Err(err).Str("napp", id).Msg("could not open settings")
+									}
+								}()
 							}
 						} else {
 							// profile tab: size buttons to its napps list
@@ -879,6 +888,7 @@ func gioMain() {
 						&detailUpdateBtn,
 						&detailAuthorBtn,
 						&detailCopyAddrBtn,
+						&detailSettingsBtn,
 						&profileList,
 						profileCardBtns,
 						profileOpenBtns,

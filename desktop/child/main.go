@@ -88,8 +88,14 @@ func main() {
 	runtime.LockOSThread()
 
 	w := webview.New(os.Getenv("WEBVIEW_DEBUG") == "true")
-	w.SetTitle(windowTitle(meta.Name, meta.Number))
 	w.SetSize(windowWidth(), windowHeight(), webview.HintNone)
+
+	if os.Getenv("VERDANA_WINDOW_KIND") == "settings" {
+		w.SetTitle(meta.Name + " \u2014 Settings")
+		runSettings(w)
+		return
+	}
+	w.SetTitle(windowTitle(meta.Name, meta.Number))
 
 	if os.Getenv("VERDANA_NAPP_FORMAT") == "napplet" {
 		runNapplet(w)

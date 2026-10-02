@@ -77,6 +77,12 @@ type Host interface {
 	// already checked. onState may be called from any goroutine for as long
 	// as the player lives, and once more with status "stopped" when it ends.
 	MediaPlay(req MediaRequest, onState func(MediaState)) (MediaPlayer, error)
+
+	// OpenSettings puts a napp's settings window on screen: the launcher's
+	// settings page (webview.SettingsHTML), whose messages go to
+	// HandleSettingsMessage under spec.Window. The platform calls
+	// SettingsClosed once it is gone.
+	OpenSettings(spec SettingsSpec) (Transport, error)
 }
 
 // NotificationRequest is a validated NAP-NOTIFY notification. Text is plain
@@ -235,4 +241,7 @@ func (noopHost) SendNotification(NotificationRequest) (NotificationHandle, error
 }
 func (noopHost) MediaPlay(MediaRequest, func(MediaState)) (MediaPlayer, error) {
 	return nil, errors.New("no media player")
+}
+func (noopHost) OpenSettings(SettingsSpec) (Transport, error) {
+	return nil, errors.New("this host cannot open windows")
 }

@@ -201,6 +201,11 @@
     if (!root) return
     if (theme) root.style.colorScheme = theme === "dark" ? "dark" : "light"
     if (vars && vars.surface) root.style.background = vars.surface
+    if (vars && typeof vars === "object") {
+      for (const k of ["surface-alt", "border", "text"]) {
+        if (typeof vars[k] === "string") root.style.setProperty("--" + k, vars[k])
+      }
+    }
   }
   window.__bridge_theme_change = applyTheme
 
@@ -208,6 +213,39 @@
   // a stray one must still be answered so nobody waits on it
   window.__bridge_dispatch_action = id => {
     rpc("napp.dispatchResult", { id, result: null }).catch(() => {})
+  }
+
+  // ── the chrome ──────────────────────────────────────────────────
+  // A slim bar above the frame, outside the napplet's reach, with the gear
+  // that opens the napp's settings window. Desktop only: there the window is
+  // a bare webview with nothing but the OS frame. Android draws its own bar
+  // natively, around the WebView.
+  const CHROME_HEIGHT = 28
+  let bar = null
+  const chrome = () => {
+    if (typeof window.__verdanaNappletRPC !== "function") return null
+    if (bar) return bar
+    bar = document.createElement("div")
+    bar.style.cssText =
+      "position:fixed;top:0;left:0;right:0;height:" +
+      CHROME_HEIGHT +
+      "px;display:flex;align-items:center;justify-content:flex-end;" +
+      "padding:0 4px;box-sizing:border-box;background:var(--surface-alt, #f2f2f2);" +
+      "border-bottom:1px solid var(--border, #ccc);font:12px system-ui, sans-serif"
+    const gear = document.createElement("button")
+    gear.type = "button"
+    gear.title = "Settings"
+    gear.setAttribute("aria-label", "Settings")
+    gear.textContent = "\u2699"
+    gear.style.cssText =
+      "border:0;background:none;color:var(--text, inherit);font-size:16px;line-height:1;" +
+      "padding:2px 6px;border-radius:5px;cursor:pointer"
+    gear.addEventListener("click", () => {
+      rpc("nap.openSettings").catch(err => console.error("[napplet-host]", err))
+    })
+    bar.appendChild(gear)
+    document.body.appendChild(bar)
+    return bar
   }
 
   // ── the frame ───────────────────────────────────────────────────
@@ -229,8 +267,13 @@
       frame.setAttribute("sandbox", "allow-scripts")
       frame.setAttribute("referrerpolicy", "no-referrer")
       frame.setAttribute("title", typeof doc.title === "string" ? doc.title : "napplet")
+      const top = chrome() ? CHROME_HEIGHT : 0
       frame.style.cssText =
-        "position:fixed;inset:0;width:100%;height:100%;border:0;margin:0;padding:0;display:block"
+        "position:fixed;left:0;right:0;bottom:0;top:" +
+        top +
+        "px;width:100%;height:calc(100% - " +
+        top +
+        "px);border:0;margin:0;padding:0;display:block"
       frame.srcdoc = doc.srcdoc
       document.body.appendChild(frame)
       return

@@ -195,7 +195,7 @@ func layoutNappDetail(
 	gtx layout.Context,
 	th *material.Theme,
 	tab *extraTab,
-	openBtn, primaryBtn, updateBtn, authorBtn, copyAddrBtn *widget.Clickable,
+	openBtn, primaryBtn, updateBtn, authorBtn, copyAddrBtn, settingsBtn *widget.Clickable,
 	installedSet map[string]bool,
 	busy map[string]bool,
 	st backend.State,
@@ -325,6 +325,18 @@ func layoutNappDetail(
 						return layout.Dimensions{}
 					}
 					return layout.Spacer{Width: unit.Dp(8)}.Layout(gtx)
+				}),
+				// its settings window: what it declared (NAP-CONFIG) and
+				// what the user let it do
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					if !installed || settingsBtn == nil {
+						return layout.Dimensions{}
+					}
+					pointer.CursorPointer.Add(gtx.Ops)
+					b := material.Button(th, settingsBtn, "Settings")
+					b.Background = currentTheme().chipBg
+					b.Color = currentTheme().chipFg
+					return layout.Inset{Right: unit.Dp(8)}.Layout(gtx, b.Layout)
 				}),
 				// the naddr is how a napp is shared: pasted into another
 				// launcher's discovery filter, it finds this one

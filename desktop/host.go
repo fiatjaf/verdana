@@ -24,6 +24,10 @@ func (gioHost) OpenWindow(spec backend.WindowSpec) (backend.Transport, error) {
 	return startChild(spec)
 }
 
+func (gioHost) OpenSettings(spec backend.SettingsSpec) (backend.Transport, error) {
+	return startSettingsChild(spec)
+}
+
 func (gioHost) StateChanged() {
 	if gioWin != nil {
 		gioWin.Invalidate()

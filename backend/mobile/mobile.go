@@ -66,6 +66,14 @@ type UI interface {
 	// it (an ACTION_VIEW intent). Already approved. mime may be empty. False
 	// when no app could take it.
 	PlayMedia(url, mime, title string) bool
+
+	// OpenSettings puts a napp's settings window on screen. spec is a JSON
+	// object: { window, nappId, name, section, theme, themeVars }. The page
+	// is SettingsHTML() with SettingsJS() injected; what it posts goes to
+	// HandleMessage under window, like a napp window's. SendToWindow,
+	// FocusWindow and CloseWindow then address it by that same id, and
+	// WindowClosed must be called once it is gone.
+	OpenSettings(window string, specJSON string) error
 }
 
 // ─── host adapter ────────────────────────────────────────────────
@@ -95,6 +103,24 @@ func (h mobileHost) OpenWindow(spec backend.WindowSpec) (backend.Transport, erro
 		return nil, err
 	}
 	return mobileTransport{ui: h.ui, instance: spec.Instance}, nil
+}
+
+func (h mobileHost) OpenSettings(spec backend.SettingsSpec) (backend.Transport, error) {
+	payload, err := json.Marshal(map[string]any{
+		"window":    spec.Window,
+		"nappId":    spec.NappID,
+		"name":      spec.Name,
+		"section":   spec.Section,
+		"theme":     spec.Theme,
+		"themeVars": spec.ThemeVars,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := h.ui.OpenSettings(spec.Window, string(payload)); err != nil {
+		return nil, err
+	}
+	return mobileTransport{ui: h.ui, instance: spec.Window}, nil
 }
 
 func (h mobileHost) StateChanged()                               { h.ui.StateChanged() }
@@ -195,6 +221,7 @@ func Start(dataDir string, ui UI) error {
 // without ever calling this, which is fine — the stores are crash-safe.
 func Stop() {
 	backend.CloseAllWindows()
+	backend.CloseAllSettings()
 	if closeStores != nil {
 		closeStores()
 		closeStores = nil
@@ -212,6 +239,12 @@ func NappletHostHTML() string { return webview.NappletHostHTML() }
 // a napplet window: it puts the napplet in its sandboxed iframe and carries
 // NAP envelopes to the backend.
 func NappletHostJS() string { return webview.NappletHostJS() }
+
+// SettingsHTML is the page a settings window loads.
+func SettingsHTML() string { return webview.SettingsHTML() }
+
+// SettingsJS is the settings page's script, injected at document start.
+func SettingsJS() string { return webview.SettingsJS() }
 
 // UIKit is the script that puts the napp-ui kit in the page, for the napps
 // whose metadata.json asks for it with `requires: ["ui"]`, and "" for the
@@ -374,14 +407,32 @@ func (e errNoNapp) Error() string { return "no napp " + string(e) }
 
 // ─── napp windows ────────────────────────────────────────────────
 
-// HandleMessage takes a wire message a napp's page posted up (an rpc).
+// HandleMessage takes a wire message a napp's page posted up (an rpc), or
+// a settings window's.
 func HandleMessage(instance string, msgJSON string) {
+	if backend.IsSettingsWindow(instance) {
+		backend.HandleSettingsWireMessage(instance, msgJSON)
+		return
+	}
 	backend.HandleWireMessage(instance, msgJSON)
 }
 
-// WindowClosed says a napp's window is gone, so whatever was waiting on it
-// stops waiting.
-func WindowClosed(instance string) { backend.WindowClosed(instance) }
+// WindowClosed says a napp's window (or a settings window) is gone, so
+// whatever was waiting on it stops waiting.
+func WindowClosed(instance string) {
+	if backend.IsSettingsWindow(instance) {
+		backend.SettingsClosed(instance)
+		return
+	}
+	backend.WindowClosed(instance)
+}
+
+// OpenSettings opens a napp's settings window (its detail page's button).
+func OpenSettings(id string) error { return backend.OpenSettings(id) }
+
+// OpenSettingsFor opens the settings of the napp in a window (the gear in
+// the window's bar).
+func OpenSettingsFor(instance string) error { return backend.OpenSettingsFor(instance) }
 
 // CloseWindow asks a napp to close (the user swiped its tab away).
 func CloseWindow(instance string) { backend.CloseWindow(instance) }

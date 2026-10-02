@@ -597,17 +597,20 @@ func pruneSecretOrphans(old, next *configNode, stored map[string]any) map[string
 	return out
 }
 
-// configSecretsSet lists the dotted paths of the secrets the user has set,
-// for the settings page, which never gets their values.
-func configSecretsSet(n *configNode, path string, stored map[string]any) []string {
-	var out []string
+// configStoredPaths lists the dotted paths of the leaves the user has set
+// (with a value the schema still accepts): the secrets among them when
+// secret is true, the rest otherwise. The settings page gets the secrets'
+// paths instead of their values, and sends back only what is set or edited,
+// so an untouched setting keeps following the napplet's default.
+func configStoredPaths(n *configNode, path string, stored map[string]any, secret bool) []string {
+	out := []string{}
 	for k, p := range n.Props {
 		name := joinConfigPath(path, k)
 		switch {
 		case p.Type == "object":
 			sub, _ := stored[k].(map[string]any)
-			out = append(out, configSecretsSet(p, name, sub)...)
-		case p.Secret:
+			out = append(out, configStoredPaths(p, name, sub, secret)...)
+		case p.Secret == secret:
 			if sv, ok := stored[k]; ok && p.valid(sv) {
 				out = append(out, name)
 			}
