@@ -40,6 +40,10 @@ object VerdanaHost : UI {
     // the napp windows that are alive right now, by instance id
     private val windows = ConcurrentHashMap<String, NappActivity>()
 
+    // the settings windows that are alive, by their window id (the backend
+    // addresses them through the same SendToWindow/FocusWindow/CloseWindow)
+    private val settingsWindows = ConcurrentHashMap<String, SettingsActivity>()
+
     // messages that got here before their window's activity finished starting
     private val outbox = ConcurrentHashMap<String, ArrayDeque<String>>()
 
@@ -121,11 +125,48 @@ object VerdanaHost : UI {
         outbox.remove(instance)
     }
 
+    fun settingsUri(window: String): Uri = Uri.parse("$WINDOW_SCHEME://settings/$window")
+
+    internal fun claimSettings(window: SettingsActivity): Boolean {
+        synchronized(settingsWindows) {
+            val existing = settingsWindows[window.windowId]
+            if (existing != null && existing != window) return false
+            settingsWindows[window.windowId] = window
+        }
+        val queued = outbox.remove(window.windowId)
+        if (queued != null) queued.forEach { window.deliver(it) }
+        return true
+    }
+
+    internal fun unregisterSettings(id: String, window: SettingsActivity) {
+        settingsWindows.remove(id, window)
+        outbox.remove(id)
+    }
+
+    // the three ways into a settings window; the backend opens it (or brings
+    // the open one back) through openSettings below
+    fun openSettingsFor(instance: String) = settingsCall { Mobile.openSettingsFor(instance) }
+    fun openNappSettings(nappId: String) = settingsCall { Mobile.openSettings(nappId) }
+    fun openLauncherSettings() = settingsCall { Mobile.openLauncherSettings() }
+
+    private fun settingsCall(call: () -> Unit) {
+        try {
+            call()
+        } catch (e: Exception) {
+            Log.e("Verdana", "could not open settings", e)
+            appContext?.let { Toast.makeText(it, "Could not open settings", Toast.LENGTH_SHORT).show() }
+        }
+    }
+
     // surface brings an open napp's task back to the front. The system does
     // the switching; all this does is find the task that window is in.
     fun surface(instance: String) {
         val ctx = appContext ?: return
         val am = ctx.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager ?: return
+        settingsWindows[instance]?.let { w ->
+            am.appTasks.firstOrNull { it.taskInfo.id == w.taskId }?.moveToFront()
+            return
+        }
         // the live window's own task, so this never picks up a duplicate
         // task still on its way out (they share the same intent data)
         val owned = windows[instance]?.taskId
@@ -179,8 +220,11 @@ object VerdanaHost : UI {
 
     override fun sendToWindow(instance: String, msgJSON: String) {
         val window = windows[instance]
+        val settings = settingsWindows[instance]
         if (window != null) {
             window.deliver(msgJSON)
+        } else if (settings != null) {
+            settings.deliver(msgJSON)
         } else {
             // the window is on its way up: hold the message until it is up
             synchronized(outbox) {
@@ -198,6 +242,24 @@ object VerdanaHost : UI {
         // for it is never going to be delivered
         outbox.remove(instance)
         windows[instance]?.finishWindow()
+        settingsWindows[instance]?.finishWindow()
+    }
+
+    override fun openSettings(window: String, specJSON: String) {
+        val ctx = appContext ?: return
+        ctx.startActivityOnMain {
+            val intent = Intent(ctx, SettingsActivity::class.java).apply {
+                data = settingsUri(window)
+                putExtra(SettingsActivity.EXTRA_SPEC, specJSON)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NEW_DOCUMENT)
+            }
+            try {
+                ctx.startActivity(intent)
+            } catch (e: Exception) {
+                Log.e("Verdana", "could not open settings window $window", e)
+                Toast.makeText(ctx, "Could not open settings", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     override fun stateChanged() {

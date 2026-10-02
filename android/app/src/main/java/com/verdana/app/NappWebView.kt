@@ -270,18 +270,6 @@ class NappWebView(
         else -> "application/octet-stream"
     }
 
-    private fun jsString(s: String): String =
-        org.json.JSONObject.quote(s ?: "")
-
-    private fun jsStringList(items: List<String>): String =
-        org.json.JSONArray(items ?: emptyList<String>()).toString()
-
-    private fun themeInitScript(name: String, varsJSON: String): String {
-        val n = name.ifBlank { "light" }
-        val vars = varsJSON.ifBlank { "{}" }
-        return "window.__nappTheme = {name:" + jsString(n) + ",vars:" + vars + "};"
-    }
-
     private fun storageInitScript(snapshotJSON: String): String {
         val snapshot = snapshotJSON.ifBlank { "{}" }
         return try {
@@ -292,4 +280,18 @@ class NappWebView(
             "window.__nappStorage = {};"
         }
     }
+}
+
+internal fun jsString(s: String): String =
+    org.json.JSONObject.quote(s)
+
+internal fun jsStringList(items: List<String>): String =
+    org.json.JSONArray(items).toString()
+
+// themeInitScript sets window.__nappTheme, which the page scripts apply as
+// soon as they run. varsJSON comes from the launcher, so it is already JSON.
+internal fun themeInitScript(name: String, varsJSON: String): String {
+    val n = name.ifBlank { "light" }
+    val vars = varsJSON.ifBlank { "{}" }
+    return "window.__nappTheme = {name:" + jsString(n) + ",vars:" + vars + "};"
 }

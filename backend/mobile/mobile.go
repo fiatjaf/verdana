@@ -400,6 +400,14 @@ func WindowClosed(instance string) {
 // OpenSettings opens a napp's settings window (its detail page's button).
 func OpenSettings(id string) error { return backend.OpenSettings(id) }
 
+// IsSettingsWindow says whether the backend has a settings window by that
+// id: a task Android restored after the process died has none, and closes.
+func IsSettingsWindow(window string) bool { return backend.IsSettingsWindow(window) }
+
+// OpenLauncherSettings opens the launcher's own settings window (relays,
+// Blossom servers).
+func OpenLauncherSettings() error { return backend.OpenLauncherSettings() }
+
 // OpenSettingsFor opens the settings of the napp in a window (the gear in
 // the window's bar).
 func OpenSettingsFor(instance string) error { return backend.OpenSettingsFor(instance) }
