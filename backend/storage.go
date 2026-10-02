@@ -32,6 +32,11 @@ var (
 // "<16hex>~<d-tag>" or "dev~<id>": the d-tag is author-controlled and may
 // contain slashes, so anything outside a safe alphabet is escaped.
 func storageFileFor(nappID string) string {
+	return filepath.Join(dataDir, "storage", safeFileName(nappID)+".json")
+}
+
+// safeFileName is a napp id as a file name, without any path tricks.
+func safeFileName(nappID string) string {
 	var b strings.Builder
 	for _, r := range nappID {
 		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' ||
@@ -46,8 +51,7 @@ func storageFileFor(nappID string) string {
 		name = "_"
 	}
 	// belt and suspenders against ".." tricks: filepath.Base strips separators
-	name = filepath.Base(name)
-	return filepath.Join(dataDir, "storage", name+".json")
+	return filepath.Base(name)
 }
 
 // StorageFile is the path of a napp's localStorage file, so platforms that
