@@ -40,9 +40,8 @@ func Install(n Napp) {
 	defer cancel()
 
 	servers := n.BlossomServers(ctx)
-	if err := fetchNappAssets(ctx, n, base, servers); err != nil {
+	if err := replaceNappFiles(ctx, n, base, servers); err != nil {
 		log.Error().Err(err).Str("napp", n.ID).Msg("install failed")
-		os.RemoveAll(base)
 		SetFetchErr("install failed: " + err.Error())
 		return
 	}
@@ -99,6 +98,45 @@ func InstallFromDiscovery(id string) bool {
 // maxParallelAssets caps how many of a napp's files are in flight at once, so
 // a big napp doesn't open a connection per asset against the same server.
 const maxParallelAssets = 6
+
+// replaceNappFiles downloads every file of a napp into a fresh directory next
+// to base and only then puts it in base's place, so a download that fails half
+// way leaves whatever was installed there untouched (and a fresh install
+// leaves nothing behind).
+func replaceNappFiles(ctx context.Context, n Napp, base string, servers []string) error {
+	parent := filepath.Dir(base)
+	if err := os.MkdirAll(parent, 0755); err != nil {
+		return err
+	}
+	tmp, err := os.MkdirTemp(parent, ".install-*")
+	if err != nil {
+		return err
+	}
+	if err := fetchNappAssets(ctx, n, tmp, servers); err != nil {
+		os.RemoveAll(tmp)
+		return err
+	}
+
+	old := ""
+	if _, err := os.Stat(base); err == nil {
+		old = tmp + ".old"
+		if err := os.Rename(base, old); err != nil {
+			os.RemoveAll(tmp)
+			return err
+		}
+	}
+	if err := os.Rename(tmp, base); err != nil {
+		if old != "" {
+			os.Rename(old, base)
+		}
+		os.RemoveAll(tmp)
+		return err
+	}
+	if old != "" {
+		os.RemoveAll(old)
+	}
+	return nil
+}
 
 // fetchNappAssets downloads every file of a napp into base. The assets go in
 // parallel; the servers for any one asset are still tried in order, so a napp
