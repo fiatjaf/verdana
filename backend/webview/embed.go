@@ -38,7 +38,7 @@ var nappletHostJS string
 var shimPrelude string
 
 // ShimVersion is the @napplet/shim release the prelude was copied from.
-const ShimVersion = "0.29.2+nap-intent-pr91"
+const ShimVersion = "0.29.2+nap-intent-pr91.resource-server-hints"
 
 //go:embed napp-ui.js
 var uiJS string

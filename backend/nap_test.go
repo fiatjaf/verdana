@@ -919,6 +919,47 @@ func TestNapResourceTrackKeepsRequestIDOwnership(t *testing.T) {
 	}
 }
 
+func TestNapResourceInfoReportsCurrentBulkLimits(t *testing.T) {
+	setupNapTest(t)
+	ci, rec := openNapplet(t, "resource-info")
+	ready(t, ci, rec, 1)
+	c := &napCall{ci: ci, gen: ci.nap.gen, ctx: ci.nap.ctx, Type: "resource.info", ID: json.RawMessage(`"info"`)}
+	napResourceInfo(c)
+	got := rec.wait(t, "resource.info.result", 1)
+	info, ok := got["info"].(map[string]any)
+	if !ok || info["maxUrls"] != float64(resourceMaxURLs) || info["maxServers"] != float64(resourceMaxServers) {
+		t.Fatalf("resource info limits: %#v", got["info"])
+	}
+}
+
+func TestNapResourceBytesManyUsesTooLargeForBulkCap(t *testing.T) {
+	setupNapTest(t)
+	ci, rec := openNapplet(t, "resource-many-cap")
+	ready(t, ci, rec, 1)
+	requests := make([]map[string]any, resourceMaxURLs+1)
+	for i := range requests {
+		requests[i] = map[string]any{"url": "data:text/plain,ok"}
+	}
+	raw, err := json.Marshal(map[string]any{"requests": requests})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := &napCall{ci: ci, gen: ci.nap.gen, ctx: ci.nap.ctx, Type: "resource.bytesMany", ID: json.RawMessage(`"many"`), raw: raw}
+	napResourceBytesMany(c)
+	if got := rec.wait(t, "resource.bytesMany.error", 1); got["error"] != "too-large" {
+		t.Fatalf("bulk cap error: %#v", got)
+	}
+}
+
+func TestBlossomResourceCapsServerHints(t *testing.T) {
+	hints := make([]string, resourceMaxServers+1)
+	_, err := fetchBlossomResource(context.Background(), nil, "sha256:"+strings.Repeat("0", 64), hints)
+	var re *resourceErr
+	if !errors.As(err, &re) || re.code != "too-large" {
+		t.Fatalf("server hint cap: %v", err)
+	}
+}
+
 func TestSniffResource(t *testing.T) {
 	var buf bytes.Buffer
 	_ = png.Encode(&buf, image.NewRGBA(image.Rect(0, 0, 1, 1)))
