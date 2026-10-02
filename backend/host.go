@@ -63,6 +63,47 @@ type Host interface {
 	// the answer comes back to AnswerAmber with the same id. False means
 	// the signer app could not be launched at all.
 	AmberRequest(id, op, payload, pubkey, counterpart, pkg string) bool
+
+	// MediaPlay hands an https url to the platform's media player
+	// (NAP-MEDIA shell-owned playback). Already approved, and the url
+	// already checked. onState may be called from any goroutine for as long
+	// as the player lives, and once more with status "stopped" when it ends.
+	MediaPlay(req MediaRequest, onState func(MediaState)) (MediaPlayer, error)
+}
+
+// MediaRequest is one thing to play.
+type MediaRequest struct {
+	URL      string
+	MimeType string
+	// Title is display text for the player's window, already sanitized.
+	Title    string
+	Live     bool
+	Autoplay bool
+}
+
+// MediaState is a player's playback state, as NAP-MEDIA reports it. Nil
+// fields are ones the player doesn't know (yet).
+type MediaState struct {
+	// Status is "playing", "paused", "stopped" or "buffering".
+	Status   string
+	Position *float64
+	Duration *float64
+	// Volume is 0..1.
+	Volume *float64
+}
+
+// MediaPlayer controls one playback started by MediaPlay. No method may
+// block for long: Stop in particular is called with the napplet session
+// locked, so it asks the player to quit and returns.
+type MediaPlayer interface {
+	Play() error
+	Pause() error
+	Stop() error
+	// Seek goes to a position in seconds.
+	Seek(sec float64) error
+	// SetVolume sets output volume, 0..1.
+	SetVolume(v float64) error
+	SetTitle(title string) error
 }
 
 // ShortcutFile is one bundle shortcut found on disk: the name the user gave
@@ -152,4 +193,7 @@ func (noopHost) DeleteShortcutFile(string) error   { return nil }
 func (noopHost) ListShortcutFiles() []ShortcutFile { return nil }
 func (noopHost) AmberRequest(string, string, string, string, string, string) bool {
 	return false
+}
+func (noopHost) MediaPlay(MediaRequest, func(MediaState)) (MediaPlayer, error) {
+	return nil, errors.New("no media player")
 }

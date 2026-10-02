@@ -55,6 +55,11 @@ type UI interface {
 	// deliver the answer back to AnswerAmber carrying the same id. False
 	// when no signer could be launched at all.
 	AmberRequest(id, op, payload, pubkey, counterpart, pkg string) bool
+
+	// PlayMedia hands an https media url to whatever app on the phone plays
+	// it (an ACTION_VIEW intent). Already approved. mime may be empty. False
+	// when no app could take it.
+	PlayMedia(url, mime, title string) bool
 }
 
 // ─── host adapter ────────────────────────────────────────────────
@@ -96,6 +101,26 @@ func (h mobileHost) SaveFile(n string, d []byte) (string, error) { return h.ui.S
 func (h mobileHost) AmberRequest(id, op, payload, pubkey, counterpart, pkg string) bool {
 	return h.ui.AmberRequest(id, op, payload, pubkey, counterpart, pkg)
 }
+
+// MediaPlay hands the url to another app. Once it has, the launcher can't
+// see or steer that app's playback: the session reports "playing" once and
+// ignores every command.
+func (h mobileHost) MediaPlay(req backend.MediaRequest, onState func(backend.MediaState)) (backend.MediaPlayer, error) {
+	if !h.ui.PlayMedia(req.URL, req.MimeType, req.Title) {
+		return nil, errors.New("no app plays this media")
+	}
+	go onState(backend.MediaState{Status: "playing"})
+	return handedOffPlayer{}, nil
+}
+
+type handedOffPlayer struct{}
+
+func (handedOffPlayer) Play() error             { return nil }
+func (handedOffPlayer) Pause() error            { return nil }
+func (handedOffPlayer) Stop() error             { return nil }
+func (handedOffPlayer) Seek(float64) error      { return nil }
+func (handedOffPlayer) SetVolume(float64) error { return nil }
+func (handedOffPlayer) SetTitle(string) error   { return nil }
 
 // AnswerAmber delivers one NIP-55 signer app answer back to whoever on the
 // backend is waiting for the request with that id. Called by the UI when

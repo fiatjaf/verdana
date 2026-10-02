@@ -410,6 +410,27 @@ func fetchBlossomResource(ctx context.Context, c *napCall, ref string, hinted []
 	if !hex64.MatchString(sha) {
 		return resourceResult{}, rerr("invalid-request", "not a sha256 blob reference")
 	}
+	var lastErr error = rerr("not-found", "")
+	for _, srv := range blossomServers(ctx, hinted) {
+		res, err := httpsBlobAttempt(ctx, srv+"/"+sha)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		sum := sha256.Sum256(res.data)
+		if hex.EncodeToString(sum[:]) != sha {
+			lastErr = rerr("decode-failed", "hash mismatch")
+			continue
+		}
+		return res, nil
+	}
+	return resourceResult{}, lastErr
+}
+
+// blossomServers is where a blob is looked for, in order: the servers the
+// napplet suggested, the user's own, and the launcher's defaults, as https
+// origins without duplicates.
+func blossomServers(ctx context.Context, hinted []string) []string {
 	servers := []string{}
 	add := func(s string) {
 		if u, err := url.Parse(s); err == nil && u.Scheme == "https" && u.Host != "" {
@@ -434,22 +455,7 @@ func fetchBlossomResource(ctx context.Context, c *napCall, ref string, hinted []
 	}
 	add("https://nostr.download")
 	add("https://blossom.primal.net")
-
-	var lastErr error = rerr("not-found", "")
-	for _, srv := range servers {
-		res, err := httpsBlobAttempt(ctx, srv+"/"+sha)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		sum := sha256.Sum256(res.data)
-		if hex.EncodeToString(sum[:]) != sha {
-			lastErr = rerr("decode-failed", "hash mismatch")
-			continue
-		}
-		return res, nil
-	}
-	return resourceResult{}, lastErr
+	return servers
 }
 
 // httpsBlobAttempt is httpsResource with its own deadline per server, so one
