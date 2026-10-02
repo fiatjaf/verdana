@@ -3,6 +3,8 @@
 package main
 
 import (
+	"bufio"
+	"net"
 	"strconv"
 	"testing"
 
@@ -83,5 +85,62 @@ func TestVLCStateFromOutput(t *testing.T) {
 		if got := stateString(s.media()); got != step.want {
 			t.Errorf("%q: state %q, want %q", step.line, got, step.want)
 		}
+	}
+}
+
+func TestMpvReplaceHandsThePlayerOver(t *testing.T) {
+	ours, theirs := net.Pipe()
+	defer ours.Close()
+	lines := make(chan string, 16)
+	go func() {
+		sc := bufio.NewScanner(theirs)
+		for sc.Scan() {
+			lines <- sc.Text()
+		}
+	}()
+	var got []string
+	p := &mpvPlayer{proc: &playerProc{done: make(chan struct{})}, conn: ours}
+	first := &mpvSession{p: p, onState: func(st backend.MediaState) { got = append(got, "first:"+st.Status) }}
+	p.owner = first
+	p.state.vol = fptr(0.5)
+
+	states := make(chan backend.MediaState, 4)
+	mp := p.replace(backend.MediaRequest{URL: "https://example.com/b.mp3", Title: "B", Autoplay: true},
+		func(st backend.MediaState) { states <- st })
+	if mp == nil {
+		t.Fatal("replace refused a running mpv")
+	}
+	for _, want := range []string{
+		`{"command":["set_property","pause",false]}`,
+		`{"command":["set_property","force-media-title","B"]}`,
+		`{"command":["loadfile","https://example.com/b.mp3","replace"]}`,
+	} {
+		if line := <-lines; line != want {
+			t.Fatalf("sent %s, want %s", line, want)
+		}
+	}
+	if st := <-states; st.Status != "buffering" || st.Volume == nil || *st.Volume != 0.5 {
+		t.Fatalf("first state after replace: %s", stateString(st))
+	}
+
+	// the replaced session is cut off: its commands go nowhere and it hears
+	// nothing more, while the new one steers mpv
+	first.Pause()
+	first.Stop()
+	mp.Pause()
+	if line := <-lines; line != `{"command":["set_property","pause",true]}` {
+		t.Fatalf("sent %s after the new session paused", line)
+	}
+	p.emit(backend.MediaState{Status: "stopped"})
+	if st := <-states; st.Status != "stopped" {
+		t.Fatalf("new session got %s", stateString(st))
+	}
+	if len(got) != 0 {
+		t.Fatalf("replaced session still heard %v", got)
+	}
+
+	close(p.proc.done)
+	if p.replace(backend.MediaRequest{URL: "https://example.com/c.mp3"}, func(backend.MediaState) {}) != nil {
+		t.Fatal("replace took an mpv that has exited")
 	}
 }

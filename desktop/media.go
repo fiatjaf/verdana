@@ -5,6 +5,8 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"verdana/backend"
@@ -17,15 +19,64 @@ import (
 // The OS-specific halves (unix sockets, or none on Windows) live in
 // media_<player>.go and media_windows.go.
 
-// MediaPlay starts the first player found.
+// MediaPlay plays in the player already open when it can take new media
+// (mpv over its IPC socket), and otherwise closes it and starts the first
+// player found: there is only ever one.
 func (gioHost) MediaPlay(req backend.MediaRequest, onState func(backend.MediaState)) (backend.MediaPlayer, error) {
-	if path, err := exec.LookPath("mpv"); err == nil {
-		return startMpv(path, req, onState)
+	playing.mu.Lock()
+	defer playing.mu.Unlock()
+	if playing.cur != nil {
+		if mp := playing.cur.replace(req, onState); mp != nil {
+			return mp, nil
+		}
+		playing.cur.retire()
+		playing.cur = nil
 	}
-	if path := findVLC(); path != "" {
-		return startVLC(path, req, onState)
+	var (
+		sp  sharedPlayer
+		mp  backend.MediaPlayer
+		err error
+	)
+	if path, lerr := exec.LookPath("mpv"); lerr == nil {
+		sp, mp, err = startMpv(path, req, onState)
+	} else if path := findVLC(); path != "" {
+		sp, mp, err = startVLC(path, req, onState)
+	} else {
+		err = errors.New("no media player installed (mpv or vlc)")
 	}
-	return nil, errors.New("no media player installed (mpv or vlc)")
+	if err != nil {
+		return nil, err
+	}
+	playing.cur = sp
+	return mp, nil
+}
+
+// playing is the one player process, which may have exited since.
+var playing struct {
+	mu  sync.Mutex
+	cur sharedPlayer
+}
+
+// sharedPlayer is a player process as MediaPlay hands it from one session
+// to the next.
+type sharedPlayer interface {
+	// replace plays req in this player for a new session, retiring the
+	// MediaPlayer it was playing for, or returns nil if it can't.
+	replace(req backend.MediaRequest, onState func(backend.MediaState)) backend.MediaPlayer
+	// retire closes the player without its session hearing of it.
+	retire()
+}
+
+// stateGate passes a player's reports to its session until it is retired.
+type stateGate struct {
+	off     atomic.Bool
+	onState func(backend.MediaState)
+}
+
+func (g *stateGate) emit(st backend.MediaState) {
+	if !g.off.Load() {
+		g.onState(st)
+	}
 }
 
 func findVLC() string {

@@ -26,19 +26,22 @@ import (
 //
 // VLC refuses most commands while paused ("Type 'pause' to continue"), and
 // its pause toggles, so a seek or volume change made while paused is lost.
+//
+// VLC can't be handed new media reliably over oldrc, so a new session's
+// media closes this VLC and starts another.
 type vlcPlayer struct {
-	proc    *playerProc
-	onState func(backend.MediaState)
+	proc *playerProc
+	gate stateGate
 
 	mu    sync.Mutex
 	conn  net.Conn
 	state vlcState
 }
 
-func startVLC(path string, req backend.MediaRequest, onState func(backend.MediaState)) (backend.MediaPlayer, error) {
+func startVLC(path string, req backend.MediaRequest, onState func(backend.MediaState)) (sharedPlayer, backend.MediaPlayer, error) {
 	dir, err := os.MkdirTemp("", "verdana-vlc-")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	sock := filepath.Join(dir, "rc")
 	args := []string{
@@ -50,15 +53,24 @@ func startVLC(path string, req backend.MediaRequest, onState func(backend.MediaS
 	}
 	args = append(args, "--", req.URL)
 
-	p := &vlcPlayer{onState: onState}
-	proc, err := startPlayerProc(exec.Command(path, args...), dir, onState)
+	p := &vlcPlayer{gate: stateGate{onState: onState}}
+	proc, err := startPlayerProc(exec.Command(path, args...), dir, p.gate.emit)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	p.proc = proc
 	go p.connect(sock)
 	log.Info().Str("player", "vlc").Msg("started media player")
-	return p, nil
+	return p, p, nil
+}
+
+func (p *vlcPlayer) replace(backend.MediaRequest, func(backend.MediaState)) backend.MediaPlayer {
+	return nil
+}
+
+func (p *vlcPlayer) retire() {
+	p.gate.off.Store(true)
+	p.Stop()
 }
 
 func (p *vlcPlayer) connect(sock string) {
@@ -105,7 +117,7 @@ func (p *vlcPlayer) connect(sock string) {
 		st := p.state.media()
 		p.mu.Unlock()
 		if changed {
-			p.onState(st)
+			p.gate.emit(st)
 		}
 	}
 }

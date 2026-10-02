@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -16,6 +17,7 @@ import (
 // Android) and reports that player's state back; the napplet never touches
 // the bytes. A napplet-owned session is the napplet's own playback, which
 // the launcher only keeps track of: it has no media controls of its own yet.
+// There is one player for every napplet: see mediaOutput.
 
 func init() {
 	handleNap(map[string]napHandler{
@@ -168,6 +170,7 @@ func napMediaCreate(c *napCall) {
 			fail("source blocked")
 			return
 		}
+		mediaOutput.Lock()
 		player, err := host.MediaPlay(MediaRequest{
 			URL:      target,
 			MimeType: r.Source.MimeType,
@@ -176,22 +179,32 @@ func napMediaCreate(c *napCall) {
 			Autoplay: r.Autoplay,
 		}, func(st MediaState) { c.ci.mediaPlayerState(c.gen, ms.id, st) })
 		if err != nil {
+			mediaOutput.Unlock()
 			log.Warn().Err(err).Str("napplet", c.ci.napp.ID).Msg("media player did not start")
 			drop()
 			fail("no media player")
 			return
 		}
+		// whatever played before is gone from the player now, whether or
+		// not this session is still there to take it
+		prev := mediaOutput.cur
+		mediaOutput.cur = mediaHolder{ci: c.ci, gen: c.gen, ms: ms, player: player}
 
 		s.mu.Lock()
-		if s.gen != c.gen || s.media[ms.id] != ms {
+		alive := s.gen == c.gen && s.media[ms.id] == ms
+		var first *MediaState
+		if alive {
+			ms.player = player
+			first = ms.takeState(time.Now(), true)
+		}
+		s.mu.Unlock()
+		mediaOutput.Unlock()
+		prev.preempt()
+		if !alive {
 			// reset or destroyed while the player was starting
-			s.mu.Unlock()
 			player.Stop()
 			return
 		}
-		ms.player = player
-		first := ms.takeState(time.Now(), true)
-		s.mu.Unlock()
 
 		c.reply(map[string]any{"sessionId": ms.id, "owner": ms.owner})
 		envs := []any{
@@ -203,6 +216,51 @@ func napMediaCreate(c *napCall) {
 		}
 		c.ci.napPushGen(c.gen, envs...)
 	})
+}
+
+// mediaOutput is the shell-owned session the player is playing for. The
+// host plays one thing at a time, so a session that starts playing takes
+// the player from the one before it, in whichever napplet that was. The
+// lock is held from MediaPlay until the new session holds its player, so
+// two sessions starting at once agree on which of them came last.
+var mediaOutput struct {
+	sync.Mutex
+	cur mediaHolder
+}
+
+type mediaHolder struct {
+	ci     *Instance
+	gen    int
+	ms     *mediaSession
+	player MediaPlayer
+}
+
+// preempt tells a session its media was replaced: the host has retired its
+// player, so it reports "stopped" and offers no more actions. NAP-MEDIA has
+// no shell-initiated end of a session, so the session itself stays, and
+// commands to it are dropped like those to any session without a player;
+// the napplet creates a new one to play again.
+func (h mediaHolder) preempt() {
+	if h.ms == nil {
+		return
+	}
+	s := h.ci.nap
+	s.mu.Lock()
+	ms := s.media[h.ms.id]
+	if s.gen != h.gen || ms != h.ms || ms.player != h.player {
+		s.mu.Unlock()
+		return
+	}
+	ms.player = nil
+	ms.actions = []string{}
+	st := MediaState{Status: "stopped"}
+	ms.last, ms.pushed, ms.pushedAt = &st, &st, time.Now()
+	s.mu.Unlock()
+	log.Debug().Str("napplet", h.ci.napp.ID).Str("session", ms.id).Msg("media session lost the player")
+	h.ci.napPushGen(h.gen,
+		mediaStateEnvelope(ms.id, st),
+		map[string]any{"type": "media.capabilities", "sessionId": ms.id, "actions": ms.actions},
+	)
 }
 
 // resolveMediaSource turns a source reference into the https url the player

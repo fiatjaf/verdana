@@ -17,20 +17,31 @@ import (
 )
 
 // mpvPlayer drives mpv over its JSON IPC socket: properties it observes come
-// back as events whenever they change, and commands go the same way.
+// back as events whenever they change, and commands go the same way. One mpv
+// plays for one session at a time; a new session's media is loaded into the
+// same window (loadfile replace), and from then on its events go to that
+// session, the one before it hearing nothing more.
 type mpvPlayer struct {
-	proc    *playerProc
-	onState func(backend.MediaState)
+	proc *playerProc
 
 	mu    sync.Mutex
 	conn  net.Conn
 	state mpvState
+	// owner is the session mpv plays for, nil once retired
+	owner *mpvSession
 }
 
-func startMpv(path string, req backend.MediaRequest, onState func(backend.MediaState)) (backend.MediaPlayer, error) {
+// mpvSession is one session's MediaPlayer: it steers mpv only while it is
+// the owner.
+type mpvSession struct {
+	p       *mpvPlayer
+	onState func(backend.MediaState)
+}
+
+func startMpv(path string, req backend.MediaRequest, onState func(backend.MediaState)) (sharedPlayer, backend.MediaPlayer, error) {
 	dir, err := os.MkdirTemp("", "verdana-mpv-")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	sock := filepath.Join(dir, "ipc")
 	args := []string{
@@ -48,15 +59,72 @@ func startMpv(path string, req backend.MediaRequest, onState func(backend.MediaS
 	}
 	args = append(args, "--", req.URL)
 
-	p := &mpvPlayer{onState: onState}
-	proc, err := startPlayerProc(exec.Command(path, args...), dir, onState)
+	p := &mpvPlayer{}
+	s := &mpvSession{p: p, onState: onState}
+	p.owner = s
+	proc, err := startPlayerProc(exec.Command(path, args...), dir, p.emit)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	p.proc = proc
 	go p.connect(sock)
 	log.Info().Str("player", "mpv").Msg("started media player")
-	return p, nil
+	return p, s, nil
+}
+
+// emit hands a state to the session mpv plays for.
+func (p *mpvPlayer) emit(st backend.MediaState) {
+	p.mu.Lock()
+	owner := p.owner
+	p.mu.Unlock()
+	if owner != nil {
+		owner.onState(st)
+	}
+}
+
+func (p *mpvPlayer) replace(req backend.MediaRequest, onState func(backend.MediaState)) backend.MediaPlayer {
+	select {
+	case <-p.proc.done:
+		return nil
+	default:
+	}
+	s := &mpvSession{p: p, onState: onState}
+	p.mu.Lock()
+	if p.conn == nil {
+		// still starting: it gets closed and a new one started
+		p.mu.Unlock()
+		return nil
+	}
+	p.owner = s
+	// pause and volume carry over to the next file; the rest is the old
+	// file's until mpv reports on the new one
+	p.state.pos, p.state.dur, p.state.cache, p.state.eof = nil, nil, false, false
+	st := p.state.media()
+	p.mu.Unlock()
+
+	if p.send("set_property", "pause", !req.Autoplay) != nil ||
+		p.send("set_property", "force-media-title", req.Title) != nil ||
+		p.send("loadfile", req.URL, "replace") != nil {
+		return nil
+	}
+	go s.onState(st)
+	log.Info().Str("player", "mpv").Msg("replaced the media playing")
+	return s
+}
+
+func (p *mpvPlayer) retire() {
+	p.mu.Lock()
+	p.owner = nil
+	p.mu.Unlock()
+	p.quit()
+}
+
+func (p *mpvPlayer) quit() {
+	err := p.send("quit")
+	p.proc.killAfter(2 * time.Second)
+	if err != nil {
+		p.proc.cmd.Process.Kill()
+	}
 }
 
 // connect waits for mpv's socket to appear, then observes what NAP-MEDIA
@@ -98,9 +166,10 @@ func (p *mpvPlayer) connect(sock string) {
 		p.mu.Lock()
 		changed := p.state.apply(sc.Bytes())
 		st := p.state.media()
+		owner := p.owner
 		p.mu.Unlock()
-		if changed {
-			p.onState(st)
+		if changed && owner != nil {
+			owner.onState(st)
 		}
 	}
 }
@@ -121,23 +190,36 @@ func (p *mpvPlayer) send(cmd ...any) error {
 	return err
 }
 
-func (p *mpvPlayer) Play() error  { return p.send("set_property", "pause", false) }
-func (p *mpvPlayer) Pause() error { return p.send("set_property", "pause", true) }
-func (p *mpvPlayer) Seek(sec float64) error {
-	return p.send("seek", sec, "absolute")
-}
-func (p *mpvPlayer) SetVolume(v float64) error {
-	return p.send("set_property", "volume", v*100)
-}
-func (p *mpvPlayer) SetTitle(title string) error {
-	return p.send("set_property", "force-media-title", title)
+// send passes a command on while this session owns mpv, and drops it once
+// another session's media replaced this one's.
+func (s *mpvSession) send(cmd ...any) error {
+	s.p.mu.Lock()
+	owns := s.p.owner == s
+	s.p.mu.Unlock()
+	if !owns {
+		return nil
+	}
+	return s.p.send(cmd...)
 }
 
-func (p *mpvPlayer) Stop() error {
-	err := p.send("quit")
-	p.proc.killAfter(2 * time.Second)
-	if err != nil {
-		p.proc.cmd.Process.Kill()
+func (s *mpvSession) Play() error  { return s.send("set_property", "pause", false) }
+func (s *mpvSession) Pause() error { return s.send("set_property", "pause", true) }
+func (s *mpvSession) Seek(sec float64) error {
+	return s.send("seek", sec, "absolute")
+}
+func (s *mpvSession) SetVolume(v float64) error {
+	return s.send("set_property", "volume", v*100)
+}
+func (s *mpvSession) SetTitle(title string) error {
+	return s.send("set_property", "force-media-title", title)
+}
+
+func (s *mpvSession) Stop() error {
+	s.p.mu.Lock()
+	owns := s.p.owner == s
+	s.p.mu.Unlock()
+	if owns {
+		s.p.quit()
 	}
 	return nil
 }

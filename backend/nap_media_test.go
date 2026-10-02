@@ -72,7 +72,12 @@ func setupMediaTest(t *testing.T, d string) (*Instance, *recTransport, *mediaTes
 	ready(t, ci, rec, 1)
 	key := RuleKey{Napp: ci.napp.ID, Permission: PermMedia}
 	setSessionRule(key, Rule{Decision: DecisionAllow})
-	t.Cleanup(func() { clearSessionRule(key) })
+	t.Cleanup(func() {
+		clearSessionRule(key)
+		mediaOutput.Lock()
+		mediaOutput.cur = mediaHolder{}
+		mediaOutput.Unlock()
+	})
 	return ci, rec, mh
 }
 
@@ -274,6 +279,51 @@ func TestMediaResetStopsPlayers(t *testing.T) {
 	napRPC(ci, "nap.reset", "")
 	WindowClosed(ci.instance)
 	waitCalls(t, p2, []string{"stop"})
+}
+
+func TestMediaNewSessionTakesThePlayer(t *testing.T) {
+	a, recA, mh := setupMediaTest(t, "media-first")
+	b, recB := openNapplet(t, "media-second")
+	ready(t, b, recB, 1)
+	key := RuleKey{Napp: b.napp.ID, Permission: PermMedia}
+	setSessionRule(key, Rule{Decision: DecisionAllow})
+	t.Cleanup(func() { clearSessionRule(key) })
+
+	post(t, a, shellCreate("m", "https://1.1.1.1/a.mp3"))
+	idA := recA.wait(t, "media.session.create.result", 1)["sessionId"]
+	recA.wait(t, "media.capabilities", 1)
+	pA := mh.player(t, 0)
+
+	post(t, b, shellCreate("m", "https://1.1.1.1/b.mp3"))
+	idB := recB.wait(t, "media.session.create.result", 1)["sessionId"]
+	if st := recA.wait(t, "media.state", 1); st["sessionId"] != idA || st["status"] != "stopped" {
+		t.Fatalf("replaced session's state: %v", st)
+	}
+	if caps := recA.wait(t, "media.capabilities", 2); caps["sessionId"] != idA || len(toStrings(caps["actions"])) != 0 {
+		t.Fatalf("replaced session's capabilities: %v", caps)
+	}
+
+	// the replaced session keeps its id but no longer steers anything: the
+	// host retired its player, and the launcher doesn't call it either
+	pA.onState(MediaState{Status: "playing"})
+	post(t, a, map[string]any{"type": "media.command", "sessionId": idA, "action": "play"})
+	post(t, a, map[string]any{"type": "media.session.destroy", "sessionId": idA})
+	pB := mh.player(t, 1)
+	post(t, b, map[string]any{"type": "media.command", "sessionId": idB, "action": "pause"})
+	waitCalls(t, pB, []string{"pause"})
+	if calls := pA.called(); len(calls) != 0 {
+		t.Fatalf("retired player was called: %v", calls)
+	}
+	if n := len(recA.find("media.state")); n != 1 {
+		t.Fatalf("replaced session got %d states", n)
+	}
+
+	// a second session in the same window takes it the same way
+	post(t, b, shellCreate("m2", "https://1.1.1.1/c.mp3"))
+	recB.wait(t, "media.session.create.result", 2)
+	if st := recB.wait(t, "media.state", 1); st["sessionId"] != idB || st["status"] != "stopped" {
+		t.Fatalf("same-window replacement: %v", st)
+	}
 }
 
 func TestMediaNappletOwnedRegistry(t *testing.T) {

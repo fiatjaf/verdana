@@ -76,6 +76,11 @@ type Host interface {
 	// (NAP-MEDIA shell-owned playback). Already approved, and the url
 	// already checked. onState may be called from any goroutine for as long
 	// as the player lives, and once more with status "stopped" when it ends.
+	//
+	// There is one player: MediaPlay replaces whatever the previous call
+	// started (reusing that player's window where it can), and the earlier
+	// MediaPlayer is retired: its onState is never called again and its
+	// methods do nothing. Calls are never concurrent.
 	MediaPlay(req MediaRequest, onState func(MediaState)) (MediaPlayer, error)
 
 	// OpenSettings puts a napp's settings window on screen: the launcher's
