@@ -3370,7 +3370,10 @@ var NappletShimPrelude = (() => {
   function request5(pending4, timeoutMessage, message) {
     const id = crypto.randomUUID();
     return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
+      // verdana: a null timeoutMessage means no timeout. Writes wait on the
+      // user's approval prompt, which can take longer than 30s (as
+      // relay.publish does); the session teardown still rejects them.
+      const timeout = timeoutMessage === null ? void 0 : setTimeout(() => {
         if (pending4.delete(id)) reject(new Error(timeoutMessage));
       }, REQUEST_TIMEOUT_MS17);
       pending4.set(id, { resolve, reject, timeout });
@@ -3424,21 +3427,21 @@ var NappletShimPrelude = (() => {
     }));
   }
   function follow(...pubkeys) {
-    return request5(pendingFollow, "common.follow timed out", (id) => ({
+    return request5(pendingFollow, null, (id) => ({
       type: "common.follow",
       id,
       pubkeys
     }));
   }
   function unfollow(...pubkeys) {
-    return request5(pendingUnfollow, "common.unfollow timed out", (id) => ({
+    return request5(pendingUnfollow, null, (id) => ({
       type: "common.unfollow",
       id,
       pubkeys
     }));
   }
   function react(targetEventId, reaction, customEmojiHref) {
-    return request5(pendingReact, "common.react timed out", (id) => ({
+    return request5(pendingReact, null, (id) => ({
       type: "common.react",
       id,
       targetEventId,
@@ -3447,7 +3450,7 @@ var NappletShimPrelude = (() => {
     }));
   }
   function report(target, reason, text) {
-    return request5(pendingReport, "common.report timed out", (id) => ({
+    return request5(pendingReport, null, (id) => ({
       type: "common.report",
       id,
       target,
