@@ -279,6 +279,7 @@ func DevUnload(id string) {
 		ci.Close()
 	}
 	devNapps.Delete(id)
+	forgetDispatchTarget(id)
 	refreshDev()
 	log.Info().Str("napp", id).Msg("dev napp unloaded")
 }

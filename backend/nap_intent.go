@@ -7,6 +7,12 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
+)
+
+var (
+	intentChangedMu      sync.Mutex
+	intentLastArchetypes = make(map[string]struct{})
 )
 
 // NAP-INTENT uses the launcher's handler selection and window routing, while
@@ -27,6 +33,17 @@ type intentRequest struct {
 	Convention string          `json:"convention"`
 	Payload    json.RawMessage `json:"payload"`
 	Handler    string          `json:"handler"`
+	Behavior   intentBehavior  `json:"behavior"`
+}
+
+type intentBehavior struct {
+	Focus     bool  `json:"focus"`
+	NewWindow bool  `json:"newWindow"`
+	Reuse     *bool `json:"reuse"`
+}
+
+func intentDefaultKey(archetype string) RuleKey {
+	return RuleKey{Permission: PermDispatch, Subject: "intent:" + archetype}
 }
 
 func napIntentInvoke(c *napCall) {
@@ -63,9 +80,13 @@ func napIntentInvoke(c *napCall) {
 	}
 	topic := req.Convention
 
-	opts := actionOptions{}
+	opts := actionOptions{
+		Focus:     req.Behavior.Focus,
+		NewWindow: req.Behavior.NewWindow || (req.Behavior.Reuse != nil && !*req.Behavior.Reuse),
+	}
 	switch h := req.Handler; {
 	case h == "" || h == "default":
+		opts.DefaultKey = intentDefaultKey(archetype)
 	case h == "choose":
 		opts.Choose = true
 	default:
@@ -169,7 +190,7 @@ func intentActionsFor(n Napp, archetype string) (actions, conventions []string, 
 func intentAvailability(archetype string) map[string]any {
 	candidates := []map[string]any{}
 	defaultID := ""
-	if rule, ok := lookupRule(RuleKey{Permission: PermDispatch, Subject: "napplet:" + archetype + "/open"}); ok &&
+	if rule, ok := lookupRule(intentDefaultKey(archetype)); ok &&
 		rule.Decision.granted() {
 		defaultID = rule.Target
 	}
@@ -222,12 +243,27 @@ func intentArchetypes() []string {
 // broadcastIntentChanges tells every napplet the handler landscape moved (a
 // napp or napplet was installed, removed or reloaded).
 func broadcastIntentChanges() {
+	intentChangedMu.Lock()
+	current := intentArchetypes()
+	changed := append([]string(nil), current...)
+	for previous := range intentLastArchetypes {
+		if !slices.Contains(current, previous) {
+			changed = append(changed, previous)
+		}
+	}
+	intentLastArchetypes = make(map[string]struct{}, len(current))
+	for _, archetype := range current {
+		intentLastArchetypes[archetype] = struct{}{}
+	}
+	sort.Strings(changed)
+	intentChangedMu.Unlock()
+
 	napplets := liveNapplets()
 	if len(napplets) == 0 {
 		return
 	}
 	envs := []any{}
-	for _, a := range intentArchetypes() {
+	for _, a := range changed {
 		envs = append(envs, map[string]any{"type": "intent.changed", "availability": intentAvailability(a)})
 	}
 	for _, ci := range napplets {

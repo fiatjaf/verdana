@@ -189,6 +189,10 @@ object VerdanaHost : UI {
         }
     }
 
+    override fun focusWindow(instance: String) {
+        appContext?.startActivityOnMain { surface(instance) }
+    }
+
     override fun closeWindow(instance: String) {
         // the window is on its way out either way: anything still queued
         // for it is never going to be delivered

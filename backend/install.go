@@ -86,6 +86,7 @@ func Uninstall(id string) {
 	// a napp that isn't installed can't be anyone's habitual handler, and
 	// whatever the next one installed under that id shouldn't inherit it
 	forgetActionUsage(id)
+	forgetDispatchTarget(id)
 
 	refreshInstalled()
 	log.Info().Str("napp", id).Msg("uninstall complete")

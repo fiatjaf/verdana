@@ -31,6 +31,7 @@ type UI interface {
 	// object with a "t": "resp" answers an rpc, "eval" runs code, "action"
 	// dispatches an action, "theme" changes the theme, "close" closes it.
 	SendToWindow(instance string, msgJSON string)
+	FocusWindow(instance string)
 
 	// CloseWindow gets rid of a napp's window (its tab). WindowClosed must be
 	// called once it is really gone.
@@ -117,6 +118,7 @@ type mobileTransport struct {
 }
 
 func (t mobileTransport) Send(msg backend.WireMsg) { t.ui.SendToWindow(t.instance, msg.JSON()) }
+func (t mobileTransport) Focus()                   { t.ui.FocusWindow(t.instance) }
 func (t mobileTransport) Close()                   { t.ui.CloseWindow(t.instance) }
 
 // ─── lifecycle ───────────────────────────────────────────────────

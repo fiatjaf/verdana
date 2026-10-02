@@ -85,6 +85,7 @@ type actionRequest struct {
 	// calling napp's or napplet's d-tag, or "launcher"
 	sender string
 	accept func(*Instance)
+	focus  bool
 }
 
 // windowRecord is what the launcher remembers about a window it has opened
@@ -263,6 +264,15 @@ func (ci *Instance) Close() {
 	ci.sendMu.Unlock()
 	if t != nil {
 		t.Close()
+	}
+}
+
+func (ci *Instance) focus() {
+	ci.sendMu.Lock()
+	t := ci.transport
+	ci.sendMu.Unlock()
+	if t != nil {
+		t.Focus()
 	}
 }
 
@@ -710,6 +720,12 @@ type actionOptions struct {
 	Choose bool   `json:"-"`
 	NappID string `json:"-"`
 
+	// Intent routing hints. DefaultKey is launcher-wide and keyed by
+	// archetype, unlike ordinary action permissions which are caller-specific.
+	DefaultKey RuleKey `json:"-"`
+	NewWindow  bool    `json:"-"`
+	Focus      bool    `json:"-"`
+
 	// Accept transfers delivery responsibility to the runtime after a target
 	// has been resolved (and launched, when necessary), but before delivery.
 	// Delivery then continues on a runtime-owned context so it is independent
@@ -766,7 +782,7 @@ func runNappAction(
 		callerName = caller.napp.Label()
 	}
 
-	req := &actionRequest{name: name, payload: payload, sender: "launcher", accept: opts.Accept}
+	req := &actionRequest{name: name, payload: payload, sender: "launcher", accept: opts.Accept, focus: opts.Focus}
 
 	callerID := ""
 	if caller != nil {
@@ -793,6 +809,21 @@ func runNappAction(
 	if len(candidates) == 0 && len(open) == 0 {
 		return nil, fmt.Errorf("%w: no installed napp handles %q", errNoHandler, name)
 	}
+	if opts.NewWindow {
+		open = nil
+	}
+	// A concrete handler dTag is already the resolution decision. Prefer its
+	// existing window unless the caller explicitly requested a new one.
+	if opts.NappID != "" && !opts.Choose {
+		if len(open) > 0 {
+			return dispatchTo(ctx, callerID, name, open[0], req)
+		}
+		ci, err := launch(ctx, candidates[0])
+		if err != nil {
+			return nil, err
+		}
+		return dispatchTo(ctx, callerID, name, ci, req)
+	}
 
 	// exactly one possibility: no need to bother the user (unless they are
 	// to be asked whatever: NAP-INTENT's handler "choose")
@@ -817,6 +848,9 @@ func runNappAction(
 	// who asked matters to the rules: the same action from another napp is
 	// another question
 	key := RuleKey{Napp: callerID, Permission: PermDispatch, Subject: name}
+	if opts.DefaultKey.valid() {
+		key = opts.DefaultKey
+	}
 
 	var choice PromptOption
 	if rule, ok := lookupRule(key); ok && !opts.Choose {
@@ -842,6 +876,9 @@ func runNappAction(
 			return nil, errors.New("action handler selection cancelled")
 		}
 		choice = picked
+		if opts.DefaultKey.valid() && !opts.Choose {
+			storeRule(opts.DefaultKey, Rule{Decision: DecisionAllow, Target: choice.NappID})
+		}
 	}
 
 	if choice.Instance != "" {
@@ -876,6 +913,9 @@ func dispatchTo(
 	req *actionRequest,
 ) (any, error) {
 	if ci != nil {
+		if req.focus {
+			ci.focus()
+		}
 		recordActionUse(caller, action, ci.napp.ID)
 		if r, ok := ctx.Value(dispatchReportKey{}).(*dispatchReport); ok {
 			r.mu.Lock()

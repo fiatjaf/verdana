@@ -80,6 +80,10 @@ type Transport interface {
 	// action dispatch, a theme change).
 	Send(msg WireMsg)
 
+	// Focus asks the platform to surface an existing window. Platforms that
+	// cannot reliably raise another process may leave this as a best effort.
+	Focus()
+
 	// Close asks the window to close. The platform is expected to call
 	// WindowClosed afterwards.
 	Close()

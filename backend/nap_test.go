@@ -32,9 +32,10 @@ import (
 // recTransport stands in for a napplet window: it keeps every NAP push the
 // backend evals into the host page.
 type recTransport struct {
-	mu     sync.Mutex
-	pushes []map[string]any
-	notify chan struct{}
+	mu      sync.Mutex
+	pushes  []map[string]any
+	notify  chan struct{}
+	focused int
 }
 
 func newRecTransport() *recTransport { return &recTransport{notify: make(chan struct{}, 1024)} }
@@ -65,6 +66,11 @@ func (r *recTransport) Send(m WireMsg) {
 }
 
 func (r *recTransport) Close() {}
+func (r *recTransport) Focus() {
+	r.mu.Lock()
+	r.focused++
+	r.mu.Unlock()
+}
 
 // find returns the pushes of a type.
 func (r *recTransport) find(typ string) []map[string]any {
@@ -710,6 +716,48 @@ func TestNapIntentWithoutHandlerOpensDiscovery(t *testing.T) {
 	}
 }
 
+func TestNapIntentChangedReportsLastHandlerRemoval(t *testing.T) {
+	setupNapTest(t)
+	caller, rec := openNapplet(t, "intent-watcher")
+	ready(t, caller, rec, 1)
+	handler := Napp{
+		ID: "napplet~0123456789abcdef~profile-handler", D: "profile-handler",
+		Name: "Profile Handler", Format: FormatNapplet,
+		Conventions: []NappletConvention{{ID: "napplet:profile/open"}},
+	}
+
+	intentChangedMu.Lock()
+	intentLastArchetypes = make(map[string]struct{})
+	intentChangedMu.Unlock()
+	stateMu.Lock()
+	if state.InstalledNapps == nil {
+		state.InstalledNapps = make(map[string]Napp)
+	}
+	state.InstalledNapps[handler.ID] = handler
+	stateMu.Unlock()
+	t.Cleanup(func() {
+		stateMu.Lock()
+		delete(state.InstalledNapps, handler.ID)
+		stateMu.Unlock()
+	})
+
+	broadcastIntentChanges()
+	first := rec.wait(t, "intent.changed", 1)["availability"].(map[string]any)
+	if first["archetype"] != "profile" || first["available"] != true {
+		t.Fatalf("handler addition: %v", first)
+	}
+
+	stateMu.Lock()
+	delete(state.InstalledNapps, handler.ID)
+	stateMu.Unlock()
+	broadcastIntentChanges()
+	removed := rec.wait(t, "intent.changed", 2)["availability"].(map[string]any)
+	if removed["archetype"] != "profile" || removed["available"] != false ||
+		len(removed["candidates"].([]any)) != 0 {
+		t.Fatalf("last handler removal: %v", removed)
+	}
+}
+
 func TestNapIntentAcceptanceSurvivesSourceLifecycle(t *testing.T) {
 	setupNapTest(t)
 	caller, recCaller := openNapplet(t, "intent-caller")
@@ -728,7 +776,7 @@ func TestNapIntentAcceptanceSurvivesSourceLifecycle(t *testing.T) {
 		delete(state.InstalledNapps, handler.napp.ID)
 		stateMu.Unlock()
 	})
-	key := RuleKey{Napp: caller.napp.ID, Permission: PermDispatch, Subject: "napplet:profile/open"}
+	key := intentDefaultKey("profile")
 	setSessionRule(key, Rule{Decision: DecisionAllow, Target: handler.napp.ID})
 	t.Cleanup(func() { clearSessionRule(key) })
 
@@ -736,6 +784,9 @@ func TestNapIntentAcceptanceSurvivesSourceLifecycle(t *testing.T) {
 	post(t, caller, map[string]any{"type": "intent.available", "id": "available", "archetype": "profile"})
 	availability := recCaller.wait(t, "intent.available.result", 1)["availability"].(map[string]any)
 	candidates := availability["candidates"].([]any)
+	if availability["hasDefault"] != true || candidates[0].(map[string]any)["isDefault"] != true {
+		t.Fatalf("default not reflected by availability: %v", availability)
+	}
 	contract := candidates[0].(map[string]any)["contracts"].([]any)[0].(map[string]any)
 	if contract["convention"] != "napplet:profile/open" {
 		t.Fatalf("availability contracts: %v", availability)
@@ -752,12 +803,19 @@ func TestNapIntentAcceptanceSurvivesSourceLifecycle(t *testing.T) {
 	post(t, caller, map[string]any{"type": "intent.invoke", "id": "invoke", "request": map[string]any{
 		"archetype": "profile",
 		"payload":   map[string]any{"pubkey": "abc"},
+		"behavior":  map[string]any{"focus": true},
 	}})
 	result := recCaller.wait(t, "intent.invoke.result", 2)["result"].(map[string]any)
 	if result["ok"] != true || result["handler"] != handler.napp.D || result["handled"] != true ||
 		result["windowId"] != handler.instance || result["action"] != "open" ||
 		result["convention"] != "napplet:profile/open" {
 		t.Fatalf("acceptance result: %v", result)
+	}
+	recHandler.mu.Lock()
+	focused := recHandler.focused
+	recHandler.mu.Unlock()
+	if focused != 1 {
+		t.Fatalf("focus requests = %d, want 1", focused)
 	}
 
 	// End the source session before the target becomes ready. Accepted delivery

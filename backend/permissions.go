@@ -317,6 +317,30 @@ func ForgetPermission(napp string, perm Permission) {
 	}
 }
 
+// forgetDispatchTarget removes defaults that point at an app which is no
+// longer installed. Leaving one behind would turn a missing handler into a
+// stale-rule failure instead of allowing discovery or another user choice.
+func forgetDispatchTarget(target string) {
+	for id, rule := range sessionRules.Range {
+		if rule.Target == target {
+			sessionRules.Delete(id)
+		}
+	}
+
+	stateMu.Lock()
+	changed := false
+	for id, rule := range state.Rules {
+		if rule.Target == target {
+			delete(state.Rules, id)
+			changed = true
+		}
+	}
+	if changed {
+		saveState()
+	}
+	stateMu.Unlock()
+}
+
 // ─── the installed configuration ──────────────────────────────────
 //
 // A napp — or the person running it — will be able to ship a document saying

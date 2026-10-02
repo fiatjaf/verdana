@@ -88,6 +88,11 @@ func (ct *childTransport) Close() {
 	ct.Send(backend.WireMsg{T: "close"})
 }
 
+// The child webview library has no cross-platform raise operation. Dispatch
+// still reaches the existing window; compositors that prevent focus stealing
+// are allowed to leave this hint unfulfilled.
+func (ct *childTransport) Focus() {}
+
 // readChild hands everything the child says to the backend, until it exits.
 func readChild(ct *childTransport, stdout io.ReadCloser) {
 	dec := json.NewDecoder(stdout)
