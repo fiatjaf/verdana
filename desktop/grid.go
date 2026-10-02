@@ -2,6 +2,8 @@ package main
 
 import (
 	"image"
+	"image/color"
+	"strconv"
 	"strings"
 	"verdana/backend"
 
@@ -22,6 +24,9 @@ const (
 	tileMinWidth = unit.Dp(280)
 	// tileGap is the space between tiles, across and down.
 	tileGap = unit.Dp(8)
+	// footerAuthorMin is the room a tile's author keeps beside its buttons;
+	// with less, the buttons go on a line of their own.
+	footerAuthorMin = unit.Dp(110)
 )
 
 // gridColumns is how many tiles of at least tileMinWidth fit across width.
@@ -29,6 +34,42 @@ func gridColumns(gtx layout.Context, width int) int {
 	gap := gtx.Dp(tileGap)
 	cols := (width + gap) / (gtx.Dp(tileMinWidth) + gap)
 	return max(cols, 1)
+}
+
+// nappGrid lists the napps vis indexes: as a grid of tiles, as many across as
+// the window fits, or one card per row in a window too narrow for two. card
+// draws the napp at an index either way. lastCols remembers the column count
+// from frame to frame: the list scrolls by row, so when a resize changes how
+// many napps a row holds, the position is moved to keep the same ones in view.
+func nappGrid(
+	gtx layout.Context,
+	th *material.Theme,
+	list *widget.List,
+	lastCols *int,
+	vis []int,
+	card func(gtx layout.Context, row int, tile bool) layout.Dimensions,
+) layout.Dimensions {
+	cols := gridColumns(gtx, gtx.Constraints.Max.X)
+	if *lastCols != 0 && cols != *lastCols {
+		list.Position.First = list.Position.First * *lastCols / cols
+		list.Position.Offset = 0
+	}
+	*lastCols = cols
+	if cols == 1 {
+		return material.List(th, list).Layout(gtx, len(vis), func(gtx layout.Context, i int) layout.Dimensions {
+			return card(gtx, vis[i], false)
+		})
+	}
+	rows := (len(vis) + cols - 1) / cols
+	return material.List(th, list).Layout(gtx, rows, func(gtx layout.Context, r int) layout.Dimensions {
+		first := r * cols
+		n := min(cols, len(vis)-first)
+		return layout.Inset{Bottom: tileGap}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return gridRow(gtx, cols, n, func(gtx layout.Context, i int) layout.Dimensions {
+				return card(gtx, vis[first+i], true)
+			})
+		})
+	})
 }
 
 // gridRow lays out the n cells of one grid row in cols equal columns, every
@@ -61,28 +102,67 @@ func gridRow(gtx layout.Context, cols, n int, cell func(gtx layout.Context, i in
 }
 
 // wrapFlow lays the widgets out left to right, starting a new line whenever
-// the next one would not fit.
-func wrapFlow(gtx layout.Context, gap unit.Dp, items []layout.Widget) layout.Dimensions {
+// the next one would not fit. With end set, each line is pushed to the
+// right edge.
+func wrapFlow(gtx layout.Context, gap unit.Dp, end bool, items []layout.Widget) layout.Dimensions {
+	type placed struct {
+		call op.CallOp
+		size image.Point
+	}
 	g := gtx.Dp(gap)
 	maxW := gtx.Constraints.Max.X
 	cg := gtx
 	cg.Constraints.Min = image.Point{}
-	x, y, lineH, w := 0, 0, 0, 0
+	var lines [][]placed
+	var line []placed
+	lineW := 0
 	for _, item := range items {
 		m := op.Record(gtx.Ops)
 		d := item(cg)
 		call := m.Stop()
-		if x > 0 && x+d.Size.X > maxW {
-			x, y, lineH = 0, y+lineH+g, 0
+		if len(line) > 0 && lineW+g+d.Size.X > maxW {
+			lines, line, lineW = append(lines, line), nil, 0
 		}
-		t := op.Offset(image.Pt(x, y)).Push(gtx.Ops)
-		call.Add(gtx.Ops)
-		t.Pop()
-		w = max(w, x+d.Size.X)
-		lineH = max(lineH, d.Size.Y)
-		x += d.Size.X + g
+		if len(line) > 0 {
+			lineW += g
+		}
+		lineW += d.Size.X
+		line = append(line, placed{call, d.Size})
 	}
-	return layout.Dimensions{Size: image.Pt(w, y+lineH)}
+	if len(line) > 0 {
+		lines = append(lines, line)
+	}
+	w, y := 0, 0
+	for i, line := range lines {
+		lw, lh := -g, 0
+		for _, p := range line {
+			lw += p.size.X + g
+			lh = max(lh, p.size.Y)
+		}
+		x := 0
+		if end {
+			x = max(maxW-lw, 0)
+		}
+		if i > 0 {
+			y += g
+		}
+		for _, p := range line {
+			t := op.Offset(image.Pt(x, y)).Push(gtx.Ops)
+			p.call.Add(gtx.Ops)
+			t.Pop()
+			x += p.size.X + g
+		}
+		y += lh
+		w = max(w, x-g)
+	}
+	return layout.Dimensions{Size: image.Pt(w, y)}
+}
+
+// cardDescription is a napp's description the way a card or tile shows it:
+// one paragraph, and cut well short of anything that could take more than
+// the few lines the card gives it (the napp page has it in full).
+func cardDescription(s string) string {
+	return truncate(s, 240)
 }
 
 // renderNappTile draws one napp as a grid tile: icon and name on top, then
@@ -96,6 +176,7 @@ func renderNappTile(
 	cardBtn,
 	authorBtn,
 	openBtn,
+	settingsBtn,
 	btn,
 	secondBtn *widget.Clickable,
 	btnLabel,
@@ -106,23 +187,88 @@ func renderNappTile(
 	fill := gtx.Constraints.Min.Y > 0
 	width := gtx.Constraints.Max.X
 
-	button := func(b *widget.Clickable, label string, primary bool) layout.FlexChild {
-		return layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			if b == nil || label == "" {
-				return layout.Dimensions{}
+	// the buttons: Open and Settings in their softer colours, then the
+	// update and install/uninstall ones
+	var buttons []layout.Widget
+	button := func(b *widget.Clickable, label string, colors *[2]color.NRGBA) {
+		if b == nil || label == "" {
+			return
+		}
+		buttons = append(buttons, func(gtx layout.Context) layout.Dimensions {
+			pointer.CursorPointer.Add(gtx.Ops)
+			s := material.Button(th, b, label)
+			if colors != nil {
+				s.Background, s.Color = colors[0], colors[1]
 			}
-			return layout.Inset{Left: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				pointer.CursorPointer.Add(gtx.Ops)
-				s := material.Button(th, b, label)
-				if !primary {
-					s.Background = currentTheme().suggestBg
-					s.Color = currentTheme().suggestFg
-				}
-				s.TextSize = unit.Sp(13)
-				s.Inset = layout.Inset{Top: unit.Dp(6), Bottom: unit.Dp(6), Left: unit.Dp(10), Right: unit.Dp(10)}
-				return s.Layout(gtx)
-			})
+			s.TextSize = unit.Sp(13)
+			s.Inset = layout.Inset{Top: unit.Dp(6), Bottom: unit.Dp(6), Left: unit.Dp(10), Right: unit.Dp(10)}
+			return s.Layout(gtx)
 		})
+	}
+	p := currentTheme()
+	button(openBtn, "Open", &[2]color.NRGBA{p.suggestBg, p.suggestFg})
+	button(settingsBtn, "Settings", &[2]color.NRGBA{p.chipBg, p.chipFg})
+	button(secondBtn, secondLabel, nil)
+	button(btn, btnLabel, nil)
+
+	author := func(gtx layout.Context) layout.Dimensions {
+		if authorName == "" {
+			return layout.Dimensions{}
+		}
+		inner := func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return avatar(gtx, authorPic, 18)
+				}),
+				layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
+				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					c := material.Caption(th, authorName)
+					c.Color = currentTheme().muted
+					c.MaxLines = 1
+					return c.Layout(gtx)
+				}),
+			)
+		}
+		if authorBtn == nil {
+			return inner(gtx)
+		}
+		pointer.CursorPointer.Add(gtx.Ops)
+		return authorBtn.Layout(gtx, inner)
+	}
+
+	// the author shares a line with the buttons while there is room for
+	// both; otherwise it gets its own, and the buttons wrap below it
+	footer := func(gtx layout.Context) layout.Dimensions {
+		gap := gtx.Dp(6)
+		total := -gap
+		mg := gtx.Disabled()
+		mg.Constraints.Min = image.Point{}
+		for _, b := range buttons {
+			m := op.Record(gtx.Ops)
+			total += b(mg).Size.X + gap
+			m.Stop()
+		}
+		if total+gtx.Dp(footerAuthorMin) <= gtx.Constraints.Max.X {
+			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+				layout.Flexed(1, author),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return wrapFlow(gtx, unit.Dp(6), false, buttons)
+				}),
+			)
+		}
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+			layout.Rigid(author),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				if authorName == "" || len(buttons) == 0 {
+					return layout.Dimensions{}
+				}
+				return layout.Spacer{Height: unit.Dp(8)}.Layout(gtx)
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				gtx.Constraints.Min.X = gtx.Constraints.Max.X
+				return wrapFlow(gtx, unit.Dp(6), true, buttons)
+			}),
+		)
 	}
 
 	children := []layout.FlexChild{
@@ -160,69 +306,28 @@ func renderNappTile(
 				return layout.Dimensions{}
 			}
 			return layout.Inset{Top: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				l := material.Body2(th, strings.Join(strings.Fields(napp.Description), " "))
+				l := material.Body2(th, cardDescription(napp.Description))
 				l.Color = currentTheme().subtle
 				l.MaxLines = 3
 				return l.Layout(gtx)
 			})
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			var chips []layout.Widget
-			for _, action := range napp.Actions {
-				if strings.TrimSpace(action) == "" {
-					continue
-				}
-				chips = append(chips, func(gtx layout.Context) layout.Dimensions {
-					return actionChip(gtx, th, action)
-				})
-			}
+			chips := actionChips(th, napp)
 			if len(chips) == 0 {
 				return layout.Dimensions{}
 			}
 			return layout.Inset{Top: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return wrapFlow(gtx, unit.Dp(4), chips)
+				return wrapFlow(gtx, unit.Dp(4), false, chips)
 			})
 		}),
 	}
 	if fill {
 		children = append(children, layout.Flexed(1, layout.Spacer{}.Layout))
 	}
-	children = append(children,
-		// the author on the left, the buttons on the right
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layout.Inset{Top: unit.Dp(10)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-						if authorName == "" {
-							return layout.Dimensions{}
-						}
-						inner := func(gtx layout.Context) layout.Dimensions {
-							return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-									return avatar(gtx, authorPic, 18)
-								}),
-								layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
-								layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-									c := material.Caption(th, authorName)
-									c.Color = currentTheme().muted
-									c.MaxLines = 1
-									return c.Layout(gtx)
-								}),
-							)
-						}
-						if authorBtn == nil {
-							return inner(gtx)
-						}
-						pointer.CursorPointer.Add(gtx.Ops)
-						return authorBtn.Layout(gtx, inner)
-					}),
-					button(openBtn, "Open", false),
-					button(secondBtn, secondLabel, true),
-					button(btn, btnLabel, true),
-				)
-			})
-		}),
-	)
+	children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+		return layout.Inset{Top: unit.Dp(10)}.Layout(gtx, footer)
+	}))
 
 	macro := op.Record(gtx.Ops)
 	dims := layout.UniformInset(unit.Dp(12)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
@@ -245,4 +350,30 @@ func renderNappTile(
 	// buttons inside it stay clickable (see renderNappCard)
 	pointer.CursorPointer.Add(gtx.Ops)
 	return cardBtn.Layout(gtx, paintTile)
+}
+
+// maxActionChips is how many of a napp's actions its card or tile shows;
+// the rest are counted in one last chip, so a napp handling dozens of
+// actions doesn't stretch its card (and, in a grid, its whole row).
+const maxActionChips = 6
+
+// actionChips are a napp's actions as chips, for wrapFlow.
+func actionChips(th *material.Theme, napp backend.Napp) []layout.Widget {
+	var actions []string
+	for _, action := range napp.Actions {
+		if strings.TrimSpace(action) != "" {
+			actions = append(actions, truncate(action, 32))
+		}
+	}
+	if len(actions) > maxActionChips {
+		more := len(actions) - (maxActionChips - 1)
+		actions = append(actions[:maxActionChips-1], "+"+strconv.Itoa(more)+" more")
+	}
+	chips := make([]layout.Widget, len(actions))
+	for i, action := range actions {
+		chips[i] = func(gtx layout.Context) layout.Dimensions {
+			return actionChip(gtx, th, action)
+		}
+	}
+	return chips
 }

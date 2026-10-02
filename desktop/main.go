@@ -85,8 +85,9 @@ var (
 	// discoKind* constants), switched by discoKindBtns.
 	discoKind     int
 	discoKindBtns [3]widget.Clickable
-	// discoCols is how many napps a row of the discovery tab held last frame.
-	discoCols int
+	// discoCols and installedCols are how many napps a row of the
+	// discovery and installed tabs held last frame (see nappGrid).
+	discoCols, installedCols int
 )
 
 const (

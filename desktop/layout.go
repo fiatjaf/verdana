@@ -375,9 +375,13 @@ func layoutMain(
 
 // truncate keeps a label short enough for a dialog line.
 func truncate(s string, max int) string {
-	s = strings.Join(strings.Fields(s), " ")
-	if len(s) > max {
-		return s[:max] + "…"
+	return capRunes(strings.Join(strings.Fields(s), " "), max)
+}
+
+// capRunes cuts s to at most max characters, marking the cut with "…".
+func capRunes(s string, max int) string {
+	if r := []rune(s); len(r) > max {
+		return strings.TrimRight(string(r[:max]), " \t\n") + "…"
 	}
 	return s
 }
@@ -782,8 +786,9 @@ func layoutNappsTab(
 				l.Color = currentTheme().muted
 				return l.Layout(gtx)
 			}
-			return material.List(th, list).Layout(gtx, len(vis), func(gtx layout.Context, i int) layout.Dimensions {
-				row := vis[i]
+			// a grid of tiles, as many across as the window fits; a narrow
+			// window gets the one-per-row cards instead
+			return nappGrid(gtx, th, list, &installedCols, vis, func(gtx layout.Context, row int, tile bool) layout.Dimensions {
 				var cardBtn, uninstBtn *widget.Clickable
 				if row < len(cardBtns) {
 					cardBtn = &cardBtns[row]
@@ -804,6 +809,9 @@ func layoutNappsTab(
 				}
 				if row < len(settingsBtns) && st.Installed[row].IsNapplet() {
 					settingsBtn = &settingsBtns[row]
+				}
+				if tile {
+					return renderNappTile(gtx, th, cardBtn, authorBtn, openBtn, settingsBtn, uninstBtn, updateBtn, "Uninstall", "Update", st.Installed[row])
 				}
 				return renderNappCard(gtx, th, cardBtn, authorBtn, openBtn, settingsBtn, uninstBtn, updateBtn, "Uninstall", "Update", st.Installed[row])
 			})
@@ -955,33 +963,11 @@ func layoutDiscoveryTab(
 					authorBtn = &authorBtns[row]
 				}
 				if tile {
-					return renderNappTile(gtx, th, cardBtn, authorBtn, openBtn, btn, updBtn, label, updLabel, n)
+					return renderNappTile(gtx, th, cardBtn, authorBtn, openBtn, nil, btn, updBtn, label, updLabel, n)
 				}
 				return renderNappCard(gtx, th, cardBtn, authorBtn, openBtn, nil, btn, updBtn, label, updLabel, n)
 			}
-			cols := gridColumns(gtx, gtx.Constraints.Max.X)
-			// the list scrolls by row: keep the same napps in view when a
-			// resize changes how many a row holds
-			if discoCols != 0 && cols != discoCols {
-				list.Position.First = list.Position.First * discoCols / cols
-				list.Position.Offset = 0
-			}
-			discoCols = cols
-			if cols == 1 {
-				return material.List(th, list).Layout(gtx, len(vis), func(gtx layout.Context, i int) layout.Dimensions {
-					return card(gtx, vis[i], false)
-				})
-			}
-			rows := (len(vis) + cols - 1) / cols
-			return material.List(th, list).Layout(gtx, rows, func(gtx layout.Context, r int) layout.Dimensions {
-				first := r * cols
-				n := min(cols, len(vis)-first)
-				return layout.Inset{Bottom: tileGap}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-					return gridRow(gtx, cols, n, func(gtx layout.Context, i int) layout.Dimensions {
-						return card(gtx, vis[first+i], true)
-					})
-				})
-			})
+			return nappGrid(gtx, th, list, &discoCols, vis, card)
 		}),
 	)
 }
@@ -1264,6 +1250,7 @@ func actionChip(gtx layout.Context, th *material.Theme, action string) layout.Di
 	macro := op.Record(gtx.Ops)
 	label := material.Caption(th, action)
 	label.Color = p.chipFg
+	label.MaxLines = 1
 	dims := layout.UniformInset(unit.Dp(4)).Layout(gtx, label.Layout)
 	call := macro.Stop()
 	bg := clip.RRect{Rect: image.Rectangle{Max: dims.Size}, NW: 5, NE: 5, SW: 5, SE: 5}
@@ -1344,6 +1331,7 @@ func renderNappCard(
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 							label := material.Body1(th, napp.Name)
 							label.Font.Weight = font.Bold
+							label.MaxLines = 2
 							if !napp.IsNapplet() {
 								return label.Layout(gtx)
 							}
@@ -1358,26 +1346,12 @@ func renderNappCard(
 							)
 						}),
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							actions := make([]string, 0, len(napp.Actions))
-							for _, action := range napp.Actions {
-								if strings.TrimSpace(action) != "" {
-									actions = append(actions, action)
-								}
-							}
-							if len(actions) == 0 {
+							chips := actionChips(th, napp)
+							if len(chips) == 0 {
 								return layout.Dimensions{}
 							}
 							return layout.Inset{Top: unit.Dp(5)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-								children := make([]layout.FlexChild, 0, len(actions)*2)
-								for i, action := range actions {
-									if i > 0 {
-										children = append(children, layout.Rigid(layout.Spacer{Width: unit.Dp(4)}.Layout))
-									}
-									children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-										return actionChip(gtx, th, action)
-									}))
-								}
-								return layout.Flex{Axis: layout.Horizontal}.Layout(gtx, children...)
+								return wrapFlow(gtx, unit.Dp(4), false, chips)
 							})
 						}),
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -1385,8 +1359,9 @@ func renderNappCard(
 								return layout.Dimensions{}
 							}
 							return layout.Inset{Top: unit.Dp(2)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-								l := material.Body2(th, napp.Description)
+								l := material.Body2(th, cardDescription(napp.Description))
 								l.Color = currentTheme().subtle
+								l.MaxLines = 3
 								return l.Layout(gtx)
 							})
 						}),

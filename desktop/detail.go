@@ -36,11 +36,16 @@ type extraTab struct {
 
 var extraTabState *extraTab
 
+// nappDetailList scrolls the napp page, whose description and file list
+// can run past the bottom of the window.
+var nappDetailList = widget.List{List: layout.List{Axis: layout.Vertical}}
+
 func openNappTab(n backend.Napp) {
 	pubkey := ""
 	if n.Author.Hex() != "" {
 		pubkey = n.Author.Hex()
 	}
+	nappDetailList.Position = layout.Position{}
 	extraTabState = &extraTab{kind: "napp", title: truncate(n.Label(), 18), nappID: n.ID, napp: n, pubkey: pubkey}
 	ensureProfile(pubkey)
 	setTab(tabExtra)
@@ -250,7 +255,7 @@ func layoutNappDetail(
 	if n.Description != "" {
 		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.Inset{Top: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				l := material.Body2(th, n.Description)
+				l := material.Body2(th, capRunes(n.Description, 4000))
 				l.Color = currentTheme().subtle
 				return l.Layout(gtx)
 			})
@@ -395,7 +400,9 @@ func layoutNappDetail(
 		}
 		children = append(children, detailRow(th, "Files", strings.Join(paths, ", ")))
 	}
-	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
+	return material.List(th, &nappDetailList).Layout(gtx, 1, func(gtx layout.Context, _ int) layout.Dimensions {
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
+	})
 }
 
 // layoutProfileDetail is the ephemeral profile page: name, about,
