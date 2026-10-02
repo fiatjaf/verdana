@@ -105,7 +105,7 @@ jobs:
         run: |
           mkdir -p dist
           if [ "$RUNNER_OS" = "Windows" ]; then
-            mv verdana.exe dist/verdana.exe
+            mv verdana dist/verdana.exe
             7z a "dist/verdana-${{ matrix.id }}.zip" ./dist/verdana.exe
           else
             mv verdana dist/verdana
