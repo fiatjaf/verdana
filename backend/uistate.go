@@ -48,9 +48,9 @@ type State struct {
 	// Relays are the discovery relays.
 	Relays []string `json:"relays"`
 
-	// Installed napps, most recently launched first. Discovery holds the ones
-	// the relays found, with the ones not installed yet first — see
-	// sortDiscovery.
+	// Installed napps, with updates available first, then most recently
+	// launched first. Discovery holds the ones the relays found, with the
+	// ones not installed yet first — see sortDiscovery.
 	Installed []Napp `json:"installed"`
 	Discovery []Napp `json:"discovery"`
 
@@ -188,6 +188,14 @@ func Snapshot() State {
 			s.Installed[i].UpdateAvailable = &newVersion
 		}
 	}
+	// napps with an update available float to the top of the installed
+	// list, so the ones needing attention are seen first. Stable sort
+	// keeps the most-recently-launched order among themselves.
+	sort.SliceStable(s.Installed, func(i, j int) bool {
+		iUpd := s.Installed[i].UpdateAvailable != nil
+		jUpd := s.Installed[j].UpdateAvailable != nil
+		return iUpd && !jUpd
+	})
 	// author names resolve in the background and are stamped on every
 	// snapshot, so the UIs get them for free (display and filtering).
 	for i := range s.Installed {
