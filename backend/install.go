@@ -16,7 +16,7 @@ import (
 )
 
 // refreshInstalled republishes the installed list into the launcher state.
-// Ordering is installedNapps' business (most recently launched first), and the
+// Ordering is installedNapps' business (most opened first), and the
 // discovery list gets resorted around the new set: an install or uninstall
 // moves its napp between the top and bottom halves of that list.
 func refreshInstalled() {
@@ -69,7 +69,7 @@ func Uninstall(id string) {
 
 	stateMu.Lock()
 	delete(state.InstalledNapps, id)
-	delete(state.LastLaunched, id)
+	delete(state.LaunchCounts, id)
 	saveState()
 	stateMu.Unlock()
 

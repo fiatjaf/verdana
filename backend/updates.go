@@ -155,11 +155,11 @@ func applyUpdate(current, newer Napp) {
 
 	// adopt the new event wholesale (new paths, new metadata), keeping the
 	// id the launcher knows it by (the id is author~d, so it is already the
-	// same — this only guards against a weird event)
+	// same — this only guards against a weird event). The open count is
+	// kept: updating is not reopening from zero.
 	newer.ID = current.ID
 	stateMu.Lock()
 	state.InstalledNapps[current.ID] = newer
-	delete(state.LastLaunched, current.ID)
 	saveState()
 	stateMu.Unlock()
 

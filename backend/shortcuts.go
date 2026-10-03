@@ -271,7 +271,15 @@ func RunShortcutEntries(entries []ShortcutEntry) error {
 			continue
 		}
 		if len(entry.Actions) == 0 {
-			Launch(napp)
+			// a shortcut open is not an Open-button open: it
+			// launches without counting toward the installed
+			// list's most-opened order (see markLaunched).
+			go func(n Napp) {
+				if _, err := launch(context.Background(), n); err != nil {
+					log.Error().Err(err).Str("napp", n.ID).Msg("launch failed")
+					SetFetchErr("launch failed: " + err.Error())
+				}
+			}(napp)
 			continue
 		}
 		if err := openAndDispatch(ctx, napp, entry.Actions); err != nil {
@@ -288,13 +296,14 @@ const shortcutActionTimeout = 60 * time.Second
 // openAndDispatch launches a napp (or finds its running instance) and sends
 // each action straight there, in order, with no handler-picking prompt: a
 // shortcut names its napp exactly, unlike an unknown-caller action dispatch.
+// A shortcut-driven open never counts toward the installed list's
+// most-opened order (see markLaunched): only Open-button opens do.
 func openAndDispatch(ctx context.Context, napp Napp, actions []ShortcutAction) error {
 	if running := runningForNapp(napp.ID); len(running) > 0 {
 		log.Info().Str("napp", napp.ID).Str("instance", running[0].instance).Msg("shortcut reusing open instance")
 		return dispatchActions(ctx, running[0], actions)
 	}
 
-	markLaunched(napp.ID)
 	ci, err := launch(ctx, napp)
 	if err != nil {
 		return err

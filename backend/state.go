@@ -19,11 +19,16 @@ type AppState struct {
 	Relays         []string        `json:"relays"`
 	InstalledNapps map[string]Napp `json:"installed_napps"`
 
-	// LastLaunched records when the user last started a napp from the
-	// launcher's installed list, so it can be shown most-recently-used first.
-	// Launches that happen because another napp dispatched an action don't
-	// count: the user didn't choose that window.
-	LastLaunched map[string]time.Time `json:"last_launched"`
+	// LaunchCounts records how many times the user started a napp from
+	// the launcher's Open buttons, so the installed list can be shown
+	// most-opened first. Launches that happen because another napp
+	// dispatched an action, or because a bundle shortcut opened it, don't
+	// count: the user didn't choose that window from the launcher.
+	LaunchCounts map[string]int `json:"launch_counts"`
+
+	// LastLaunched is the pre-counts ordering, kept only to migrate old
+	// state files: anything launched before counts existed starts at 1.
+	LastLaunched map[string]time.Time `json:"last_launched,omitempty"`
 
 	// Rules are the answers the user gave to permission prompts that were
 	// meant to stick ("always allow", "always deny"), keyed by RuleKey
@@ -72,9 +77,17 @@ func loadState() {
 	if state.InstalledNapps == nil {
 		state.InstalledNapps = make(map[string]Napp)
 	}
-	if state.LastLaunched == nil {
-		state.LastLaunched = make(map[string]time.Time)
+	if state.LaunchCounts == nil {
+		state.LaunchCounts = make(map[string]int)
 	}
+	// migrate the pre-counts ordering: anything the user had launched
+	// before counts existed starts at 1, never-opened napps stay at 0.
+	if len(state.LaunchCounts) == 0 && len(state.LastLaunched) > 0 {
+		for id := range state.LastLaunched {
+			state.LaunchCounts[id] = 1
+		}
+	}
+	state.LastLaunched = nil
 	if state.Rules == nil {
 		state.Rules = make(map[string]Rule)
 	}
@@ -148,32 +161,36 @@ func installedNapps() []Napp {
 	for _, n := range state.InstalledNapps {
 		list = append(list, n)
 	}
-	last := make(map[string]time.Time, len(state.LastLaunched))
-	for id, t := range state.LastLaunched {
-		last[id] = t
+	counts := make(map[string]int, len(state.LaunchCounts))
+	for id, c := range state.LaunchCounts {
+		counts[id] = c
 	}
 	stateMu.Unlock()
 
-	// most recently started first, then by name: never-started napps sink
-	// to the bottom (their zero time sorts before everything), keeping the
-	// alphabetical order readable among themselves.
+	// most opened first, then by name: never-opened napps sink to the
+	// bottom (their zero count sorts after everything opened), keeping
+	// the alphabetical order readable among themselves.
 	sort.Slice(list, func(i, j int) bool {
-		ti, tj := last[list[i].ID], last[list[j].ID]
-		if !ti.Equal(tj) {
-			return ti.After(tj)
+		ci, cj := counts[list[i].ID], counts[list[j].ID]
+		if ci != cj {
+			return ci > cj
 		}
 		return list[i].Name < list[j].Name
 	})
 	return list
 }
 
-// markLaunched records a user-initiated launch of a napp. Only the launcher's
-// own Open buttons get here: action-driven window opens (a napp dispatching
-// into another napp) never do, because the user didn't pick that napp.
+// markLaunched records one user-initiated open of a napp. Only the
+// launcher's own Open buttons get here: action-driven window opens (a napp
+// dispatching into another napp) and bundle shortcut runs never do,
+// because the user didn't pick that napp from the launcher.
 func markLaunched(id string) {
 	stateMu.Lock()
 	if _, ok := state.InstalledNapps[id]; ok {
-		state.LastLaunched[id] = time.Now()
+		if state.LaunchCounts == nil {
+			state.LaunchCounts = make(map[string]int)
+		}
+		state.LaunchCounts[id]++
 		saveState()
 	}
 	stateMu.Unlock()

@@ -411,10 +411,12 @@ func (ci *Instance) waitForHandler(ctx context.Context, name string) (int, bool)
 
 // ─── launching ───────────────────────────────────────────────────
 
-// Launch opens a napp window without waiting for it (what a launcher button
-// does). Failures show up as the launcher's error.
+// Launch opens a napp window without waiting for it (what the launcher's
+// Open buttons do). Failures show up as the launcher's error.
 func Launch(napp Napp) {
-	// a launch the user asked for is what the installed list is ordered by
+	// an Open-button open is what the installed list is ordered by:
+	// action dispatches and shortcut runs use launch directly and never
+	// count here.
 	markLaunched(napp.ID)
 
 	go func() {
