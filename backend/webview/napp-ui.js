@@ -356,6 +356,130 @@
 
   const links = (...children) => el("nav", "v-links", children)
 
+  // authors is who the napp names. Every element ui.author makes is filed
+  // under its pubkey, and when a profile arrives (the kit's own lookup, or the
+  // napp handing one over with authors.set) exactly those are repainted.
+  // Until then a person is their petname from the viewer's follow list, or a
+  // short npub.
+  const authorUsers = new Map() // pubkey -> NostrUser
+  const authorPetnames = new Map() // pubkey -> petname from the viewer's kind 3
+  const authorNodes = new Map() // pubkey -> Set of elements showing them
+  const authorAsked = new Set()
+  let authorLoad = pk => window.napp.utils.loadNostrUser(pk)
+
+  const shortNpub = pk => {
+    try {
+      const npub = window.napp.nip19.npubEncode(pk)
+      return npub.slice(0, 10) + "…" + npub.slice(-4)
+    } catch {
+      return String(pk).slice(0, 8) + "…"
+    }
+  }
+
+  const authorName = pk => {
+    const user = authorUsers.get(pk)
+    const md = (user && user.metadata) || {}
+    return (
+      md.display_name ||
+      md.displayName ||
+      md.name ||
+      authorPetnames.get(pk) ||
+      (user && user.shortName && !user.shortName.startsWith("npub") ? user.shortName : "") ||
+      shortNpub(pk)
+    )
+  }
+
+  const authorPicture = pk => {
+    const user = authorUsers.get(pk)
+    return (user && (user.image || (user.metadata && user.metadata.picture))) || ""
+  }
+
+  const paintAuthor = node => {
+    const pk = node.dataset.pubkey
+    node.label.textContent = (node.prefix || "") + authorName(pk)
+    if (node.pic) {
+      const src = authorPicture(pk)
+      if (src && node.pic.img.getAttribute("src") !== src) node.pic.img.src = src
+    }
+  }
+
+  const repaintAuthor = pk => {
+    const nodes = authorNodes.get(pk)
+    if (!nodes) return
+    for (const node of nodes) {
+      // an element that was on the page and left it is forgotten; one not
+      // put on the page yet is still to come
+      if (node.isConnected) node.shown = true
+      else if (node.shown) {
+        nodes.delete(node)
+        continue
+      }
+      paintAuthor(node)
+    }
+  }
+
+  const authors = {
+    /** use sets how profiles are found: load(pubkey) returns a NostrUser, or
+     * load: null when the napp hands every profile over with set itself. */
+    use({ load } = {}) {
+      authorLoad = typeof load === "function" ? load : null
+    },
+    /** set hands over a profile, and every element naming them repaints. */
+    set(pk, user) {
+      if (!pk) return
+      if (user) authorUsers.set(pk, user)
+      else authorUsers.delete(pk)
+      repaintAuthor(pk)
+    },
+    /** name is what the kit calls a person right now. */
+    name: pk => authorName(pk),
+    /** viewer takes the viewer's follow list (kind 3): its petnames name the
+     * people whose profiles don't. */
+    viewer(event) {
+      authorPetnames.clear()
+      for (const tag of (event && event.tags) || []) {
+        if (tag[0] === "p" && tag[1] && tag[3]) authorPetnames.set(tag[1], tag[3])
+      }
+      for (const pk of authorNodes.keys()) repaintAuthor(pk)
+    },
+  }
+
+  // author is one element for a person: a name, with picture: true their
+  // avatar ahead of it, with prefix: "@" a mention.
+  const author = (pk, { picture, prefix, onClick, className } = {}) => {
+    const node = el(onClick ? "button" : "span", "v-author")
+    if (onClick) {
+      node.type = "button"
+      node.addEventListener("click", event => {
+        event.stopPropagation()
+        onClick(pk, event)
+      })
+    }
+    classes(node, className)
+    node.dataset.pubkey = pk
+    node.prefix = prefix
+    if (picture) {
+      node.pic = appIcon({ size: "s", fade: true, className: "v-author__pic" })
+      node.append(node.pic)
+    }
+    node.label = el("span", "v-author__name")
+    node.append(node.label)
+    paintAuthor(node)
+
+    let nodes = authorNodes.get(pk)
+    if (!nodes) authorNodes.set(pk, (nodes = new Set()))
+    nodes.add(node)
+
+    if (authorLoad && !authorUsers.has(pk) && !authorAsked.has(pk)) {
+      authorAsked.add(pk)
+      Promise.resolve()
+        .then(() => authorLoad(pk))
+        .then(user => user && authors.set(pk, user))
+        .catch(() => {})
+    }
+    return node
+  }
+
   const ui = {
     // layout
     el,
@@ -401,6 +525,8 @@
     icon,
     appIcon,
     links,
+    author,
+    authors,
     busy,
     spinner,
   }

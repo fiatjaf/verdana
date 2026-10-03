@@ -1393,3 +1393,38 @@ textarea.v-input {
   )[hidden] {
   display: none;
 }
+
+/* author: a person wherever one is named (ui.author), their avatar round */
+.v-author {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--v-gap-tight);
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+  vertical-align: baseline;
+}
+
+button.v-author {
+  cursor: pointer;
+}
+
+button.v-author:hover .v-author__name {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.v-author__pic {
+  border-radius: 50%;
+  flex: none;
+}
+
+.v-author__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
