@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"fiatjaf.com/nostr"
+
+	"verdana/backend/wasm"
 )
 
 // NappPath is one file of a napp: where it goes and the blob that holds it.
@@ -49,9 +51,13 @@ func sanitizeInitialSize(width, height int) (NappInitialSize, bool) {
 }
 
 // WindowSize is the size a napp window should open at: its initial_size when
-// valid, the roomy default otherwise. Minimums keep a degenerate value from
+// valid, the mode's default otherwise. Minimums keep a degenerate value from
 // making an unusable window.
 func (n Napp) WindowSize() (int, int) {
+	defW, defH := DefaultWindowWidth, DefaultWindowHeight
+	if n.IsWasm() {
+		defW, defH = wasm.DefaultWidth, wasm.DefaultHeight
+	}
 	if n.InitialSize != nil {
 		if s, ok := sanitizeInitialSize(n.InitialSize.Width, n.InitialSize.Height); ok {
 			w, h := s.Width, s.Height
@@ -64,10 +70,35 @@ func (n Napp) WindowSize() (int, int) {
 			return w, h
 		}
 	}
-	return DefaultWindowWidth, DefaultWindowHeight
+	return defW, defH
 }
 
-// Napp is a napp as its kind:35130 event describes it.
+// What a napp is is its event kind, the way an nsite is 35128 and a napplet
+// is 35129: a web napp is a page a webview loads, a wasm napp is a module it
+// runs. Kind decides; tags describe. Everything else about a napp window is
+// the same either way.
+const (
+	// KindWeb is the usual napp: a page, served and loaded.
+	KindWeb = nostr.Kind(35130)
+
+	// KindWasm is a napp made of one WebAssembly module that paints into a
+	// canvas the launcher hands it. See wasm and WASM.md.
+	KindWasm = nostr.Kind(35131)
+)
+
+// How a napp is hosted, as the window shells see it: ModeWeb loads the napp's
+// index.html, ModeWasm runs its module. Backend.Napp.Kind is the source of
+// truth; this is only the word the shell is picked by.
+const (
+	// ModeWeb is the default: the napp's index.html, served and loaded.
+	ModeWeb = "web"
+
+	// ModeWasm is a napp made of one WebAssembly module that paints into a
+	// canvas the launcher hands it. See wasm and WASM.md.
+	ModeWasm = "wasm"
+)
+
+// Napp is a napp as its kind:35130 or kind:35131 event describes it.
 type Napp struct {
 	ID          string           `json:"id"`
 	D           string           `json:"d"`
@@ -83,8 +114,13 @@ type Napp struct {
 	Paths       []NappPath       `json:"paths"`
 	Servers     []string         `json:"servers"`
 
+	// Kind is the event kind that described the napp: 35130 for a page,
+	// 35131 for a module. Zero reads as 35130, which is what every record
+	// written before kinds split carries.
+	Kind nostr.Kind `json:"kind,omitempty"`
+
 	// UpdateAvailable is stamped by Snapshot(): a newer version of this napp
-	// was seen on the relays (kind:35130, same author+d-tag, newer
+	// was seen on the relays (same kind, same author+d-tag, newer
 	// created_at). It is not part of the wire model.
 	UpdateAvailable *Napp `json:"updateAvailable"`
 }
@@ -95,6 +131,43 @@ func (n Napp) Label() string {
 		return n.Name
 	}
 	return n.ID
+}
+
+// KindOf is the event kind that described the napp, with the past folded in:
+// records written before the kinds split carry zero and were all pages.
+func (n Napp) KindOf() nostr.Kind {
+	if n.Kind == KindWasm {
+		return KindWasm
+	}
+	return KindWeb
+}
+
+// Mode is how the napp gets hosted: ModeWeb for the usual page-in-a-webview,
+// ModeWasm for a module painting a canvas.
+func (n Napp) Mode() string {
+	if n.KindOf() == KindWasm {
+		return ModeWasm
+	}
+	return ModeWeb
+}
+
+// IsWasm says whether this is a wasm napp: a module instead of a page.
+func (n Napp) IsWasm() bool { return n.Mode() == ModeWasm }
+
+// WasmFile is where the napp's module lives on disk once the napp is
+// installed (or, for a dev napp, is loaded from a folder): always
+// /app.wasm. False when the file is not there — a wasm napp with no module
+// has nothing to run.
+func (n Napp) WasmFile() (string, bool) {
+	root := nappBaseDir(n.ID)
+	if d := devLookup(n.ID); d != nil && d.source == "folder" {
+		root = d.dir
+	}
+	abs := filepath.Join(root, wasm.DefaultEntry)
+	if st, err := os.Stat(abs); err != nil || !st.Mode().IsRegular() {
+		return "", false
+	}
+	return abs, true
 }
 
 // Handles says whether the napp declares this action. A napp declaring "view"

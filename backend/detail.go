@@ -50,7 +50,7 @@ func FetchProfileDetail(pubkeyHex string) ProfileDetail {
 	}
 }
 
-// FetchAuthorNapps lists the kind:35130 napps an author published: from the
+// FetchAuthorNapps lists the kind:35130/35131 napps an author published: from the
 // author's own write relays plus the launcher's discovery relays. Newest
 // version wins per d-tag, so an author that republished the same napp shows
 // up once. It blocks (with its own timeout), so call it off the render loop.
@@ -80,14 +80,14 @@ func FetchAuthorNapps(pubkeyHex string) []Napp {
 
 	// whatever is already local renders instantly
 	for evt := range sys.Store.QueryEvents(nostr.Filter{
-		Kinds:   []nostr.Kind{35130},
+		Kinds:   []nostr.Kind{KindWeb, KindWasm},
 		Authors: []nostr.PubKey{pk},
 	}, 200) {
 		collect(evt)
 	}
 
 	for re := range sys.Pool.FetchMany(ctx, urls, nostr.Filter{
-		Kinds:   []nostr.Kind{35130},
+		Kinds:   []nostr.Kind{KindWeb, KindWasm},
 		Authors: []nostr.PubKey{pk},
 	}, nostr.SubscriptionOptions{Label: "verdana-author-napps"}) {
 		collect(re.Event)

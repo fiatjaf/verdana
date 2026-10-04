@@ -9,8 +9,7 @@ import (
 )
 
 func initSystem(dataDir string) (func(), error) {
-	log.Info().Str("path", filepath.Join(dataDir, "eventstore")).Msg("init eventstore")
-	db, closeEventStore, err := openEventStore(filepath.Join(dataDir, "eventstore"))
+	db, closeEventStore, err := openEventStore(dataDir)
 	if err != nil {
 		return nil, err
 	}

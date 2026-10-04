@@ -56,7 +56,10 @@ require (
 	github.com/ebitengine/purego v0.8.2 // indirect
 )
 
-require verdana/backend v0.0.0
+require (
+	github.com/tetratelabs/wazero v1.12.0
+	verdana/backend v0.0.0
+)
 
 require (
 	github.com/RoaringBitmap/roaring v1.9.4 // indirect

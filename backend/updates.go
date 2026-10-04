@@ -7,12 +7,12 @@ import (
 	"fiatjaf.com/nostr"
 )
 
-// Napp updates are the same kind:35130 event, same author and d-tag, with a
+// Napp updates are the same kind:35130/35131 event, same author and d-tag, with a
 // newer created_at: there are no version numbers, only newer publications.
 // Discovery keeps the in-memory list fresh passively; CheckForUpdates goes
 // out and asks the source relays about every installed napp at once.
 
-// CheckForUpdates looks for a newer kind:35130 of every installed napp — on
+// CheckForUpdates looks for a newer kind:35130/35131 of every installed napp — on
 // the discovery relays and on each author's outbox relays — and marks the
 // napps it found new versions for. Non-blocking: watch UpdateCheckRunning and
 // the per-napp UpdateAvailable flags in the state for the outcome.
@@ -68,7 +68,7 @@ func checkAllUpdates(napps []Napp) map[string]Napp {
 	}
 
 	for re := range sys.Pool.FetchMany(ctx, Relays(), nostr.Filter{
-		Kinds: []nostr.Kind{35130},
+		Kinds: []nostr.Kind{KindWeb, KindWasm},
 		Tags:  nostr.TagMap{"d": ds},
 	}, nostr.SubscriptionOptions{}) {
 		napp := nappFromEvent(re.Event)
@@ -80,7 +80,7 @@ func checkAllUpdates(napps []Napp) map[string]Napp {
 
 	for _, napp := range napps {
 		re := sys.Pool.QuerySingle(ctx, sys.FetchWriteRelays(ctx, napp.Author), nostr.Filter{
-			Kinds:   []nostr.Kind{35130},
+			Kinds:   []nostr.Kind{KindWeb, KindWasm},
 			Authors: []nostr.PubKey{napp.Author},
 			Tags:    nostr.TagMap{"d": []string{napp.D}},
 			Limit:   1,
@@ -100,7 +100,7 @@ func checkAllUpdates(napps []Napp) map[string]Napp {
 	return found
 }
 
-// scanRelays queries one relay set for the current kind:35130 of the given
+// scanRelays queries one relay set for the current kind:35130/35131 of the given
 // napps and feeds every event to handle. It returns false when the round was
 // cut short (a relay that never answered), so the caller can keep its old
 // cache instead of narrowing it to what a truncated round saw.
@@ -202,7 +202,7 @@ func newerVersion(n Napp) *Napp {
 	return nil
 }
 
-// fetchCurrentEvent fetches the current kind:35130 of a napp from its
+// fetchCurrentEvent fetches the current kind:35130/35131 of a napp from its
 // author's outbox relays (falling back to the discovery relays).
 func fetchCurrentEvent(author nostr.PubKey, d string) *nostr.Event {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -214,7 +214,7 @@ func fetchCurrentEvent(author nostr.PubKey, d string) *nostr.Event {
 	}
 
 	for re := range sys.Pool.FetchMany(ctx, urls, nostr.Filter{
-		Kinds:   []nostr.Kind{35130},
+		Kinds:   []nostr.Kind{KindWeb, KindWasm},
 		Authors: []nostr.PubKey{author},
 		Tags:    nostr.TagMap{"d": []string{d}},
 		Limit:   1,

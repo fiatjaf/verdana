@@ -60,6 +60,12 @@ type UI interface {
 type mobileHost struct{ ui UI }
 
 func (h mobileHost) OpenWindow(spec backend.WindowSpec) (backend.Transport, error) {
+	// A napp window on the phone is a WebView, so there is nowhere to run a
+	// wasm module: it gets a window only if the desktop can, which it can't
+	// here. Saying so beats opening a blank tab.
+	if spec.Mode == backend.ModeWasm {
+		return nil, errors.New("wasm napps don't run on android yet")
+	}
 	payload, err := json.Marshal(map[string]any{
 		"instance":    spec.Instance,
 		"nappId":      spec.NappID,
@@ -248,7 +254,7 @@ func Profile(pubkeyHex string) string {
 	return string(data)
 }
 
-// AuthorNapps lists the kind:35130 napps an author published as JSON: from
+// AuthorNapps lists the kind:35130/35131 napps an author published as JSON: from
 // the author's own write relays plus the launcher's discovery relays.
 // Blocks with its own timeout; call it off the main thread.
 func AuthorNapps(pubkeyHex string) string {

@@ -13,12 +13,18 @@ import (
 )
 
 // gioHost is this launcher's answer to everything platform-shaped the backend
-// needs: a napp window is an OS window backed by its own webview process, a
-// redraw is a Gio invalidation, a download goes to ~/Downloads and a link
-// goes to whatever the desktop uses to open links.
+// needs: a napp window is an OS window backed by its own process — a webview
+// for a web napp, a canvas for a wasm one — a redraw is a Gio invalidation,
+// a download goes to ~/Downloads and a link goes to whatever the desktop
+// uses to open links.
 type gioHost struct{}
 
+// OpenWindow picks the shell that matches the napp's mode. Both are the same
+// wire to the backend; only what is inside the window differs.
 func (gioHost) OpenWindow(spec backend.WindowSpec) (backend.Transport, error) {
+	if spec.Mode == backend.ModeWasm {
+		return startWasmChild(spec)
+	}
 	return startChild(spec)
 }
 

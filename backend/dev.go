@@ -19,6 +19,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"verdana/backend/wasm"
 
 	"github.com/puzpuzpuz/xsync/v3"
 )
@@ -36,7 +37,8 @@ import (
 // turns into manifest tags on publish, and its id is "dev~<metadata id>".
 
 // devMetadata is the metadata.json at the top level of a napp folder (next to
-// index.html), or served by a dev server next to its index.
+// index.html, or next to app.wasm for a wasm napp), or served by a dev server
+// next to its index.
 type devMetadata struct {
 	ID          string   `json:"id"`
 	Title       string   `json:"title"`
@@ -311,8 +313,21 @@ func readDevFolder(dir string) (Napp, error) {
 	if err != nil {
 		return Napp{}, err
 	}
-	indexInfo, err := os.Stat(filepath.Join(dir, "index.html"))
-	if err != nil || !indexInfo.Mode().IsRegular() {
+	indexInfo, statErr := os.Stat(filepath.Join(dir, "index.html"))
+	hasIndex := statErr == nil && indexInfo.Mode().IsRegular()
+	hasModule := false
+	for _, p := range napp.Paths {
+		if p.Path == "/"+wasm.DefaultEntry {
+			hasModule = true
+			break
+		}
+	}
+	// What the folder is is decided after the walk above, so napp.Paths is
+	// complete: no index.html and an app.wasm beside the metadata.json is a
+	// wasm napp. A web napp is a page, so it needs an index.html.
+	if !hasIndex && hasModule {
+		napp.Kind = KindWasm
+	} else if !hasIndex {
 		return Napp{}, fmt.Errorf("no index.html in %s", dir)
 	}
 	sort.Slice(napp.Paths, func(i, j int) bool { return napp.Paths[i].Path < napp.Paths[j].Path })

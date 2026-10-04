@@ -449,6 +449,8 @@ func launchWithInstance(ctx context.Context, napp Napp, requestedInstance string
 
 	appDir := nappBaseDir(id)
 	pageURL := ""
+	mode := napp.Mode()
+	wasmFile := ""
 	if d := devLookup(id); d != nil {
 		// dev napps live in memory, not on disk: the shell navigates to
 		// the throwaway server (folder napps) or the dev server (url napps)
@@ -460,6 +462,17 @@ func launchWithInstance(ctx context.Context, napp Napp, requestedInstance string
 		if err := os.MkdirAll(appDir, 0755); err != nil {
 			return nil, err
 		}
+	}
+
+	// What the napp is made of is checked before a window exists, so a
+	// broken install says so here instead of opening a blank window.
+	if mode == ModeWasm {
+		f, ok := napp.WasmFile()
+		if !ok {
+			return nil, fmt.Errorf("napp %s has no wasm module to run", id)
+		}
+		wasmFile = f
+	} else if pageURL == "" {
 		if _, err := os.Stat(filepath.Join(appDir, "index.html")); err != nil {
 			return nil, fmt.Errorf("napp %s is not installed", id)
 		}
@@ -497,6 +510,8 @@ func launchWithInstance(ctx context.Context, napp Napp, requestedInstance string
 		Description: napp.Description,
 		Dir:         appDir,
 		URL:         pageURL,
+		Mode:        mode,
+		Wasm:        wasmFile,
 		Requires:    napp.Requires,
 		Theme:       themeName,
 		ThemeVars:   themeVars,

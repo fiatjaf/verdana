@@ -27,13 +27,15 @@ jobs:
         working-directory: backend
         run: go test ./...
 
-      # embed_prod.go embeds child/child, so the child has to exist before the
+      # embed_prod.go embeds both shells, so they have to exist before the
       # desktop package can even be compiled on a fresh checkout
-      - name: build child
+      - name: build shells
         working-directory: desktop
         env:
           CGO_ENABLED: "1"
-        run: go build -o child/child ./child
+        run: |
+          go build -o child/child ./child
+          go build -o wasmchild/wasmchild ./wasmchild
 
       - name: test desktop
         working-directory: desktop
@@ -85,13 +87,16 @@ jobs:
           cd backend && go mod download
           cd ../desktop && go mod download
 
-      # the child (the webview host) is embedded into the main binary by
-      # embed_prod.go, so it has to be built for the same target first
-      - name: build child
+      # the shells (the webview host and the wasm canvas host) are embedded
+      # into the main binary by embed_prod.go, so they have to be built for
+      # the same target first
+      - name: build shells
         working-directory: desktop
         env:
           CGO_ENABLED: "1"
-        run: go build -o child/child ./child
+        run: |
+          go build -o child/child ./child
+          go build -o wasmchild/wasmchild ./wasmchild
 
       - name: build verdana
         working-directory: desktop

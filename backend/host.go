@@ -100,6 +100,14 @@ type WindowSpec struct {
 	// Dir holds the napp's unpacked files (index.html and friends).
 	Dir string
 
+	// Mode is how the napp is hosted: ModeWeb for the usual page in a
+	// webview, ModeWasm for a module painting a canvas. A host that has no
+	// wasm window says so by failing OpenWindow.
+	Mode string
+
+	// Wasm is the napp's module, an absolute path, set only for ModeWasm.
+	Wasm string
+
 	// URL navigates the shell straight to a page instead of serving Dir:
 	// dev napps use it (a dev-server url, or the throwaway server the
 	// backend runs for folder dev napps). Empty for installed napps.

@@ -184,9 +184,7 @@ fun LoginScreen(activity: MainActivity, st: LauncherState) {
         Button(onClick = { activity.login(input.trim()) }, modifier = Modifier.fillMaxWidth()) {
             Text("Log in")
         }
-        Spacer(Modifier.height(8.dp))
-        Text("— or —", style = MaterialTheme.typography.bodyMedium, color = theme.subtle)
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(26.dp))
         if (Amber.installed(activity)) {
             var amberErr by remember { mutableStateOf("") }
             AmberLogin(activity, theme) { amberErr = it }

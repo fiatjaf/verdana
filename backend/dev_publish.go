@@ -70,7 +70,7 @@ func DevPublishInfoFor(id string) (DevPublishInfo, error) {
 	return DevPublishInfo{Napp: napp, Files: files}, nil
 }
 
-// PublishDev uploads a folder dev napp, signs its kind-35130 manifest, and
+// PublishDev uploads a folder dev napp, signs its kind-35130/35131 manifest, and
 // publishes it to selected relays. Every file must reach at least one server.
 // Progress is reported line-by-line through onStep (may be nil).
 func PublishDev(ctx context.Context, id string, servers, relays []string, protected bool, onStep func(string)) (int, int, error) {
@@ -178,8 +178,8 @@ func PublishDev(ctx context.Context, id string, servers, relays []string, protec
 		tags = append(tags, nostr.Tag{"-"})
 	}
 	tags = append(tags, nostr.Tag{"d", napp.D})
-	step("signing kind:35130 event (%d tags, %d path tags)...", len(tags), len(napp.Paths))
-	event := nostr.Event{Kind: 35130, CreatedAt: nostr.Now(), Tags: tags}
+	step("signing kind:%d event (%d tags, %d path tags)...", napp.KindOf(), len(tags), len(napp.Paths))
+	event := nostr.Event{Kind: napp.KindOf(), CreatedAt: nostr.Now(), Tags: tags}
 	if err := userKeyer.SignEvent(ctx, &event); err != nil {
 		step("signing failed: %v", err)
 		return 0, 0, fmt.Errorf("signing manifest: %w", err)

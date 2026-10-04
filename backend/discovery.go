@@ -31,7 +31,7 @@ func Discover() {
 
 	events, eose := sys.Pool.SubscribeManyNotifyEOSE(ctx, urls,
 		nostr.Filter{
-			Kinds: []nostr.Kind{35130},
+			Kinds: []nostr.Kind{KindWeb, KindWasm},
 		},
 		nostr.SubscriptionOptions{
 			Label:          "verdana-discovery",
@@ -64,6 +64,7 @@ func nappFromEvent(evt nostr.Event) Napp {
 		ID:        evt.PubKey.Hex()[:16] + "~" + d,
 		Author:    evt.PubKey,
 		CreatedAt: evt.CreatedAt,
+		Kind:      evt.Kind,
 	}
 
 	for _, tag := range evt.Tags {

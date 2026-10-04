@@ -150,7 +150,7 @@ func main() {
 	go func() {
 		gioMain()
 		backend.CloseAllWindows()
-		killAllChildren()
+		killAllShells()
 		closeStores()
 		os.Exit(0)
 	}()

@@ -1,14 +1,17 @@
+# A napp window is its own process: child/ is the webview shell, wasmchild/
+# is the canvas shell a wasm napp paints into. Both are built before the
+# launcher, because a release build embeds them.
 run:
-    cd desktop && go build -o child/child ./child && go build -o verdana -tags 'dev,novulkan' && WEBVIEW_DEBUG=true ./verdana
+    cd desktop && go build -o child/child ./child && go build -o wasmchild/wasmchild ./wasmchild && go build -o verdana -tags 'dev,novulkan' && WEBVIEW_DEBUG=true ./verdana
 
 prod:
-    cd desktop && go build -o child/child ./child && go build -o verdana -tags 'novulkan' .
+    cd desktop && go build -o child/child ./child && go build -o wasmchild/wasmchild ./wasmchild && go build -o verdana -tags novulkan .
 
 # the ui kit carries the launcher's own face (desktop/assets/*.ttf is
 # Verdana, in three faces) as woff2, inlined by backend/webview/embed.go.
 # Regenerate them when those ttf files change.
 fonts:
-	(cd desktop/assets && woff2_compress v.TTF && woff2_compress vb.ttf && woff2_compress vi.ttf)
+	(cd desktop/assets && woff2_compress v.TTF && woff2_compress vb.ttf && woff2_compress vi.TTF)
 	cp desktop/assets/v.woff2 desktop/assets/vb.woff2 desktop/assets/vi.woff2 backend/webview/fonts/
 	rm -f desktop/assets/*.woff2
 
