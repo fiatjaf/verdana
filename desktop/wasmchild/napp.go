@@ -16,15 +16,23 @@ import (
 // napp is one wasm napp running inside this process: the module wazero
 // instantiated, the functions it exports, and the canvas it last painted.
 //
-// The module gets the three canvas imports and nothing else. There is no WASI
-// here, and no way to add one: a napp that wants a file, a socket or a clock
-// of its own asks the launcher for it like every other napp does, so the
-// capability stays somewhere permission can see it.
+// The module gets the canvas imports and napp_call, and nothing else. There
+// is no WASI here, and no way to add one: a napp that wants a file, a socket
+// or a clock of its own asks the launcher for it through napp_call like every
+// other napp does, so the capability stays somewhere permission can see it.
 type napp struct {
 	mod   api.Module
 	frame api.Function
 	ptr   api.Function
 	event api.Function
+
+	// alloc and receive are how messages get into the module: present
+	// whenever it imports napp_call, since its answers come back this way.
+	alloc   api.Function
+	receive api.Function
+
+	// call is napp_call's body: the bridge, or nil when there is none.
+	call func(method string, params []byte) int32
 
 	// width and height are what the canvas is right now. The imports read
 	// them, so a napp learns about a resize by asking.
@@ -41,8 +49,9 @@ type napp struct {
 	animating bool
 }
 
-// loadWasmNapp compiles and instantiates the module at path.
-func loadWasmNapp(path string, nowMS func() float64) (*napp, error) {
+// loadWasmNapp compiles and instantiates the module at path. call is what the
+// module's napp_call reaches; nil answers every call with id 0.
+func loadWasmNapp(path string, nowMS func() float64, call func(method string, params []byte) int32) (*napp, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -54,7 +63,7 @@ func loadWasmNapp(path string, nowMS func() float64) (*napp, error) {
 	// to run, the launcher drives it a frame at a time.
 	cfg := wazero.NewModuleConfig().WithName("").WithStartFunctions()
 
-	n := &napp{started: nowMS()}
+	n := &napp{started: nowMS(), call: call}
 
 	if _, err := rt.NewHostModuleBuilder(wasm.HostModule).
 		NewFunctionBuilder().
@@ -69,6 +78,11 @@ func loadWasmNapp(path string, nowMS func() float64) (*napp, error) {
 		NewFunctionBuilder().
 		WithFunc(func(offset, length uint32) { n.say(int32(offset), int32(length)) }).
 		Export(wasm.ImportLog).
+		NewFunctionBuilder().
+		WithFunc(func(ctx context.Context, m api.Module, mPtr, mLen, pPtr, pLen uint32) int32 {
+			return n.hostCall(m, mPtr, mLen, pPtr, pLen)
+		}).
+		Export(wasm.ImportCall).
 		Instantiate(ctx); err != nil {
 		rt.Close(ctx)
 		return nil, err
@@ -112,7 +126,19 @@ func loadWasmNapp(path string, nowMS func() float64) (*napp, error) {
 	// still perfectly valid.
 	n.event = mod.ExportedFunction(wasm.ExportEvent)
 
-	log.Info().Str("wasm", path).Bool("input", n.event != nil).Msg("wasm napp ready")
+	// A napp that calls out must have somewhere for the answers to land.
+	// One that does not call is spared the two exports.
+	n.alloc = mod.ExportedFunction(wasm.ExportAlloc)
+	n.receive = mod.ExportedFunction(wasm.ExportReceive)
+	if importsCall(compiled) && (n.alloc == nil || n.receive == nil) {
+		mod.Close(ctx)
+		rt.Close(ctx)
+		return nil, fmt.Errorf("the module imports %s but does not export both %s and %s, "+
+			"so there is no way to hand it the answers", wasm.ImportCall, wasm.ExportAlloc, wasm.ExportReceive)
+	}
+
+	log.Info().Str("wasm", path).Bool("input", n.event != nil).Bool("calls", n.receive != nil).
+		Msg("wasm napp ready")
 	return n, nil
 }
 
@@ -135,6 +161,16 @@ func missingImports(compiled wazero.CompiledModule) []string {
 		list = append(list, wasm.Import{Module: module, Name: name})
 	}
 	return wasm.MissingImports(list)
+}
+
+// importsCall says whether the module imports napp_call.
+func importsCall(compiled wazero.CompiledModule) bool {
+	for _, f := range compiled.ImportedFunctions() {
+		if module, name, ok := f.Import(); ok && module == wasm.HostModule && name == wasm.ImportCall {
+			return true
+		}
+	}
+	return false
 }
 
 // Resize tells the module the canvas it should paint at. The next frame sees
@@ -219,6 +255,59 @@ func (n *napp) Input(kind int32, x, y int32, buttons int32, a, b float32) {
 	); err != nil {
 		log.Warn().Err(err).Int("kind", int(kind)).Msg("napp rejected an input event")
 	}
+}
+
+// hostCall is the body of the napp_call import: read the method and params
+// out of the module's memory and hand them to the bridge, which answers
+// later. Never blocks, never calls back into the module.
+func (n *napp) hostCall(m api.Module, mPtr, mLen, pPtr, pLen uint32) int32 {
+	if n.call == nil || mLen == 0 || mLen > 256 || pLen > maxMessage {
+		return 0
+	}
+	mem := m.Memory()
+	method, ok := mem.Read(mPtr, mLen)
+	if !ok {
+		return 0
+	}
+	params, ok := mem.Read(pPtr, pLen)
+	if !ok {
+		return 0
+	}
+	// both are views into the module's memory, which the module is free
+	// to reuse as soon as this returns
+	return n.call(string(method), append([]byte(nil), params...))
+}
+
+// maxMessage caps what a napp may hand napp_call in one go, the size of a
+// saveFile payload being the practical limit.
+const maxMessage = 64 << 20
+
+// Deliver hands the module one message through napp_receive: the bytes go
+// into room it allocates with napp_alloc, which it then owns. A module with
+// no napp_receive called nothing and has nothing coming.
+func (n *napp) Deliver(kind, id int32, data []byte) error {
+	if n.receive == nil {
+		return nil
+	}
+	ctx := context.Background()
+	var ptr uint32
+	if len(data) > 0 {
+		res, err := n.alloc.Call(ctx, uint64(uint32(len(data))))
+		if err != nil {
+			return err
+		}
+		if len(res) == 0 {
+			return errors.New("napp_alloc returned nothing")
+		}
+		ptr = uint32(res[0])
+		// the memory may have grown inside napp_alloc, so it is looked up
+		// only now
+		if !n.mod.Memory().Write(ptr, data) {
+			return fmt.Errorf("napp_alloc gave %d, which does not fit %d bytes", ptr, len(data))
+		}
+	}
+	_, err := n.receive.Call(ctx, uint64(uint32(kind)), uint64(uint32(id)), uint64(ptr), uint64(uint32(len(data))))
+	return err
 }
 
 // say passes one of the module's log lines on to the launcher's own log.

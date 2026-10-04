@@ -25,8 +25,8 @@ package wasm
 
 import "slices"
 
-// The import module the host provides. A module must import exactly these
-// three functions from it.
+// The import module the host provides. A module may import any of the
+// functions below from it, and nothing else.
 const HostModule = "env"
 
 // Imports: the host calling into the napp.
@@ -49,6 +49,16 @@ const (
 	// at offset in the napp's own memory, which is how anything at all
 	// crosses into wasm.
 	ImportLog = "napp_log"
+
+	// ImportCall is napp_call(method_ptr, method_len, params_ptr,
+	// params_len) -> id: the wasm side of everything bridge.js gives a web
+	// napp (window.nostr, window.nostrdb, window.napp). method is one of the
+	// bridge's rpc names and params its JSON, both utf-8 in the napp's own
+	// memory. It never blocks: it returns a call id at once (always > 0) and
+	// the answer arrives later through ExportReceive as MsgResult or
+	// MsgError carrying that id. A module importing this must export
+	// ExportAlloc and ExportReceive, or there is nowhere to put the answer.
+	ImportCall = "napp_call"
 )
 
 // Exports: the napp calling out to the host.
@@ -71,6 +81,52 @@ const (
 	// it when the module exports it, and only from between two frames, so a
 	// napp can simply append to a queue and look at it when it next paints.
 	ExportEvent = "napp_event"
+
+	// ExportAlloc is napp_alloc(len) -> ptr: room for len bytes in the
+	// napp's memory, which the host fills before handing it over through
+	// ExportReceive. Ownership passes to the napp with the message, so the
+	// napp frees it whenever it is done with it.
+	ExportAlloc = "napp_alloc"
+
+	// ExportReceive is napp_receive(kind, id, ptr, len): the host handing
+	// the napp one message, len bytes at ptr (from napp_alloc; ptr is 0 when
+	// len is). Like ExportEvent it is only ever called between two frames,
+	// and the frame after it always runs.
+	ExportReceive = "napp_receive"
+)
+
+// The messages a host hands over through ExportReceive.
+const (
+	// MsgResult answers the napp_call with this id; the bytes are its JSON
+	// result.
+	MsgResult int32 = iota
+
+	// MsgError says the napp_call with this id failed; the bytes are the
+	// error message, as plain text.
+	MsgError
+
+	// MsgFeed is one batch from the feed the napp_call with this id
+	// started: {"events": [...], "synced": bool}. synced turns true once
+	// the relays have sent everything stored, after which only live events
+	// follow.
+	MsgFeed
+
+	// MsgAction is the outside world calling the napp: an action it
+	// registered with napp.registerAction was dispatched to this window.
+	// The bytes are {"name", "payload", "idx"}, idx being whatever the
+	// napp registered the pattern with. The napp answers by calling
+	// napp.dispatchResult with {"id": <this id>, "result"} or {"id",
+	// "error"}; an id of -1 means nobody is waiting for an answer.
+	MsgAction
+
+	// MsgStorage says another window of the same napp changed its storage:
+	// {"op": "set"|"remove"|"clear", "key", "value"}. This window's
+	// storage already has the change by the time the napp hears of it.
+	MsgStorage
+
+	// MsgTheme says the user switched the launcher's theme: {"name",
+	// "vars"}, the same thing napp.theme answers with.
+	MsgTheme
 )
 
 // The input events a host reports through ExportEvent. Pointer coordinates
@@ -90,7 +146,7 @@ const (
 	ButtonMiddle    = 4
 )
 
-// CanvasEntryDefault is the module a wasm napp gets when its manifest does
+// DefaultEntry is the module a wasm napp gets when its manifest does
 // not name one: /app.wasm.
 const DefaultEntry = "app.wasm"
 
@@ -118,13 +174,15 @@ type Import struct {
 	Name   string
 }
 
-// NeededImports are the imports a wasm napp must have, from HostModule.
+// NeededImports are the imports a host provides from HostModule, which are
+// also the only ones a wasm napp may have.
 func NeededImports() []Import {
 	return []Import{
 		{HostModule, ImportCanvasWidth},
 		{HostModule, ImportCanvasHeight},
 		{HostModule, ImportNowMs},
 		{HostModule, ImportLog},
+		{HostModule, ImportCall},
 	}
 }
 

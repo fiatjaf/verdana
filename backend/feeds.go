@@ -221,7 +221,8 @@ func feedPump(ctx context.Context, ci *Instance, callbackID int, filter nostr.Fi
 	}
 }
 
-// deliverFeed hands a batch to the napp's callback inside its webview.
+// deliverFeed hands a batch to the napp's callback inside its webview (or,
+// for a wasm napp, to its module).
 func (ci *Instance) deliverFeed(callbackID int, events []nostr.Event, synced bool) {
 	if events == nil {
 		events = []nostr.Event{}
@@ -229,6 +230,11 @@ func (ci *Instance) deliverFeed(callbackID int, events []nostr.Event, synced boo
 	payload, err := json.Marshal(events)
 	if err != nil {
 		log.Error().Err(err).Msg("failed to marshal feed events")
+		return
+	}
+	if ci.napp.IsWasm() {
+		ci.send(WireMsg{T: "feed", ID: callbackID,
+			Params: `{"events":` + string(payload) + `,"synced":` + jsBool(synced) + `}`})
 		return
 	}
 	ci.eval("window.__bridge_feed_callback(" +

@@ -79,7 +79,7 @@ func TestFrameRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	n, err := loadWasmNapp(path, func() float64 { return 0 })
+	n, err := loadWasmNapp(path, func() float64 { return 0 }, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func TestRefusesImportsBeyondTheCanvas(t *testing.T) {
 		t.Skipf("no wasm assembler available: %v", err)
 	}
 
-	_, err := loadWasmNapp(out, func() float64 { return 0 })
+	_, err := loadWasmNapp(out, func() float64 { return 0 }, nil)
 	if err == nil {
 		t.Fatal("a module importing WASI should not run here")
 	}
@@ -145,7 +145,7 @@ func TestRefusesAModuleWithoutTheExports(t *testing.T) {
 		t.Skipf("no wasm assembler available: %v", err)
 	}
 
-	if _, err := loadWasmNapp(out, func() float64 { return 0 }); err == nil {
+	if _, err := loadWasmNapp(out, func() float64 { return 0 }, nil); err == nil {
 		t.Fatal("a module with no napp_frame should not run")
 	}
 }

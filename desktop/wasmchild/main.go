@@ -55,6 +55,10 @@ type nappMeta struct {
 
 var meta nappMeta
 
+// br is this window's bridge to the launcher: napp_call goes out through it,
+// and everything the launcher sends comes in through it.
+var br *bridge
+
 func main() {
 	meta = nappMeta{
 		ID:       os.Getenv("VERDANA_NAPP_ID"),
@@ -75,21 +79,22 @@ func main() {
 	log.Info().Str("napp", meta.ID).Str("instance", meta.Instance).Str("wasm", meta.Wasm).
 		Msg("wasm napp window started")
 
-	// The launcher's "close" comes down the same pipe the webview shell's
-	// does; nothing else about a window's lifetime is ours to decide. The
-	// module is in this process's memory and goes away with it, so leaving
-	// is the whole cleanup there is.
+	br = newBridge(os.Stdout)
+
+	// Everything the launcher says comes down stdin, the same pipe the
+	// webview shell reads: answers to the napp's calls, actions, feeds,
+	// prompts, and "close", which is the one thing about a window's lifetime
+	// that is not ours to decide. The module is in this process's memory and
+	// goes away with it, so leaving is the whole cleanup there is.
 	stop := make(chan struct{})
 	go func() {
 		dec := json.NewDecoder(os.Stdin)
 		for {
-			var m struct {
-				T string `json:"t"`
-			}
+			var m wireMsg
 			if err := dec.Decode(&m); err != nil {
 				break
 			}
-			if m.T == "close" {
+			if !br.handleWire(m) {
 				break
 			}
 		}
@@ -155,7 +160,7 @@ func runWindow() {
 	// ready while nothing else is happening would sit there unseen until the
 	// user moved the mouse.
 	go func() {
-		n, err := loadWasmNapp(meta.Wasm, nowMS)
+		n, err := loadWasmNapp(meta.Wasm, nowMS, br.call)
 		if err != nil {
 			failures <- err
 		} else {
@@ -170,8 +175,13 @@ func runWindow() {
 		ops    op.Ops
 		last   = time.Now()
 		// input is the tag the window's pointer events are addressed to.
-		input int
+		input  int
+		prompt = newPromptOverlay()
 	)
+
+	// Whatever the launcher sends wakes the window, so a napp parked on an
+	// idle canvas still hears its answers on the frame right after.
+	br.setWake(w.Invalidate)
 
 	for {
 		ev := w.Event()
@@ -212,6 +222,21 @@ func runWindow() {
 
 			gtx := app.NewContext(&ops, e)
 
+			// What the launcher sent goes in first: answers, feeds and
+			// actions all land before the frame that can show them. A
+			// module that is still loading keeps its messages queued.
+			if n != nil {
+				for _, m := range br.drain() {
+					if err := n.Deliver(m.kind, m.id, m.data); err != nil {
+						fail("wasm napp trapped on a message: " + err.Error())
+					}
+				}
+			}
+
+			// A prompt covers the canvas and takes the input with it: the
+			// napp must not be clicked through a question about itself.
+			pv := br.currentPrompt()
+
 			// Gio hands pointer events only to a target that registered
 			// for them, and only through the frame's context. They go to
 			// the napp before it paints, so a click shows on this frame.
@@ -225,7 +250,7 @@ func runWindow() {
 				if !ok {
 					break
 				}
-				if pe, ok := ev.(pointer.Event); ok && n != nil {
+				if pe, ok := ev.(pointer.Event); ok && n != nil && pv == nil {
 					sendPointer(n, pe)
 				}
 			}
@@ -245,12 +270,19 @@ func runWindow() {
 				animating = n.Animating()
 			}
 
-			drawCanvas(gtx, canvas, n != nil && n.HasCanvas())
+			if pv != nil {
+				prompt.Layout(gtx, pv, br.themeName(), func(id int, ok bool, index int, scope string) {
+					br.answerPrompt(id, ok, index, scope)
+					w.Invalidate()
+				})
+			} else {
+				drawCanvas(gtx, canvas, n != nil && n.HasCanvas())
 
-			// The whole window is the napp's input area.
-			area := clip.Rect(image.Rectangle{Max: size}).Push(gtx.Ops)
-			event.Op(gtx.Ops, &input)
-			area.Pop()
+				// The whole window is the napp's input area.
+				area := clip.Rect(image.Rectangle{Max: size}).Push(gtx.Ops)
+				event.Op(gtx.Ops, &input)
+				area.Pop()
+			}
 
 			e.Frame(&ops)
 

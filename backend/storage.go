@@ -193,6 +193,11 @@ func broadcastStorage(nappID, exceptInstance, op, key, value string) {
 		if ci.instance == exceptInstance {
 			continue
 		}
+		if ci.napp.IsWasm() {
+			raw, _ := json.Marshal(map[string]string{"op": op, "key": key, "value": value})
+			ci.send(WireMsg{T: "storage", Params: string(raw)})
+			continue
+		}
 		ci.eval(code)
 	}
 }

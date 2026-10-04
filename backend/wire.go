@@ -16,6 +16,13 @@ import "encoding/json"
 //	                                     window ("" = take the overlay down)
 //	{t:"close"}                      close this window
 //
+// A wasm napp's canvas shell has no page to eval code in, so the two things
+// that otherwise arrive as eval come to it as data instead:
+//
+//	{t:"feed",    id:<callbackId>, params:{"events","synced"}}  a feed batch
+//	{t:"storage", params:{"op","key","value"}}  another window of the same
+//	                                 napp changed its storage
+//
 // Shell → backend (all through HandleWireMessage):
 //
 //	{t:"rpc", id, method, params}    a window.nostr/nostrdb/napp call
