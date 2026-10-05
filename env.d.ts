@@ -285,7 +285,8 @@ type Nip19Decoded =
 type NappNip19 = {
   decode(bech: string): Nip19Decoded
   npubEncode(hex: string): string
-  noteEncode(hex: string): string
+  /** alias for neventEncode({ id }): returns an nevent, not a note */
+  noteEncode(id: string): string
   neventEncode(pointer: { id: string; relays?: string[]; author?: string; kind?: number }): string
   naddrEncode(pointer: {
     identifier: string

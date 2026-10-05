@@ -3,7 +3,7 @@ module fiatjaf.com/verdana/desktop
 go 1.26.2
 
 require (
-	fiatjaf.com/nostr v0.0.0-20260919022302-cf8167ebdb95
+	fiatjaf.com/nostr v0.0.0-20261005012418-685c38fc6629
 	gioui.org v0.10.0
 )
 
@@ -14,7 +14,7 @@ require (
 	github.com/PowerDNS/lmdb-go v1.9.3 // indirect
 	github.com/btcsuite/btcd v0.24.2 // indirect
 	github.com/btcsuite/btcd/btcec/v2 v2.3.4 // indirect
-	github.com/btcsuite/btcd/btcutil v1.1.5
+	github.com/btcsuite/btcd/btcutil v1.1.5 // indirect
 	github.com/btcsuite/btcd/chaincfg/chainhash v1.1.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/coder/websocket v1.8.13 // indirect

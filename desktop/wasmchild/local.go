@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -15,7 +14,6 @@ import (
 
 	"fiatjaf.com/nostr"
 	"fiatjaf.com/nostr/nip19"
-	"github.com/btcsuite/btcd/btcutil/bech32"
 )
 
 // ─── localStorage ────────────────────────────────────────────────
@@ -129,10 +127,8 @@ func (s *store) apply(op, k, v string) {
 // argument as its params; one taking a pointer takes the pointer object.
 //
 // The nip19 and coordinate logic comes from fiatjaf.com/nostr; this file
-// only adapts its types to the {type, data} shapes bridge.js produces. The
-// bits still hand-rolled are the ones the library doesn't expose: note
-// encoding (a bare bech32 of 32 bytes), the optional kind TLV on nevent
-// encodes, and the bolt11 amount-prefix sniff.
+// only adapts its types to the {type, data} shapes bridge.js produces. Only
+// the bolt11 amount-prefix sniff is hand-rolled.
 
 var pureMethods = map[string]func(json.RawMessage) (any, error){
 	"nip19.decode": func(p json.RawMessage) (any, error) {
@@ -149,12 +145,13 @@ var pureMethods = map[string]func(json.RawMessage) (any, error){
 		}
 		return nip19.EncodeNpub(pk), nil
 	},
+	// noteEncode is an alias for neventEncode({id}): napps get nevents.
 	"nip19.noteEncode": func(p json.RawMessage) (any, error) {
 		id, err := idParam(p)
 		if err != nil {
 			return nil, err
 		}
-		return encodeBytes("note", id[:])
+		return nip19.EncodeNevent(id, nil, nostr.ZeroPK), nil
 	},
 	"nip19.neventEncode": func(p json.RawMessage) (any, error) {
 		var ptr struct {
@@ -179,17 +176,7 @@ var pureMethods = map[string]func(json.RawMessage) (any, error){
 		if ptr.Kind == nil {
 			return nip19.EncodeNevent(id, ptr.Relays, author), nil
 		}
-		// EncodeNevent doesn't emit the optional kind TLV (type 3), so fall
-		// back to a hand-rolled TLV in nostr-tools order (3,2,1,0).
-		tlv := appendTLV(nil, 3, be32(*ptr.Kind))
-		if ptr.Author != "" {
-			tlv = appendTLV(tlv, 2, author[:])
-		}
-		for _, r := range ptr.Relays {
-			tlv = appendTLV(tlv, 1, []byte(r))
-		}
-		tlv = appendTLV(tlv, 0, id[:])
-		return encodeBytes("nevent", tlv)
+		return nip19.EncodeNeventWithKind(id, ptr.Relays, author, nostr.Kind(*ptr.Kind)), nil
 	},
 	"nip19.naddrEncode": func(p json.RawMessage) (any, error) {
 		var ptr struct {
@@ -369,23 +356,6 @@ func decodeError(prefix string, err error) error {
 	default:
 		return errors.New("unsupported prefix: " + prefix)
 	}
-}
-
-func encodeBytes(hrp string, data []byte) (string, error) {
-	words, err := bech32.ConvertBits(data, 8, 5, true)
-	if err != nil {
-		return "", err
-	}
-	return bech32.Encode(hrp, words)
-}
-
-func appendTLV(buf []byte, typ byte, v []byte) []byte {
-	buf = append(buf, typ, byte(len(v)))
-	return append(buf, v...)
-}
-
-func be32(n uint32) []byte {
-	return binary.BigEndian.AppendUint32(nil, n)
 }
 
 type coordinate struct {

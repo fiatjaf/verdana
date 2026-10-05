@@ -639,7 +639,6 @@
 
   const encodeBytes = (hrp, bytes) => bech32Encode(hrp, convertBits(Array.from(bytes), 8, 5, true))
   const npubEncode = hex => encodeBytes("npub", hexToBytes(hex))
-  const noteEncode = hex => encodeBytes("note", hexToBytes(hex))
 
   // nostr-tools emits TLV types in reverse order (3,2,1,0); match it so our
   // strings are byte-identical to the library's.
@@ -651,6 +650,9 @@
     entries.push([0, hexToBytes(p.id)])
     return encodeBytes("nevent", encodeTLV(entries))
   }
+
+  // noteEncode is an alias for neventEncode({id}): napps get nevents.
+  const noteEncode = id => neventEncode({ id })
 
   function naddrEncode(p) {
     const entries = [

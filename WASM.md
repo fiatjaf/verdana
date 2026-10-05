@@ -180,7 +180,8 @@ window until it is answered, exactly like a web napp's overlay.
 | `napp.storageRemove` | `{key}` | null | `localStorage.removeItem` |
 | `napp.storageClear` | — | null | `localStorage.clear` |
 | `nip19.decode` | code string | `{type, data}` | `napp.nip19.decode` |
-| `nip19.npubEncode` / `noteEncode` | hex string | bech32 | `napp.nip19.*Encode` |
+| `nip19.npubEncode` | hex string | bech32 | `napp.nip19.npubEncode` |
+| `nip19.noteEncode` | hex id | nevent (alias for `neventEncode({id})`) | `napp.nip19.noteEncode` |
 | `nip19.neventEncode` | `{id, relays?, author?, kind?}` | bech32 | `napp.nip19.neventEncode` |
 | `nip19.naddrEncode` | `{identifier, pubkey, kind, relays?}` | bech32 | `napp.nip19.naddrEncode` |
 | `fx.isHex64` | string | bool | `napp.fx.isHex64` |
