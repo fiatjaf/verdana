@@ -185,6 +185,31 @@ type NappFeeds = {
   ): FeedHandle
 }
 
+// ── Raw relay subscription ───────────────────────────────────────────────
+type NostrFilter = {
+  ids?: string[]
+  authors?: string[]
+  kinds?: number[]
+  since?: number
+  until?: number
+  limit?: number
+  search?: string
+  [tag: `#${string}`]: string[] | undefined
+}
+
+type SubscribeOpts = {
+  /** Sent to the relays as the subscription id prefix. Defaults to "<author prefix>-<napp d tag>". */
+  label?: string
+  /** Milliseconds to wait for every relay's EOSE before giving up on the slow ones. Defaults to 20000. */
+  maxEoseTimeout?: number
+  /** Called once, with everything that arrived before EOSE (or the timeout), deduplicated. */
+  eoseEventsCallback?: (events: NostrEvent[]) => void
+  /** Called once for each new event that arrives after that. */
+  liveEventCallback?: (event: NostrEvent) => void
+  /** Called once when every relay has ended the subscription, with each relay's reason. Not called when the napp closes it. */
+  closedCallback?: (reasons: { [relay: string]: string }) => void
+}
+
 // ── Data-loading utils ───────────────────────────────────────────────────
 type NappUtils = {
   // NIP-51 lists — accepts hex pubkey, npub, or nprofile
@@ -223,6 +248,9 @@ type NappUtils = {
 
   // Relay info
   loadRelayInfo(url: string): Promise<RelayInfoDocument | null>
+
+  // A plain REQ to exactly these relays (no outbox logic). Returns the closer.
+  subscribe(relays: string[], filter: NostrFilter, opts?: SubscribeOpts): () => void
 
   // Profile metadata
   loadNostrUser(request: NostrUserRequest | string): Promise<NostrUser>

@@ -127,6 +127,13 @@ const (
 	// MsgTheme says the user switched the launcher's theme: {"name",
 	// "vars"}, the same thing napp.theme answers with.
 	MsgTheme
+
+	// MsgSubscription is news from the napp.subscribe call with this id:
+	// {"type": "eose", "events": [...]} once, with everything stored, then
+	// {"type": "event", "event": {...}} for each live event, and
+	// {"type": "closed", "reasons": {relay: reason}} if every relay ends
+	// it, after which nothing more comes.
+	MsgSubscription
 )
 
 // The input events a host reports through ExportEvent. Pointer coordinates

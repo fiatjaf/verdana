@@ -268,6 +268,7 @@
   // below are pure, so they stay here and answer synchronously.
 
   const feedCallbacks = new Map()
+  const subCallbacks = new Map()
   const actionHandlers = []
   let serial = 0
 
@@ -341,6 +342,27 @@
       cb(events, !!synced)
     } catch (err) {
       console.error("[napp] feed callback threw", err)
+    }
+  }
+
+  window.__bridge_sub_callback = function (callbackId, msgJSON) {
+    const cbs = subCallbacks.get(callbackId)
+    if (!cbs) return
+    let msg
+    try {
+      msg = JSON.parse(msgJSON)
+    } catch {
+      return
+    }
+    try {
+      if (msg.type === "eose") cbs.eoseEventsCallback?.(msg.events || [])
+      else if (msg.type === "event") cbs.liveEventCallback?.(msg.event)
+      else if (msg.type === "closed") {
+        subCallbacks.delete(callbackId)
+        cbs.closedCallback?.(msg.reasons || {})
+      }
+    } catch (err) {
+      console.error("[napp] subscription callback threw", err)
     }
   }
 
@@ -471,6 +493,27 @@
         feedCallbacks.delete(callbackId)
         rpc("napp.feeds.cancel", { callbackId }).catch(() => {})
       }
+    }
+  }
+
+  function subscribe(relays, filter, opts) {
+    const { label, maxEoseTimeout, eoseEventsCallback, liveEventCallback, closedCallback } =
+      opts || {}
+    const callbackId = serial++
+    subCallbacks.set(callbackId, { eoseEventsCallback, liveEventCallback, closedCallback })
+    rpc("napp.subscribe", { relays, filter, label, maxEoseTimeout, callbackId }).catch(err => {
+      const cbs = subCallbacks.get(callbackId)
+      if (!cbs) return
+      subCallbacks.delete(callbackId)
+      console.error("[napp] subscription failed", err)
+      const reason = "error: " + String(err?.message || err)
+      try {
+        cbs.closedCallback?.(Object.fromEntries((relays || []).map(url => [url, reason])))
+      } catch {}
+    })
+    return () => {
+      if (!subCallbacks.delete(callbackId)) return
+      rpc("napp.unsubscribe", { callbackId }).catch(() => {})
     }
   }
 
@@ -794,6 +837,7 @@
 
       // ── relays ───────────────────────────────────
       loadRelayInfo: url => rpc("napp.loadRelayInfo", url),
+      subscribe,
 
       // ── metadata + search ────────────────────────
       loadNostrUser: request => rpc("napp.loadNostrUser", request),

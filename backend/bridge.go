@@ -390,7 +390,29 @@ func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 			go startFeed(ctx, ci, method, p)
 			return nil, nil
 
-		case "napp.feeds.cancel":
+		case "napp.subscribe":
+			var p subscribeParams
+			if err := json.Unmarshal([]byte(params), &p); err != nil {
+				return nil, err
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			ci.subMu.Lock()
+			if old, ok := ci.subs[p.CallbackID]; ok {
+				old()
+			}
+			ci.subs[p.CallbackID] = cancel
+			ci.subMu.Unlock()
+			if err := startSubscription(ctx, ci, p); err != nil {
+				ci.subMu.Lock()
+				delete(ci.subs, p.CallbackID)
+				ci.subMu.Unlock()
+				cancel()
+				return nil, err
+			}
+			return nil, nil
+
+		// a subscription is closed the same way a feed is
+		case "napp.feeds.cancel", "napp.unsubscribe":
 			var p struct {
 				CallbackID int `json:"callbackId"`
 			}

@@ -41,26 +41,26 @@ extra tags. Kind decides what the app is; tags only describe it. Absent
 All five come from the module named `env`. A module imports only the ones it
 uses.
 
-| name | signature | |
-| --- | --- | --- |
-| `napp_canvas_width` | `() -> i32` | canvas width, in device pixels |
-| `napp_canvas_height` | `() -> i32` | canvas height, in device pixels |
-| `napp_now_ms` | `() -> f64` | milliseconds since the window opened |
-| `napp_log` | `(offset: i32, length: i32) -> ()` | write one line to the launcher's log |
-| `napp_call` | `(method_ptr, method_len, params_ptr, params_len: i32) -> i32` | call the launcher; see [Talking to the launcher](#talking-to-the-launcher) |
+| name                 | signature                                                      |                                                                            |
+| ---                  | ---                                                            | ---                                                                        |
+| `napp_canvas_width`  | `() -> i32`                                                    | canvas width, in device pixels                                             |
+| `napp_canvas_height` | `() -> i32`                                                    | canvas height, in device pixels                                            |
+| `napp_now_ms`        | `() -> f64`                                                    | milliseconds since the window opened                                       |
+| `napp_log`           | `(offset: i32, length: i32) -> ()`                             | write one line to the launcher's log                                       |
+| `napp_call`          | `(method_ptr, method_len, params_ptr, params_len: i32) -> i32` | call the launcher; see [Talking to the launcher](#talking-to-the-launcher) |
 
 A napp asks for the size every frame rather than caching it, which is how a
 window resize is something it notices on its own.
 
 ### Exports — the napp calling out
 
-| name | signature | |
-| --- | --- | --- |
-| `napp_frame` | `(dt_ms: f64) -> i32` | paint one frame; non-zero means "call me again without being told to" |
-| `napp_canvas_ptr` | `() -> i32` | byte offset of the canvas in the module's own memory |
-| `napp_event` | `(kind, x, y, buttons, a, b) -> ()` | optional: one input event |
-| `napp_alloc` | `(len: i32) -> i32` | room for a message the host is about to hand over; required with `napp_call` |
-| `napp_receive` | `(kind, id, ptr, len: i32) -> ()` | one message from the host; required with `napp_call` |
+| name              | signature                           |                                                                              |
+| ---               | ---                                 | ---                                                                          |
+| `napp_frame`      | `(dt_ms: f64) -> i32`               | paint one frame; non-zero means "call me again without being told to"        |
+| `napp_canvas_ptr` | `() -> i32`                         | byte offset of the canvas in the module's own memory                         |
+| `napp_event`      | `(kind, x, y, buttons, a, b) -> ()` | optional: one input event                                                    |
+| `napp_alloc`      | `(len: i32) -> i32`                 | room for a message the host is about to hand over; required with `napp_call` |
+| `napp_receive`    | `(kind, id, ptr, len: i32) -> ()`   | one message from the host; required with `napp_call`                         |
 
 `napp_frame` returning non-zero is how an animation keeps running and how a
 click gets drawn on the frame after it. Returning zero parks the window until
@@ -70,12 +70,12 @@ Gio for frames until an event arrives.
 `napp_event` kinds, with `x` and `y` in canvas pixels and `buttons` a mask of
 `1` primary, `2` secondary, `4` middle:
 
-| kind | |
-| --- | --- |
-| 0 | pointer moved |
-| 1 | pointer pressed |
-| 2 | pointer released |
-| 3 | scroll, in `a` and `b` |
+| kind |                        |
+| ---  | ---                    |
+| 0    | pointer moved          |
+| 1    | pointer pressed        |
+| 2    | pointer released       |
+| 3    | scroll, in `a` and `b` |
 
 A module may leave `napp_event` out entirely if it only draws.
 
@@ -121,14 +121,15 @@ delivered between frames — never from inside `napp_call` or `napp_frame` — a
 the frame after one always runs, so a napp parked on an idle canvas still sees
 its answer at once.
 
-| kind | `id` | bytes | |
-| --- | --- | --- | --- |
-| 0 result | the call's | JSON | what the call returned |
-| 1 error | the call's | text | why the call failed (including "denied by the user") |
-| 2 feed | the feed call's | `{"events": [...], "synced": bool}` | one batch from a feed |
-| 3 action | the dispatch's | `{"name", "payload", "idx"}` | someone dispatched an action to this window |
-| 4 storage | 0 | `{"op", "key", "value"}` | another window of this napp changed its storage |
-| 5 theme | 0 | `{"name", "vars"}` | the user switched the launcher's theme |
+| kind           | `id`                 | bytes                               |                                                               |
+| ---            | ---                  | ---                                 | ---                                                           |
+| 0 result       | the call's           | JSON                                | what the call returned                                        |
+| 1 error        | the call's           | text                                | why the call failed (including "denied by the user")          |
+| 2 feed         | the feed call's      | `{"events": [...], "synced": bool}` | one batch from a feed                                         |
+| 3 action       | the dispatch's       | `{"name", "payload", "idx"}`        | someone dispatched an action to this window                   |
+| 4 storage      | 0                    | `{"op", "key", "value"}`            | another window of this napp changed its storage               |
+| 5 theme        | 0                    | `{"name", "vars"}`                  | the user switched the launcher's theme                        |
+| 6 subscription | the subscribe call's | `{"type", ...}`                     | news from a subscription; see [Subscriptions](#subscriptions) |
 
 ### Methods
 
@@ -137,57 +138,59 @@ function. Calls that would prompt a web napp (signing, encrypting, publishing,
 links, files, clipboard) prompt a wasm napp too: the question covers the
 window until it is answered, exactly like a web napp's overlay.
 
-| method | params | answers | bridge.js |
-| --- | --- | --- | --- |
-| `getPublicKey` | — | hex pubkey | `nostr.getPublicKey()` |
-| `signEvent` | event template | signed event | `nostr.signEvent(evt)` |
-| `nip04.encrypt` / `nip44.encrypt` | `{pubkey, plaintext}` | ciphertext | `nostr.nip04/nip44.encrypt` |
-| `nip04.decrypt` / `nip44.decrypt` | `{pubkey, ciphertext}` | plaintext | `nostr.nip04/nip44.decrypt` |
-| `nostrdb.add` | `{event}` | bool | `nostrdb.add` |
-| `nostrdb.query` | `{filters}` (one or an array) | events | `nostrdb.query` |
-| `nostrdb.count` | `{filters}` | number | `nostrdb.count` |
-| `nostrdb.event` | `{id}` | event or null | `nostrdb.event` |
-| `nostrdb.remove` | `{ids}` | removed ids | `nostrdb.remove` |
-| `nostrdb.replaceable` | `{kind, author, identifier?}` | event or null | `nostrdb.replaceable` |
-| `nostrdb.supports` | — | `[]` | `nostrdb.supports` |
-| `napp.instance` | — | instance id | `napp.instance` |
-| `napp.theme` | — | `{name, vars}` | `window.__nappTheme` |
-| `napp.action` | `{name, payload, options?}` | the handler's result | `napp.action` |
-| `napp.registerAction` | `{pattern, idx?}` | null | `napp.registerAction` |
-| `napp.dispatchResult` | `{id, result}` or `{id, error}` | null | (answering an action) |
-| `napp.close` | — | null | `napp.close` |
-| `napp.link` | url string | null | `napp.link` |
-| `napp.feeds.profile` | `{pubkey, kinds, ...opts}` | null, then feed messages | `napp.feeds.profile` |
-| `napp.feeds.following` | `{source, kinds, ...opts}` | 〃 | `napp.feeds.following` |
-| `napp.feeds.inbox` | `{pubkey, kinds, ...opts}` | 〃 | `napp.feeds.inbox` |
-| `napp.feeds.outbox` | `{pubkeys, kinds, ...opts}` | 〃 | `napp.feeds.outbox` |
-| `napp.feeds.cancel` | `{callbackId}` | null | `feed.close()` |
-| `napp.load*`, `napp.fetch*WithSets` | user (hex, npub, nprofile, nip05) | the list | `napp.utils.load*` / `fetch*` |
-| `napp.loadRelayInfo` | url string | NIP-11 info | `napp.utils.loadRelayInfo` |
-| `napp.loadNostrUser` | user, or `{pubkey, relays}` | profile | `napp.utils.loadNostrUser` |
-| `napp.searchUser` / `napp.searchUserLocal` | term string | profiles | `napp.utils.searchUser*` |
-| `napp.loadEvent` | `{code, relays?, author?}` | event or null | `napp.utils.loadEvent` |
-| `napp.loadEvents` | ids | events | `napp.utils.loadEvents` |
-| `napp.verifyEvent` | event | bool | `napp.utils.verifyEvent` |
-| `napp.generateKey` | — | `{sk, pk}` | `napp.utils.generateKey` |
-| `napp.signWithKey` | `{event, sk}` | signed event | `napp.utils.signWithKey` |
-| `napp.saveFile` | `{name, data, type}`, data **base64** | null | `napp.utils.saveFile` |
-| `napp.copyText` | `{text}` | null | `napp.utils.copyText` |
-| `napp.publish` | `{event, relays?}` | `{relays, published, failed}` | `napp.utils.publish` |
-| `napp.storageGet` | key string | value or null | `localStorage.getItem` |
-| `napp.storageKeys` | — | keys, sorted | `localStorage.key` / `length` |
-| `napp.storageSet` | `{key, value}` | null | `localStorage.setItem` |
-| `napp.storageRemove` | `{key}` | null | `localStorage.removeItem` |
-| `napp.storageClear` | — | null | `localStorage.clear` |
-| `nip19.decode` | code string | `{type, data}` | `napp.nip19.decode` |
-| `nip19.npubEncode` | hex string | bech32 | `napp.nip19.npubEncode` |
-| `nip19.noteEncode` | hex id | nevent (alias for `neventEncode({id})`) | `napp.nip19.noteEncode` |
-| `nip19.neventEncode` | `{id, relays?, author?, kind?}` | bech32 | `napp.nip19.neventEncode` |
-| `nip19.naddrEncode` | `{identifier, pubkey, kind, relays?}` | bech32 | `napp.nip19.naddrEncode` |
-| `fx.isHex64` | string | bool | `napp.fx.isHex64` |
-| `fx.parseCoordinate` | string | `{kind, pubkey, identifier}` or null | `napp.fx.parseCoordinate` |
-| `fx.formatCoordinate` | `{kind, pubkey, identifier}` | string | `napp.fx.formatCoordinate` |
-| `fx.satsFromBolt11` | invoice string | sats or null | `napp.fx.satsFromBolt11` |
+| method                                     | params                                      | answers                                 | bridge.js                      |
+| ---                                        | ---                                         | ---                                     | ---                            |
+| `getPublicKey`                             | —                                           | hex pubkey                              | `nostr.getPublicKey()`         |
+| `signEvent`                                | event template                              | signed event                            | `nostr.signEvent(evt)`         |
+| `nip04.encrypt` / `nip44.encrypt`          | `{pubkey, plaintext}`                       | ciphertext                              | `nostr.nip04/nip44.encrypt`    |
+| `nip04.decrypt` / `nip44.decrypt`          | `{pubkey, ciphertext}`                      | plaintext                               | `nostr.nip04/nip44.decrypt`    |
+| `nostrdb.add`                              | `{event}`                                   | bool                                    | `nostrdb.add`                  |
+| `nostrdb.query`                            | `{filters}` (one or an array)               | events                                  | `nostrdb.query`                |
+| `nostrdb.count`                            | `{filters}`                                 | number                                  | `nostrdb.count`                |
+| `nostrdb.event`                            | `{id}`                                      | event or null                           | `nostrdb.event`                |
+| `nostrdb.remove`                           | `{ids}`                                     | removed ids                             | `nostrdb.remove`               |
+| `nostrdb.replaceable`                      | `{kind, author, identifier?}`               | event or null                           | `nostrdb.replaceable`          |
+| `nostrdb.supports`                         | —                                           | `[]`                                    | `nostrdb.supports`             |
+| `napp.instance`                            | —                                           | instance id                             | `napp.instance`                |
+| `napp.theme`                               | —                                           | `{name, vars}`                          | `window.__nappTheme`           |
+| `napp.action`                              | `{name, payload, options?}`                 | the handler's result                    | `napp.action`                  |
+| `napp.registerAction`                      | `{pattern, idx?}`                           | null                                    | `napp.registerAction`          |
+| `napp.dispatchResult`                      | `{id, result}` or `{id, error}`             | null                                    | (answering an action)          |
+| `napp.close`                               | —                                           | null                                    | `napp.close`                   |
+| `napp.link`                                | url string                                  | null                                    | `napp.link`                    |
+| `napp.feeds.profile`                       | `{pubkey, kinds, ...opts}`                  | null, then feed messages                | `napp.feeds.profile`           |
+| `napp.feeds.following`                     | `{source, kinds, ...opts}`                  | 〃                                      | `napp.feeds.following`         |
+| `napp.feeds.inbox`                         | `{pubkey, kinds, ...opts}`                  | 〃                                      | `napp.feeds.inbox`             |
+| `napp.feeds.outbox`                        | `{pubkeys, kinds, ...opts}`                 | 〃                                      | `napp.feeds.outbox`            |
+| `napp.feeds.cancel`                        | `{callbackId}`                              | null                                    | `feed.close()`                 |
+| `napp.load*`, `napp.fetch*WithSets`        | user (hex, npub, nprofile, nip05)           | the list                                | `napp.utils.load*` / `fetch*`  |
+| `napp.loadRelayInfo`                       | url string                                  | NIP-11 info                             | `napp.utils.loadRelayInfo`     |
+| `napp.loadNostrUser`                       | user, or `{pubkey, relays}`                 | profile                                 | `napp.utils.loadNostrUser`     |
+| `napp.searchUser` / `napp.searchUserLocal` | term string                                 | profiles                                | `napp.utils.searchUser*`       |
+| `napp.loadEvent`                           | `{code, relays?, author?}`                  | event or null                           | `napp.utils.loadEvent`         |
+| `napp.loadEvents`                          | ids                                         | events                                  | `napp.utils.loadEvents`        |
+| `napp.verifyEvent`                         | event                                       | bool                                    | `napp.utils.verifyEvent`       |
+| `napp.generateKey`                         | —                                           | `{sk, pk}`                              | `napp.utils.generateKey`       |
+| `napp.signWithKey`                         | `{event, sk}`                               | signed event                            | `napp.utils.signWithKey`       |
+| `napp.saveFile`                            | `{name, data, type}`, data **base64**       | null                                    | `napp.utils.saveFile`          |
+| `napp.copyText`                            | `{text}`                                    | null                                    | `napp.utils.copyText`          |
+| `napp.publish`                             | `{event, relays?}`                          | `{relays, published, failed}`           | `napp.utils.publish`           |
+| `napp.subscribe`                           | `{relays, filter, label?, maxEoseTimeout?}` | null, then subscription messages        | `napp.utils.subscribe`         |
+| `napp.unsubscribe`                         | `{callbackId}`                              | null                                    | the closer `subscribe` returns |
+| `napp.storageGet`                          | key string                                  | value or null                           | `localStorage.getItem`         |
+| `napp.storageKeys`                         | —                                           | keys, sorted                            | `localStorage.key` / `length`  |
+| `napp.storageSet`                          | `{key, value}`                              | null                                    | `localStorage.setItem`         |
+| `napp.storageRemove`                       | `{key}`                                     | null                                    | `localStorage.removeItem`      |
+| `napp.storageClear`                        | —                                           | null                                    | `localStorage.clear`           |
+| `nip19.decode`                             | code string                                 | `{type, data}`                          | `napp.nip19.decode`            |
+| `nip19.npubEncode`                         | hex string                                  | bech32                                  | `napp.nip19.npubEncode`        |
+| `nip19.noteEncode`                         | hex id                                      | nevent (alias for `neventEncode({id})`) | `napp.nip19.noteEncode`        |
+| `nip19.neventEncode`                       | `{id, relays?, author?, kind?}`             | bech32                                  | `napp.nip19.neventEncode`      |
+| `nip19.naddrEncode`                        | `{identifier, pubkey, kind, relays?}`       | bech32                                  | `napp.nip19.naddrEncode`       |
+| `fx.isHex64`                               | string                                      | bool                                    | `napp.fx.isHex64`              |
+| `fx.parseCoordinate`                       | string                                      | `{kind, pubkey, identifier}` or null    | `napp.fx.parseCoordinate`      |
+| `fx.formatCoordinate`                      | `{kind, pubkey, identifier}`                | string                                  | `napp.fx.formatCoordinate`     |
+| `fx.satsFromBolt11`                        | invoice string                              | sats or null                            | `napp.fx.satsFromBolt11`       |
 
 The `napp.storage*`, `nip19.*`, `fx.*`, `napp.instance`, `napp.theme` and
 `nostrdb.supports` calls are answered by the window itself, without a round
@@ -203,6 +206,26 @@ subscription is up; the events then keep arriving as feed messages under that
 same id, `synced` turning true once the relays have sent what they had stored.
 `napp.feeds.cancel` with `{"callbackId": id}` ends it, and nothing more is
 delivered for it after that.
+
+### Subscriptions
+
+`napp.subscribe` is a plain REQ with `filter` to exactly `relays`. Like a
+feed, the call's own id is its `callbackId`: it answers `null` once the
+subscription is up, then subscription messages arrive under that id:
+
+1. `{"type": "eose", "events": [...]}` once, with every event that came before
+   all the relays sent EOSE — or before `maxEoseTimeout` milliseconds (20000
+   if left out), whichever is first.
+2. `{"type": "event", "event": {...}}` for each new event after that, one by
+   one.
+3. `{"type": "closed", "reasons": {"<relay>": "<reason>"}}` if every relay
+   ends it on its own (a CLOSED, or no connection to begin with). Nothing
+   comes after this.
+
+`label` is what the relays see the subscription id prefixed with,
+`<author prefix>-<d tag>` by default. `napp.unsubscribe` with
+`{"callbackId": id}` ends it, and nothing more is delivered for it after
+that.
 
 ### Actions
 
@@ -244,10 +267,10 @@ Android has no wasm host yet and says so rather than opening a blank WebView.
 A wasm napp window is its own process, like a web napp's — a hung or trapping
 module is its own crash, not the launcher's. The two shells are:
 
-| | |
-| --- | --- |
-| `desktop/child` | the webview shell: serves the napp's files, loads the page |
-| `desktop/wasmchild` | the canvas shell: runs the module, paints the canvas |
+|                     |                                                            |
+| ---                 | ---                                                        |
+| `desktop/child`     | the webview shell: serves the napp's files, loads the page |
+| `desktop/wasmchild` | the canvas shell: runs the module, paints the canvas       |
 
 Both speak the same wire protocol (`backend.WireMsg`) over stdin/stdout, so the
 backend does not know the difference — `backend.WindowSpec.Mode` is the only

@@ -265,3 +265,33 @@ func TestBridgeForwardsAndRoutes(t *testing.T) {
 		t.Fatalf("action arrived as %+v %s", m, m[0].data)
 	}
 }
+
+func TestBridgeSubscription(t *testing.T) {
+	b, out := testBridge(t)
+
+	sub := b.call("napp.subscribe", []byte(`{"relays":["wss://r"],"filter":{"kinds":[1]}}`))
+	sent := lastSent(t, out)
+	var p struct {
+		CallbackID int32 `json:"callbackId"`
+	}
+	json.Unmarshal([]byte(sent.Params), &p)
+	if sent.Method != "napp.subscribe" || p.CallbackID != sub {
+		t.Fatalf("subscribe went up as %+v", sent)
+	}
+
+	b.handleWire(wireMsg{T: "subscription", ID: int(sub), Params: `{"type":"eose","events":[]}`})
+	b.handleWire(wireMsg{T: "subscription", ID: int(sub), Params: `{"type":"closed","reasons":{"wss://r/":"bye"}}`})
+	b.handleWire(wireMsg{T: "subscription", ID: int(sub), Params: `{"type":"event","event":{}}`})
+	m := b.drain()
+	if len(m) != 2 || m[0].kind != wasm.MsgSubscription || m[0].id != sub || m[1].kind != wasm.MsgSubscription {
+		t.Fatalf("subscription messages arrived as %+v", m)
+	}
+
+	// and nothing arrives once the napp unsubscribes
+	sub2 := b.call("napp.subscribe", []byte(`{"relays":["wss://r"],"filter":{}}`))
+	b.call("napp.unsubscribe", []byte(fmt.Sprintf(`{"callbackId":%d}`, sub2)))
+	b.handleWire(wireMsg{T: "subscription", ID: int(sub2), Params: `{"type":"eose","events":[]}`})
+	if m := b.drain(); len(m) != 0 {
+		t.Fatalf("a closed subscription still delivered %+v", m)
+	}
+}

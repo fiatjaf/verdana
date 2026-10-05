@@ -65,6 +65,9 @@ type bridge struct {
 	// already closed is dropped instead of delivered.
 	feeds map[int32]bool
 
+	// subs are the napp.subscribe calls still open, the same way.
+	subs map[int32]bool
+
 	theme  themeState
 	prompt *promptView
 
@@ -75,6 +78,7 @@ func newBridge(out io.Writer) *bridge {
 	b := &bridge{
 		out:   json.NewEncoder(out),
 		feeds: make(map[int32]bool),
+		subs:  make(map[int32]bool),
 		store: loadStore(os.Getenv("VERDANA_NAPP_STORAGE_FILE")),
 		theme: themeState{Name: os.Getenv("VERDANA_THEME"), Vars: json.RawMessage(os.Getenv("VERDANA_THEME_VARS"))},
 	}
@@ -193,13 +197,27 @@ func (b *bridge) call(method string, params []byte) int32 {
 		b.feeds[id] = true
 		b.mu.Unlock()
 
-	case method == "napp.feeds.cancel":
+	case method == "napp.subscribe":
+		// like a feed: the call's own id is the subscription's callbackId
+		var p map[string]json.RawMessage
+		if err := json.Unmarshal(params, &p); err != nil || p == nil {
+			b.answer(id, nil, errors.New(method+": params must be {relays, filter, label?, maxEoseTimeout?}"))
+			return id
+		}
+		p["callbackId"], _ = json.Marshal(id)
+		params, _ = json.Marshal(p)
+		b.mu.Lock()
+		b.subs[id] = true
+		b.mu.Unlock()
+
+	case method == "napp.feeds.cancel", method == "napp.unsubscribe":
 		var p struct {
 			CallbackID int32 `json:"callbackId"`
 		}
 		json.Unmarshal(params, &p)
 		b.mu.Lock()
 		delete(b.feeds, p.CallbackID)
+		delete(b.subs, p.CallbackID)
 		b.mu.Unlock()
 	}
 
@@ -321,6 +339,21 @@ func (b *bridge) handleWire(m wireMsg) bool {
 		b.mu.Unlock()
 		if open {
 			b.push(message{kind: wasm.MsgFeed, id: int32(m.ID), data: []byte(m.Params)})
+		}
+
+	case "subscription":
+		var p struct {
+			Type string `json:"type"`
+		}
+		json.Unmarshal([]byte(m.Params), &p)
+		b.mu.Lock()
+		open := b.subs[int32(m.ID)]
+		if p.Type == "closed" {
+			delete(b.subs, int32(m.ID))
+		}
+		b.mu.Unlock()
+		if open {
+			b.push(message{kind: wasm.MsgSubscription, id: int32(m.ID), data: []byte(m.Params)})
 		}
 
 	case "storage":

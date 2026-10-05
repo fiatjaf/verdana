@@ -22,6 +22,8 @@ import "encoding/json"
 //	{t:"feed",    id:<callbackId>, params:{"events","synced"}}  a feed batch
 //	{t:"storage", params:{"op","key","value"}}  another window of the same
 //	                                 napp changed its storage
+//	{t:"subscription", id:<callbackId>, params:{"type",…}}  news from a
+//	                                 napp.subscribe (see wasm.MsgSubscription)
 //
 // Shell → backend (all through HandleWireMessage):
 //
