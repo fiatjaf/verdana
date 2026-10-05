@@ -69,6 +69,8 @@ class MainActivity : ComponentActivity() {
     fun update(id: String) = Mobile.update(id)
     fun uninstall(id: String) = Mobile.uninstall(id)
     fun launch(id: String) = Mobile.launch(id)
+    fun pin(id: String) = Mobile.pin(id)
+    fun unpin(id: String) = Mobile.unpin(id)
     fun checkForUpdates() = Mobile.checkForUpdates()
     fun toggleTheme() = VerdanaHost.toggleTheme()
 

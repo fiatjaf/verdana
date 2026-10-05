@@ -23,6 +23,7 @@ const (
 	tabDiscovery = 2
 	tabDev       = 3
 	tabExtra     = 4
+	tabHome      = 5
 )
 
 // extraTab is the ephemeral tab: either a napp page or a profile page.
@@ -475,7 +476,7 @@ func layoutProfileDetail(
 				}
 				// inside a profile the author row is the profile itself:
 				// no nested author button
-				return renderNappCard(gtx, th, cardBtn, nil, openBtn, actBtn, updBtn, label, updLabel, n)
+				return renderNappCard(gtx, th, cardBtn, nil, openBtn, actBtn, updBtn, label, updLabel, nil, false, n)
 			})
 		}),
 	)

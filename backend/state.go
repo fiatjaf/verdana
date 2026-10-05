@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -29,6 +30,10 @@ type AppState struct {
 	// LastLaunched is the pre-counts ordering, kept only to migrate old
 	// state files: anything launched before counts existed starts at 1.
 	LastLaunched map[string]time.Time `json:"last_launched,omitempty"`
+
+	// Pinned are the napp ids the user put on the launcher's home tab, in
+	// the order they were pinned (the order the home grid shows them in).
+	Pinned []string `json:"pinned"`
 
 	// Rules are the answers the user gave to permission prompts that were
 	// meant to stick ("always allow", "always deny"), keyed by RuleKey
@@ -194,6 +199,47 @@ func markLaunched(id string) {
 		saveState()
 	}
 	stateMu.Unlock()
+}
+
+// ─── pinned napps ────────────────────────────────────────────────
+
+// Pin puts an installed napp on the home tab, after the ones pinned before.
+func Pin(id string) {
+	stateMu.Lock()
+	if _, ok := state.InstalledNapps[id]; !ok || slices.Contains(state.Pinned, id) {
+		stateMu.Unlock()
+		return
+	}
+	state.Pinned = append(state.Pinned, id)
+	saveState()
+	stateMu.Unlock()
+	notifyState()
+}
+
+// Unpin takes a napp off the home tab.
+func Unpin(id string) {
+	stateMu.Lock()
+	if !slices.Contains(state.Pinned, id) {
+		stateMu.Unlock()
+		return
+	}
+	state.Pinned = slices.DeleteFunc(state.Pinned, func(p string) bool { return p == id })
+	saveState()
+	stateMu.Unlock()
+	notifyState()
+}
+
+// IsPinned says whether a napp is on the home tab.
+func IsPinned(id string) bool {
+	stateMu.Lock()
+	defer stateMu.Unlock()
+	return slices.Contains(state.Pinned, id)
+}
+
+func pinnedIDs() []string {
+	stateMu.Lock()
+	defer stateMu.Unlock()
+	return append([]string(nil), state.Pinned...)
 }
 
 // IsInstalled says whether a napp is on disk.

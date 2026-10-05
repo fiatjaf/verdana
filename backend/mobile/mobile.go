@@ -235,6 +235,12 @@ func CheckForUpdates() { go backend.CheckForUpdates() }
 // Uninstall removes an installed napp.
 func Uninstall(id string) { go backend.Uninstall(id) }
 
+// Pin puts an installed napp on the launcher's home tab.
+func Pin(id string) { backend.Pin(id) }
+
+// Unpin takes a napp off the home tab.
+func Unpin(id string) { backend.Unpin(id) }
+
 // Launch opens an installed napp, or surfaces the window it already has.
 func Launch(id string) { backend.LaunchByID(id) }
 

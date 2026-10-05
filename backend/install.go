@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -70,6 +71,7 @@ func Uninstall(id string) {
 	stateMu.Lock()
 	delete(state.InstalledNapps, id)
 	delete(state.LaunchCounts, id)
+	state.Pinned = slices.DeleteFunc(state.Pinned, func(p string) bool { return p == id })
 	saveState()
 	stateMu.Unlock()
 

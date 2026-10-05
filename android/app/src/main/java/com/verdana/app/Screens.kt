@@ -10,6 +10,9 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -21,6 +24,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.Image
@@ -203,7 +208,17 @@ fun LoginScreen(activity: MainActivity, st: LauncherState) {
 @Composable
 fun LauncherScreen(activity: MainActivity, st: LauncherState) {
     val theme = themeByName(st.theme)
-    var tab by remember { mutableStateOf(if (st.installed.isNotEmpty()) 0 else 1) }
+    // tabs: 0 home, 1 installed, 2 discovery. Home is where the launcher
+    // opens as long as anything is pinned there.
+    var tab by remember {
+        mutableStateOf(
+            when {
+                st.pinned.isNotEmpty() -> 0
+                st.installed.isNotEmpty() -> 1
+                else -> 2
+            }
+        )
+    }
     var relaysEd by remember(st.relays.hashCode()) { mutableStateOf(st.relays.joinToString("\n")) }
     var discoveryFilter by remember { mutableStateOf("") }
     var installedFilter by remember { mutableStateOf("") }
@@ -238,9 +253,11 @@ fun LauncherScreen(activity: MainActivity, st: LauncherState) {
     Column(Modifier.fillMaxSize().padding(16.dp)) {
         // tabs, with the ephemeral one at the end
         Row {
-            TabChip("Installed", tab == 0 && detailNapp == null && detailProfile == null, theme) { pickTab(0) }
+            TabChip("Home", tab == 0 && detailNapp == null && detailProfile == null, theme) { pickTab(0) }
             Spacer(Modifier.width(8.dp))
-            TabChip("Discovery", tab == 1 && detailNapp == null && detailProfile == null, theme) { pickTab(1) }
+            TabChip("Installed", tab == 1 && detailNapp == null && detailProfile == null, theme) { pickTab(1) }
+            Spacer(Modifier.width(8.dp))
+            TabChip("Discovery", tab == 2 && detailNapp == null && detailProfile == null, theme) { pickTab(2) }
             if (freshDetail != null) {
                 Spacer(Modifier.width(8.dp))
                 TabChip(freshDetail.name.ifBlank { freshDetail.id }.take(18), true, theme) { }
@@ -260,7 +277,8 @@ fun LauncherScreen(activity: MainActivity, st: LauncherState) {
             detailProfile != null -> AuthorProfileDetailScreen(activity, st, theme, detailProfile!!,
                 onBack = { detailProfile = null },
                 onOpenNapp = { openNapp(it) })
-            tab == 0 -> InstalledTab(activity, st, theme, installedFilter, { installedFilter = it },
+            tab == 0 -> HomeTab(activity, st, theme)
+            tab == 1 -> InstalledTab(activity, st, theme, installedFilter, { installedFilter = it },
                 onDetail = { openNapp(it) }, onAuthor = { openProfile(it) })
             else -> DiscoveryTab(activity, st, theme, relaysEd, { relaysEd = it }, discoveryFilter, { discoveryFilter = it },
                 onDetail = { openNapp(it) }, onAuthor = { openProfile(it) })
@@ -433,6 +451,7 @@ private fun InstalledTab(activity: MainActivity, st: LauncherState, theme: Theme
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f)) {
             items(visible, key = { it.id }) { napp ->
                 val busy = st.busy.contains(napp.id)
+                val pinned = st.pinned.any { it.id == napp.id }
                 NappCard(
                     activity, napp, theme,
                     onDetail = { onDetail(napp) },
@@ -443,6 +462,8 @@ private fun InstalledTab(activity: MainActivity, st: LauncherState, theme: Theme
                     onPrimary = { activity.uninstall(napp.id) },
                     secondaryLabel = if (napp.updateAvailable) "Update" else null,
                     onSecondary = { activity.update(napp.id) },
+                    pinned = pinned,
+                    onPin = { if (pinned) activity.unpin(napp.id) else activity.pin(napp.id) },
                 )
             }
         }
@@ -563,20 +584,11 @@ private fun NappCard(
     onAuthor: (() -> Unit)? = null,
     onLaunch: (() -> Unit)? = null,
     showOpen: Boolean = false,
+    // onPin draws the Pin/Unpin toggle for the home tab
+    pinned: Boolean = false,
+    onPin: (() -> Unit)? = null,
 ) {
-    // icons load off the main thread, keyed by blob hash like the desktop
-    val hash = napp.iconHash()
-    var bitmap by remember(napp.id, hash) { mutableStateOf(iconCache[hash]) }
-
-    LaunchedEffect(napp.id, hash) {
-        if (bitmap == null && hash.isNotBlank()) {
-            activity.loadIcon(napp) { bytes ->
-                val img = bytes?.decodeBitmap()
-                if (img != null) iconCache[hash] = img
-                bitmap = img
-            }
-        }
-    }
+    val bitmap = rememberNappIcon(activity, napp)
 
     Row(
         Modifier
@@ -633,6 +645,16 @@ private fun NappCard(
             }
         }
         Spacer(Modifier.width(8.dp))
+        if (onPin != null) {
+            Button(
+                onClick = onPin,
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = theme.chipBg, contentColor = theme.chipFg),
+            ) {
+                Text(if (pinned) "Unpin" else "Pin", fontSize = 13.sp)
+            }
+            Spacer(Modifier.width(6.dp))
+        }
         if (showOpen && onLaunch != null) {
             Button(
                 onClick = onLaunch,
@@ -661,6 +683,62 @@ private fun NappCard(
             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
         ) {
             Text(primaryLabel, fontSize = 13.sp)
+        }
+    }
+}
+
+// rememberNappIcon loads a napp's icon off the main thread, keyed by blob
+// hash like the desktop.
+@Composable
+private fun rememberNappIcon(activity: MainActivity, napp: Napp): ImageBitmap? {
+    val hash = napp.iconHash()
+    var bitmap by remember(napp.id, hash) { mutableStateOf(iconCache[hash]) }
+
+    LaunchedEffect(napp.id, hash) {
+        if (bitmap == null && hash.isNotBlank()) {
+            activity.loadIcon(napp) { bytes ->
+                val img = bytes?.decodeBitmap()
+                if (img != null) iconCache[hash] = img
+                bitmap = img
+            }
+        }
+    }
+    return bitmap
+}
+
+// HomeTab is the pinned napps as a home-screen grid: the icon with its name
+// below, a tap opens it.
+@Composable
+private fun HomeTab(activity: MainActivity, st: LauncherState, theme: Theme) {
+    if (st.pinned.isEmpty()) {
+        Text("Nothing pinned yet. Pin napps from the Installed tab to have them here.", color = theme.muted)
+        return
+    }
+    LazyVerticalGrid(
+        columns = GridCells.Adaptive(84.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+        modifier = Modifier.fillMaxSize(),
+    ) {
+        gridItems(st.pinned, key = { it.id }) { napp ->
+            val bitmap = rememberNappIcon(activity, napp)
+            Column(
+                Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable { activity.launch(napp.id) }
+                    .padding(6.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                NappIcon(bitmap, theme, 56)
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    napp.name.ifBlank { napp.id },
+                    color = theme.fg,
+                    fontSize = 12.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                )
+            }
         }
     }
 }

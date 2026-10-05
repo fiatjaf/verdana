@@ -75,6 +75,7 @@ data class LauncherState(
     val relays: List<String>,
     val installed: List<Napp>,
     val discovery: List<Napp>,
+    val pinned: List<Napp> = listOf(),
     val busy: List<String>,
     val windows: List<WindowInfo>,
     val updateCheckRunning: Boolean = false,
@@ -130,6 +131,7 @@ fun parseState(json: String): LauncherState {
         relays = (0 until relaysArr.length()).map { relaysArr.getString(it) },
         installed = napps("installed"),
         discovery = napps("discovery"),
+        pinned = napps("pinned"),
         busy = (0 until busyArr.length()).map { busyArr.getString(it) },
         updateCheckRunning = o.optBoolean("updateCheckRunning"),
         windows = (0 until windowsArr.length()).map { i ->

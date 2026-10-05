@@ -54,6 +54,10 @@ type State struct {
 	Installed []Napp `json:"installed"`
 	Discovery []Napp `json:"discovery"`
 
+	// Pinned are the installed napps the user put on the home tab, in the
+	// order they were pinned.
+	Pinned []Napp `json:"pinned"`
+
 	// Dev napps are the ephemeral in-memory ones loaded from a folder or a
 	// dev-server url (see dev.go): shown on the launcher's dev tab, never
 	// persisted.
@@ -201,6 +205,17 @@ func Snapshot() State {
 	for i := range s.Installed {
 		if s.Installed[i].AuthorName == "" {
 			s.Installed[i].AuthorName = s.Installed[i].AuthorShortName()
+		}
+	}
+
+	byID := make(map[string]Napp, len(s.Installed))
+	for _, n := range s.Installed {
+		byID[n.ID] = n
+	}
+	s.Pinned = make([]Napp, 0)
+	for _, id := range pinnedIDs() {
+		if n, ok := byID[id]; ok {
+			s.Pinned = append(s.Pinned, n)
 		}
 	}
 

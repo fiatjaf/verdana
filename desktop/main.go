@@ -140,11 +140,14 @@ func main() {
 	// the palette the user last chose, and its CSS tokens for napps
 	applyStoredTheme()
 
-	// startup tab: installed if any napps, else discovery
-	if len(backend.Snapshot().Installed) > 0 {
-		ui.tab = 1
+	// startup tab: home if anything is pinned, else installed if any
+	// napps, else discovery
+	if snap := backend.Snapshot(); len(snap.Pinned) > 0 {
+		ui.tab = tabHome
+	} else if len(snap.Installed) > 0 {
+		ui.tab = tabInstalled
 	} else {
-		ui.tab = 2
+		ui.tab = tabDiscovery
 	}
 
 	go func() {
@@ -240,6 +243,7 @@ func gioMain() {
 		loginBtn            widget.Clickable
 		relaysEd            widget.Editor
 		fetchBtn            widget.Clickable
+		tabHomeBtn          widget.Clickable
 		tabNappsBtn         widget.Clickable
 		tabDiscoBtn         widget.Clickable
 		tabDevBtn           widget.Clickable
@@ -267,6 +271,9 @@ func gioMain() {
 		installedUpdateBtns []widget.Clickable
 		installedOpenBtns   []widget.Clickable
 		installedAuthorBtns []widget.Clickable
+		installedPinBtns    []widget.Clickable
+		homeList            widget.List
+		homeBtns            []widget.Clickable
 		actionBtns          []widget.Clickable
 		updateBtns          []widget.Clickable
 		discoCardBtns       []widget.Clickable
@@ -304,6 +311,7 @@ func gioMain() {
 	devList.Axis = layout.Vertical
 	windowsList.Axis = layout.Vertical
 	profileList.Axis = layout.Vertical
+	homeList.Axis = layout.Vertical
 	relaysEd.SetText(strings.Join(backend.Relays(), "\n"))
 
 	var ops op.Ops
@@ -399,6 +407,9 @@ func gioMain() {
 					}
 					return layoutLogin(gtx, th, &loginEd, &loginBtn, st.LoginErr)
 				case backend.PhaseMain:
+					if tabHomeBtn.Clicked(gtx) {
+						setTab(tabHome)
+					}
 					if tabWindowsBtn.Clicked(gtx) {
 						setTab(tabWindows)
 					}
@@ -438,6 +449,12 @@ func gioMain() {
 					}
 					for len(installedAuthorBtns) < len(st.Installed) {
 						installedAuthorBtns = append(installedAuthorBtns, widget.Clickable{})
+					}
+					for len(installedPinBtns) < len(st.Installed) {
+						installedPinBtns = append(installedPinBtns, widget.Clickable{})
+					}
+					for len(homeBtns) < len(st.Pinned) {
+						homeBtns = append(homeBtns, widget.Clickable{})
 					}
 					for len(actionBtns) < len(st.Discovery) {
 						actionBtns = append(actionBtns, widget.Clickable{})
@@ -479,7 +496,13 @@ func gioMain() {
 					}
 					vis := discoveryFilter(st)
 					instVis := installedFilter(st)
-					if tab == 0 {
+					if tab == tabHome {
+						for i, n := range st.Pinned {
+							if homeBtns[i].Clicked(gtx) {
+								backend.Launch(n)
+							}
+						}
+					} else if tab == 0 {
 						for i, w := range st.ManagedWindows {
 							if w.Open {
 								if closeBtns[i].Clicked(gtx) {
@@ -547,6 +570,19 @@ func gioMain() {
 							for _, i := range instVis {
 								if installedOpenBtns[i].Clicked(gtx) {
 									backend.Launch(st.Installed[i])
+									acted = true
+								}
+							}
+						}
+						if !acted {
+							for _, i := range instVis {
+								if installedPinBtns[i].Clicked(gtx) {
+									id := st.Installed[i].ID
+									if backend.IsPinned(id) {
+										backend.Unpin(id)
+									} else {
+										backend.Pin(id)
+									}
 									acted = true
 								}
 							}
@@ -750,6 +786,7 @@ func gioMain() {
 					}
 					return layoutMain(gtx,
 						th,
+						&tabHomeBtn,
 						&tabWindowsBtn,
 						&tabNappsBtn,
 						&tabDiscoBtn,
@@ -814,6 +851,9 @@ func gioMain() {
 						profileOpenBtns,
 						profileActionBtns,
 						profileUpdateBtns,
+						&homeList,
+						homeBtns,
+						installedPinBtns,
 					)
 				default:
 					return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {

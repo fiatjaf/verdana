@@ -12,6 +12,7 @@ import (
 	"gioui.org/op"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
+	"gioui.org/text"
 	"gioui.org/unit"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
@@ -285,6 +286,7 @@ func layoutLogin(
 func layoutMain(
 	gtx layout.Context,
 	th *material.Theme,
+	tabHomeBtn,
 	tabWindowsBtn,
 	tabNappsBtn,
 	tabDiscoBtn,
@@ -346,6 +348,9 @@ func layoutMain(
 	profileOpenBtns,
 	profileActionBtns,
 	profileUpdateBtns []widget.Clickable,
+	homeList *widget.List,
+	homeBtns,
+	pinBtns []widget.Clickable,
 ) layout.Dimensions {
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -353,12 +358,15 @@ func layoutMain(
 		}),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layoutTabs(gtx, th, tabWindowsBtn, tabNappsBtn, tabDiscoBtn, tabDevBtn, tab, len(st.Installed), len(st.Discovery), extra, extraBtn)
+			return layoutTabs(gtx, th, tabHomeBtn, tabWindowsBtn, tabNappsBtn, tabDiscoBtn, tabDevBtn, tab, len(st.Installed), len(st.Discovery), extra, extraBtn)
 		}),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			if editing := currentShortcutEdit(); editing != nil {
 				return layoutShortcutEditor(gtx, th, saveShortcutBtn, cancelShortcutBtn, bundleNameEd, editing)
+			}
+			if tab == tabHome {
+				return layoutHomeTab(gtx, th, homeList, homeBtns, st)
 			}
 			if tab == 0 {
 				return layoutWindowsTab(gtx, th, windowsList,
@@ -366,7 +374,7 @@ func layoutMain(
 					shortcutDelBtns, shortcutEditBtns, st)
 			}
 			if tab == 1 {
-				return layoutNappsTab(gtx, th, installedList, installedFilterEd, cardBtns, uninstBtns, installedUpdateBtns, installedOpenBtns, installedAuthorBtns, checkUpdBtn, instVis, st)
+				return layoutNappsTab(gtx, th, installedList, installedFilterEd, cardBtns, uninstBtns, installedUpdateBtns, installedOpenBtns, installedAuthorBtns, pinBtns, checkUpdBtn, instVis, st)
 			}
 			if tab == 2 {
 				return layoutDiscoveryTab(gtx, th, discoveryList, relaysEd, filterEd, fetchBtn, actionBtns,
@@ -396,6 +404,7 @@ func truncate(s string, max int) string {
 func layoutTabs(
 	gtx layout.Context,
 	th *material.Theme,
+	homeBtn,
 	windowsBtn,
 	nappsBtn,
 	discoBtn,
@@ -418,6 +427,10 @@ func layoutTabs(
 		return b.Layout(gtx)
 	}
 	children := []layout.FlexChild{
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return tabBtn(gtx, homeBtn, "Home", tab == tabHome)
+		}),
+		layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return tabBtn(gtx, windowsBtn, "Windows", tab == 0)
 		}),
@@ -450,6 +463,74 @@ func layoutTabs(
 		)
 	}
 	return layout.Flex{Axis: layout.Horizontal}.Layout(gtx, children...)
+}
+
+// homeCellDp is the width of one launcher-grid cell on the home tab: the
+// icon with its name under it, like a phone's home screen.
+const homeCellDp = 92
+
+// layoutHomeTab draws the pinned napps as a grid of icons with their names
+// below; clicking one opens it.
+func layoutHomeTab(
+	gtx layout.Context,
+	th *material.Theme,
+	list *widget.List,
+	btns []widget.Clickable,
+	st backend.State,
+) layout.Dimensions {
+	if len(st.Pinned) == 0 {
+		l := material.Body2(th, "Nothing pinned yet. Pin napps from the Installed tab to have them here.")
+		l.Color = currentTheme().muted
+		return l.Layout(gtx)
+	}
+	cellPx := gtx.Dp(unit.Dp(homeCellDp))
+	cols := gtx.Constraints.Max.X / cellPx
+	if cols < 1 {
+		cols = 1
+	}
+	rows := (len(st.Pinned) + cols - 1) / cols
+	return material.List(th, list).Layout(gtx, rows, func(gtx layout.Context, r int) layout.Dimensions {
+		children := make([]layout.FlexChild, 0, cols)
+		for c := 0; c < cols; c++ {
+			i := r*cols + c
+			if i >= len(st.Pinned) || i >= len(btns) {
+				break
+			}
+			children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return layoutHomeCell(gtx, th, &btns[i], cellPx, st.Pinned[i])
+			}))
+		}
+		return layout.Inset{Bottom: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Horizontal}.Layout(gtx, children...)
+		})
+	})
+}
+
+func layoutHomeCell(gtx layout.Context, th *material.Theme, btn *widget.Clickable, cellPx int, n backend.Napp) layout.Dimensions {
+	gtx.Constraints.Min.X = cellPx
+	gtx.Constraints.Max.X = cellPx
+	gtx.Constraints.Min.Y = 0
+	pointer.CursorPointer.Add(gtx.Ops)
+	return btn.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.UniformInset(unit.Dp(6)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return nappIcon(gtx, n, 56)
+				}),
+				layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					name := n.Name
+					if name == "" {
+						name = n.ID
+					}
+					l := material.Caption(th, name)
+					l.Alignment = text.Middle
+					l.MaxLines = 2
+					return l.Layout(gtx)
+				}),
+			)
+		})
+	})
 }
 
 func layoutWindowsTab(
@@ -750,11 +831,16 @@ func layoutNappsTab(
 	uninstBtns []widget.Clickable,
 	installedUpdateBtns []widget.Clickable,
 	openBtns,
-	authorBtns []widget.Clickable,
+	authorBtns,
+	pinBtns []widget.Clickable,
 	checkUpdBtn *widget.Clickable,
 	vis []int,
 	st backend.State,
 ) layout.Dimensions {
+	pinnedSet := make(map[string]bool, len(st.Pinned))
+	for _, n := range st.Pinned {
+		pinnedSet[n.ID] = true
+	}
 	if len(st.Installed) == 0 {
 		l := material.Body2(th, "No napps installed yet. Find some in the Discovery tab.")
 		l.Color = currentTheme().muted
@@ -812,7 +898,12 @@ func layoutNappsTab(
 				if row < len(authorBtns) {
 					authorBtn = &authorBtns[row]
 				}
-				return renderNappCard(gtx, th, cardBtn, authorBtn, openBtn, uninstBtn, updateBtn, "Uninstall", "Update", st.Installed[row])
+				var pinBtn *widget.Clickable
+				if row < len(pinBtns) {
+					pinBtn = &pinBtns[row]
+				}
+				n := st.Installed[row]
+				return renderNappCard(gtx, th, cardBtn, authorBtn, openBtn, uninstBtn, updateBtn, "Uninstall", "Update", pinBtn, pinnedSet[n.ID], n)
 			})
 		}),
 	)
@@ -925,7 +1016,7 @@ func layoutDiscoveryTab(
 				if row < len(authorBtns) {
 					authorBtn = &authorBtns[row]
 				}
-				return renderNappCard(gtx, th, cardBtn, authorBtn, openBtn, btn, updBtn, label, updLabel, n)
+				return renderNappCard(gtx, th, cardBtn, authorBtn, openBtn, btn, updBtn, label, updLabel, nil, false, n)
 			})
 		}),
 	)
@@ -1034,7 +1125,7 @@ func layoutDevTab(
 				if i < len(publishBtns) && backend.DevSourceKind(st.Dev[i].ID) == "folder" {
 					publishBtn = &publishBtns[i]
 				}
-				return renderNappCard(gtx, th, openBtn, nil, nil, publishBtn, unloadBtn, "Publish", "Unload", st.Dev[i])
+				return renderNappCard(gtx, th, openBtn, nil, nil, publishBtn, unloadBtn, "Publish", "Unload", nil, false, st.Dev[i])
 			})
 		}),
 	)
@@ -1230,6 +1321,9 @@ func renderNappCard(
 	secondBtn *widget.Clickable,
 	btnLabel,
 	secondLabel string,
+	// pinBtn, when given, is the Pin/Unpin toggle for the home tab
+	pinBtn *widget.Clickable,
+	pinned bool,
 	napp backend.Napp,
 ) layout.Dimensions {
 	authorName, authorPic := "", ""
@@ -1325,6 +1419,24 @@ func renderNappCard(
 							})
 						}),
 					)
+				}),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					if pinBtn == nil {
+						return layout.Dimensions{}
+					}
+					return layout.Inset{Left: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						pointer.CursorPointer.Add(gtx.Ops)
+						label := "Pin"
+						if pinned {
+							label = "Unpin"
+						}
+						b := material.Button(th, pinBtn, label)
+						b.Background = currentTheme().chipBg
+						b.Color = currentTheme().chipFg
+						b.TextSize = unit.Sp(13)
+						b.Inset = layout.UniformInset(unit.Dp(8))
+						return b.Layout(gtx)
+					})
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					if openBtn == nil {
