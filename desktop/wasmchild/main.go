@@ -16,16 +16,22 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"io"
 	"math"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"gioui.org/app"
 	"gioui.org/f32"
+	"gioui.org/io/clipboard"
 	"gioui.org/io/event"
+	"gioui.org/io/key"
 	"gioui.org/io/pointer"
+	"gioui.org/io/transfer"
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/clip"
@@ -251,7 +257,47 @@ func runWindow() {
 					break
 				}
 				if pe, ok := ev.(pointer.Event); ok && n != nil && pv == nil {
+					// A click is also what gives the napp the keyboard, as it
+					// would to a focused element in a page.
+					if pe.Kind == pointer.Press {
+						gtx.Execute(key.FocusCmd{Tag: &input})
+					}
 					sendPointer(n, pe)
+				}
+			}
+
+			// Keys, once the canvas has the focus: a key event for every key
+			// the ABI can name, a text event per character typed, and a
+			// paste turned into the text events typing it would have sent.
+			for {
+				ev, ok := gtx.Event(
+					key.FocusFilter{Target: &input},
+					key.Filter{Focus: &input, Optional: key.ModCtrl | key.ModCommand | key.ModShift | key.ModAlt | key.ModSuper},
+					transfer.TargetFilter{Target: &input, Type: "application/text"},
+				)
+				if !ok {
+					break
+				}
+				if n == nil || pv != nil {
+					continue
+				}
+				switch e := ev.(type) {
+				case key.Event:
+					if e.State == key.Press && e.Name == "V" && e.Modifiers.Contain(key.ModShortcut) {
+						gtx.Execute(clipboard.ReadCmd{Tag: &input})
+					}
+					sendKey(n, e)
+				case key.EditEvent:
+					for _, r := range e.Text {
+						n.Input(wasm.EventText, r, 0, 0, 0, 0)
+					}
+				case transfer.DataEvent:
+					rd := e.Open()
+					raw, _ := io.ReadAll(io.LimitReader(rd, 1<<20))
+					rd.Close()
+					for _, r := range string(raw) {
+						n.Input(wasm.EventText, r, 0, 0, 0, 0)
+					}
 				}
 			}
 
@@ -353,6 +399,78 @@ func sendPointer(n *napp, e pointer.Event) {
 	default:
 		n.Input(wasm.EventPointerMove, pos[0], pos[1], int32(buttons), 0, 0)
 	}
+}
+
+// sendKey turns one Gio key event into the ABI's key down or up. Keys the ABI
+// has no name for (modifiers on their own, function keys) are not reported.
+func sendKey(n *napp, e key.Event) {
+	code, ok := nappKey(e.Name)
+	if !ok {
+		return
+	}
+	kind := wasm.EventKeyDown
+	if e.State == key.Release {
+		kind = wasm.EventKeyUp
+	}
+	n.Input(kind, code, 0, nappMods(e.Modifiers), 0, 0)
+}
+
+// nappKey is the ABI's number for a Gio key name: a named key, or the
+// character the key types, lowercased.
+func nappKey(name key.Name) (int32, bool) {
+	switch name {
+	case key.NameDeleteBackward:
+		return wasm.KeyBackspace, true
+	case key.NameTab:
+		return wasm.KeyTab, true
+	case key.NameReturn, key.NameEnter:
+		return wasm.KeyEnter, true
+	case key.NameEscape:
+		return wasm.KeyEscape, true
+	case key.NameDeleteForward:
+		return wasm.KeyDelete, true
+	case key.NameLeftArrow:
+		return wasm.KeyArrowLeft, true
+	case key.NameRightArrow:
+		return wasm.KeyArrowRight, true
+	case key.NameUpArrow:
+		return wasm.KeyArrowUp, true
+	case key.NameDownArrow:
+		return wasm.KeyArrowDown, true
+	case key.NameHome:
+		return wasm.KeyHome, true
+	case key.NameEnd:
+		return wasm.KeyEnd, true
+	case key.NamePageUp:
+		return wasm.KeyPageUp, true
+	case key.NamePageDown:
+		return wasm.KeyPageDown, true
+	case key.NameSpace:
+		return ' ', true
+	}
+	r, size := utf8.DecodeRuneInString(string(name))
+	if r == utf8.RuneError || size != len(name) {
+		return 0, false
+	}
+	return unicode.ToLower(r), true
+}
+
+// nappMods is Gio's modifier set as the mask the ABI carries.
+func nappMods(m key.Modifiers) int32 {
+	var out int32
+	if m.Contain(key.ModShift) {
+		out |= wasm.ModShift
+	}
+	if m.Contain(key.ModCtrl) {
+		out |= wasm.ModCtrl
+	}
+	if m.Contain(key.ModAlt) {
+		out |= wasm.ModAlt
+	}
+	if m.Contain(key.ModSuper) || m.Contain(key.ModCommand) {
+		out |= wasm.ModMeta
+	}
+	return out
 }
 
 // nappButtons is Gio's button set as the mask the ABI carries.

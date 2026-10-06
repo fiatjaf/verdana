@@ -67,15 +67,40 @@ click gets drawn on the frame after it. Returning zero parks the window until
 something happens, so an idle window costs nothing — the window stops asking
 Gio for frames until an event arrives.
 
-`napp_event` kinds, with `x` and `y` in canvas pixels and `buttons` a mask of
-`1` primary, `2` secondary, `4` middle:
+`napp_event` kinds. For the pointer ones `x` and `y` are canvas pixels and
+`buttons` a mask of `1` primary, `2` secondary, `4` middle; for the keyboard
+ones `x` is the key or the character and `buttons` the modifiers, a mask of
+`1` shift, `2` ctrl, `4` alt, `8` meta (super or command):
 
-| kind |                        |
-| ---  | ---                    |
-| 0    | pointer moved          |
-| 1    | pointer pressed        |
-| 2    | pointer released       |
-| 3    | scroll, in `a` and `b` |
+| kind |                                                           |
+| ---  | ---                                                       |
+| 0    | pointer moved                                             |
+| 1    | pointer pressed                                           |
+| 2    | pointer released                                          |
+| 3    | scroll, in `a` and `b`                                    |
+| 4    | key down: the key in `x`; `a` is `1` when the key repeats |
+| 5    | key up: the key in `x`                                    |
+| 6    | text: one code point typed (or pasted), in `x`            |
+
+A key is the code point of the character it types, lowercased (`a` for both
+`a` and `A`, the shift being in `buttons`), or for a key that types nothing:
+
+| key        | `x`        | key       | `x`        |
+| ---        | ---        | ---       | ---        |
+| Backspace  | `8`        | ArrowUp   | `0x110002` |
+| Tab        | `9`        | ArrowDown | `0x110003` |
+| Enter      | `13`       | Home      | `0x110004` |
+| Escape     | `27`       | End       | `0x110005` |
+| Delete     | `127`      | PageUp    | `0x110006` |
+| ArrowLeft  | `0x110000` | PageDown  | `0x110007` |
+| ArrowRight | `0x110001` |           |            |
+
+Other keys (a modifier on its own, function keys) are not reported. A text
+field wants the text events, which carry what was typed with the layout and
+shift already applied (Gio's edit events); the key events are for shortcuts
+and editing keys. The window gets the keyboard once it has been clicked, and
+ctrl+v (command+v on macOS) reads the clipboard and sends what is in it as
+text events, after the key events for the shortcut itself.
 
 A module may leave `napp_event` out entirely if it only draws.
 
@@ -130,6 +155,7 @@ its answer at once.
 | 4 storage      | 0                    | `{"op", "key", "value"}`            | another window of this napp changed its storage               |
 | 5 theme        | 0                    | `{"name", "vars"}`                  | the user switched the launcher's theme                        |
 | 6 subscription | the subscribe call's | `{"type", ...}`                     | news from a subscription; see [Subscriptions](#subscriptions) |
+| 7 bitmap       | the image call's     | width, height, RGBA                 | a decoded image; see [The web](#the-web)                      |
 
 ### Methods
 
@@ -191,6 +217,8 @@ window until it is answered, exactly like a web napp's overlay.
 | `fx.parseCoordinate`                       | string                                      | `{kind, pubkey, identifier}` or null    | `napp.fx.parseCoordinate`      |
 | `fx.formatCoordinate`                      | `{kind, pubkey, identifier}`                | string                                  | `napp.fx.formatCoordinate`     |
 | `fx.satsFromBolt11`                        | invoice string                              | sats or null                            | `napp.fx.satsFromBolt11`       |
+| `http_fetch`                               | `{url, method?, headers?, body?}` or a url  | `{status, url, headers, body}`          | `fetch()`; see [The web](#the-web) |
+| `http_fetch_image`                         | `{url, width?, height?, fit?}` or a url     | a bitmap message                        | see [The web](#the-web)        |
 
 The `napp.storage*`, `nip19.*`, `fx.*`, `napp.instance`, `napp.theme` and
 `nostrdb.supports` calls are answered by the window itself, without a round
@@ -199,6 +227,9 @@ through `napp_receive`, like everything else. Storage is the same 5MB store
 per napp a web napp's `localStorage` is, shared by all its windows (web or
 wasm), and a write over the quota fails with an error message.
 
+`signEvent` may leave `created_at` out: a wasm napp has no wall clock, so a
+template without one is stamped with the time it is signed at.
+
 ### Feeds
 
 A feed call's own id is its `callbackId`. The call answers `null` once the
@@ -206,6 +237,34 @@ subscription is up; the events then keep arriving as feed messages under that
 same id, `synced` turning true once the relays have sent what they had stored.
 `napp.feeds.cancel` with `{"callbackId": id}` ends it, and nothing more is
 delivered for it after that.
+
+### The web
+
+A web napp has `fetch()`. A wasm napp has no sockets, so the window fetches
+for it:
+
+- `http_fetch` makes one request: `method` defaults to `GET`, `headers` is an
+  object of strings and `body` a string (base64 bytes yourself if you need
+  to send any). It answers `{"status", "url", "headers", "body"}`, with the
+  header names lowercased and **`body` base64**, since JSON has no bytes. A
+  non-2xx status is still an answer; only not getting one is an error.
+- `http_fetch_image` fetches an image and decodes it (png, jpeg, gif, webp),
+  so a napp can show a picture without a decoder in its module. It answers
+  with a **bitmap message** (kind 7) under the call's id instead of a result:
+  `width` and `height` as little-endian u32s, then `width * height * 4` bytes
+  of RGBA, rows top-down, **alpha not premultiplied** — what iced's
+  `image::Handle::from_rgba` and egui's `ColorImage::from_rgba_unmultiplied`
+  take. With no `width`/`height` the image comes at its own size, scaled down
+  to fit 1024×1024. With them, `fit: "contain"` (the default) scales it to fit
+  inside, never up; `fit: "cover"` fills exactly `width`×`height` and crops
+  what overhangs evenly — the square avatar out of any photo. Only one of the
+  two sides is a square of that side. An animated image gives its first
+  frame.
+
+Both read at most 16MB and give up after 20 seconds. They run in the window's
+own process (`desktop/wasmchild/http.go`), beside the frame loop, so a slow
+server never holds up a frame. There is no CORS here, as there is none for a
+web napp's page in verdana; in nostrapps the browser's rules apply.
 
 ### Subscriptions
 
@@ -250,7 +309,7 @@ handler's result.
 ## What a wasm napp does not have
 
 **No WASI.** wazero is started with no `wasi_snapshot_preview1` module, no
-filesystem, no socket and no clock. A module that imports anything beyond the
+filesystem, no socket (the web is `http_fetch`) and no clock. A module that imports anything beyond the
 five above is refused before it starts, with what it asked for in the message
 — a host cannot half-support a napp, because the parts it does support are the
 parts nobody had to think about. Whatever a napp needs from the outside comes

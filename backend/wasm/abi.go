@@ -134,15 +134,54 @@ const (
 	// {"type": "closed", "reasons": {relay: reason}} if every relay ends
 	// it, after which nothing more comes.
 	MsgSubscription
+
+	// MsgBitmap answers the http_fetch_image call with this id with the
+	// image already decoded: width and height as little-endian uint32s, then
+	// width*height*4 bytes of RGBA, rows top-down, alpha not premultiplied.
+	MsgBitmap
 )
 
 // The input events a host reports through ExportEvent. Pointer coordinates
-// are in canvas pixels.
+// are in canvas pixels. The keyboard ones carry the key (Key* below, or the
+// lowercased code point of the character the key types) or the typed code
+// point in x and the modifier mask (Mod* below) in buttons; a key down has
+// a = 1 when it is the key repeating.
 const (
 	EventPointerMove int32 = iota
 	EventPointerDown
 	EventPointerUp
 	EventScroll
+	EventKeyDown
+	EventKeyUp
+	// EventText is one code point of text typed or pasted, in x.
+	EventText
+)
+
+// The keys a key event names that do not type a character. The ones with an
+// ASCII control code use it; the rest are past the end of Unicode, so no
+// character can be mistaken for them.
+const (
+	KeyBackspace  = 8
+	KeyTab        = 9
+	KeyEnter      = 13
+	KeyEscape     = 27
+	KeyDelete     = 127
+	KeyArrowLeft  = 0x110000
+	KeyArrowRight = 0x110001
+	KeyArrowUp    = 0x110002
+	KeyArrowDown  = 0x110003
+	KeyHome       = 0x110004
+	KeyEnd        = 0x110005
+	KeyPageUp     = 0x110006
+	KeyPageDown   = 0x110007
+)
+
+// Keyboard modifiers, as the bit mask key and text events carry.
+const (
+	ModShift = 1
+	ModCtrl  = 2
+	ModAlt   = 4
+	ModMeta  = 8
 )
 
 // Pointer buttons, as the bit mask both the down/up events and pointer-move's

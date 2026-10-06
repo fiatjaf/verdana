@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"verdana/backend/wasm"
 )
@@ -162,6 +163,10 @@ func (b *bridge) call(method string, params []byte) int32 {
 		return id
 	}
 
+	if b.httpCall(id, method, params) {
+		return id
+	}
+
 	if result, err, ok := b.local(id, method, params); ok {
 		b.answer(id, result, err)
 		return id
@@ -209,6 +214,19 @@ func (b *bridge) call(method string, params []byte) int32 {
 		b.mu.Lock()
 		b.subs[id] = true
 		b.mu.Unlock()
+
+	case method == "signEvent":
+		// A wasm napp has no wall clock to stamp an event with, so a
+		// template without created_at is stamped now.
+		var p map[string]json.RawMessage
+		if json.Unmarshal(params, &p) == nil && p != nil {
+			var at float64
+			json.Unmarshal(p["created_at"], &at)
+			if at == 0 {
+				p["created_at"], _ = json.Marshal(time.Now().Unix())
+				params, _ = json.Marshal(p)
+			}
+		}
 
 	case method == "napp.feeds.cancel", method == "napp.unsubscribe":
 		var p struct {
