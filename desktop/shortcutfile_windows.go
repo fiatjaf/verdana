@@ -14,10 +14,11 @@ import (
 
 // writeShortcutFile writes a .lnk in the user's Start Menu Programs folder
 // with WScript.Shell through powershell (every Windows has both). The link's
-// Arguments is the bundle token as one argument. COM writes the file, so the
-// link is exactly what Windows expects; the bundle's name goes into its
-// NAME_STRING afterwards, since what COM puts there is the launcher's own file
-// name.
+// Arguments is the bundle token as one argument, and IconLocation is the
+// unpacked .ico -- COM would otherwise take the icon from the launcher .exe,
+// which carries none. COM writes the file, so the link is exactly what Windows
+// expects; the bundle's name goes into its NAME_STRING afterwards, since what
+// COM puts there is the launcher's own file name.
 func writeShortcutFile(name, exe, token string) (string, error) {
 	startMenu, err := userStartMenuPrograms()
 	if err != nil {
@@ -27,9 +28,11 @@ func writeShortcutFile(name, exe, token string) (string, error) {
 		return "", err
 	}
 	target := filepath.Join(startMenu, shortcutPrefix+shortcutSlug(name)+".lnk")
+	// IconLocation is "<path>,<index>"; index 0 is the first icon in the file,
+	// which is the 16x16 one we put there.
 	ps := fmt.Sprintf(
-		`$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut('%s'); $s.TargetPath = '%s'; $s.Arguments = '%s'; $s.Save()`,
-		target, psSingleQuote(exe), psSingleQuote(token),
+		`$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut('%s'); $s.TargetPath = '%s'; $s.Arguments = '%s'; %s$s.Save()`,
+		target, psSingleQuote(exe), psSingleQuote(token), psIconLocation(),
 	)
 	if out, err := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", ps).CombinedOutput(); err != nil {
 		return target, fmt.Errorf("creating shortcut failed: %v: %s", err, out)
@@ -38,6 +41,17 @@ func writeShortcutFile(name, exe, token string) (string, error) {
 		log.Warn().Err(err).Str("path", target).Msg("could not name the shortcut file")
 	}
 	return target, nil
+}
+
+// psIconLocation sets the link's icon to the unpacked .ico, or leaves it to
+// COM when the icon could not be unpacked: a link with no IconLocation still
+// runs, it just borrows the target's icon.
+func psIconLocation() string {
+	path := iconFile()
+	if path == "" {
+		return ""
+	}
+	return fmt.Sprintf("$s.IconLocation = '%s,0'; ", psSingleQuote(path))
 }
 
 // nameLnkFile writes the bundle's name into a link COM just wrote. The Start

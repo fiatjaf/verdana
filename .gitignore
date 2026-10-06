@@ -1,6 +1,7 @@
 desktop/verdana
 desktop/child/child
 desktop/wasmchild/wasmchild
+desktop/rsrc.syso
 
 # android build products
 android/app/libs/backend.aar

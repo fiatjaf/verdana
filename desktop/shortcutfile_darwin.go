@@ -13,42 +13,63 @@ import (
 )
 
 // writeShortcutFile writes a minimal .app bundle into ~/Applications: a
-// stub Info.plist and a launcher script whose only line is calling verdana
-// with the bundle token. LaunchServices picks bundles up on their own.
+// stub Info.plist, the icon it points at, and a launcher script whose only
+// line is calling verdana with the bundle token. LaunchServices picks bundles
+// up on their own.
 func writeShortcutFile(name, exe, token string) (string, error) {
 	slug := shortcutSlug(name)
 	appDir, err := shortcutBundleDir(slug)
 	if err != nil {
 		return "", err
 	}
-	if err := os.MkdirAll(filepath.Join(appDir, "Contents", "MacOS"), 0755); err != nil {
+	contents := filepath.Join(appDir, "Contents")
+	if err := os.MkdirAll(filepath.Join(contents, "MacOS"), 0755); err != nil {
 		return "", err
 	}
 
 	id := "com.verdana.shortcut." + slug
-	if err := os.WriteFile(filepath.Join(appDir, "Contents", "Info.plist"), []byte(fmt.Sprintf(
+	if err := os.WriteFile(filepath.Join(contents, "Info.plist"), []byte(fmt.Sprintf(
 		`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
 	<key>CFBundleExecutable</key><string>%s</string>
+	<key>CFBundleIconFile</key><string>%s</string>
 	<key>CFBundleIdentifier</key><string>%s</string>
 	<key>CFBundleName</key><string>%s</string>
 	<key>CFBundlePackageType</key><string>APPL</string>
 	<key>CFBundleShortVersionString</key><string>1.0</string>
 </dict>
 </plist>
-`, slug, xmlEscape(id), xmlEscape(name))), 0644); err != nil {
+`, slug, xmlEscape(bundleIconFile(contents)), xmlEscape(id), xmlEscape(name))), 0644); err != nil {
 		return "", err
 	}
 
 	script := "#!/bin/sh\nexec " + shellQuote(exe) + " " + shellQuote(token) + "\n"
-	elem := filepath.Join(appDir, "Contents", "MacOS", slug)
+	elem := filepath.Join(contents, "MacOS", slug)
 	if err := os.WriteFile(elem, []byte(script), 0755); err != nil {
 		return "", err
 	}
 	refreshShortcutParent("")
 	return appDir, nil
+}
+
+// bundleIconFile copies the .icns into Contents/Resources, where CFBundleIconFile
+// looks for it, and returns the name to record in the plist. A bundle whose
+// icon could not be written still launches, so an empty name is a valid answer
+// to leave in the plist.
+func bundleIconFile(contents string) string {
+	resources := filepath.Join(contents, "Resources")
+	if err := os.MkdirAll(resources, 0755); err != nil {
+		log.Warn().Err(err).Str("dir", resources).Msg("could not create the bundle resources directory")
+		return ""
+	}
+	path := filepath.Join(resources, "verdana.icns")
+	if err := os.WriteFile(path, iconICNS, 0644); err != nil {
+		log.Warn().Err(err).Str("path", path).Msg("could not write the bundle icon")
+		return ""
+	}
+	return "verdana.icns"
 }
 
 func shellQuote(s string) string {

@@ -1,5 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- The launcher icon is an adaptive icon: a white tile with the ocean-green V
+     on it. A launcher mask may crop this layer to its middle 72/108, so the V
+     is drawn into mipmap-*/ic_launcher_foreground.png sized to 66/108 of it.
+     The monochrome layer is the same shape in black, which Android 13+ recolors
+     to match the user's wallpaper. -->
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@color/ic_launcher_background"/>
-    <foreground android:drawable="@android:color/white"/>
+    <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
+    <monochrome android:drawable="@mipmap/ic_launcher_monochrome"/>
 </adaptive-icon>

@@ -98,6 +98,24 @@ jobs:
           go build -o child/child ./child
           go build -o wasmchild/wasmchild ./wasmchild
 
+      # a windows .exe with no icon of its own shows the generic exe picture in
+      # Explorer, the taskbar and the Start Menu. desktop/icon.rc names the file
+      # and windres (from the mingw install above) compiles it into an object
+      # the go linker puts in the binary. generated here rather than committed,
+      # because it is a build product that has to match the committed icon.
+      - name: embed the icon in the exe
+        if: runner.os == 'Windows'
+        shell: bash
+        working-directory: desktop
+        run: |
+          w=$(command -v windres || command -v x86_64-w64-mingw32-windres || command -v i686-w64-mingw32-windres)
+          if [ -z "$w" ]; then
+            echo "no windres on PATH: the exe would ship without an icon" >&2
+            exit 1
+          fi
+          echo "using $w"
+          "$w" --target=pe-x86-64 -i icon.rc -o rsrc.syso
+
       - name: build verdana
         working-directory: desktop
         env:

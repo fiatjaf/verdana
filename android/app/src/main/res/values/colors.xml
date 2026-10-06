@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ic_launcher_background">#3F51B5</color>
+    <!-- The adaptive icon's background layer. White, so the ocean-green V in
+         ic_launcher_foreground is what reads; see tools/make-icons.py. -->
+    <color name="ic_launcher_background">#FFFFFF</color>
 </resources>

@@ -13,7 +13,8 @@ import (
 // writeShortcutFile writes a freedesktop .desktop entry into the user's
 // applications directory. Its only job is Exec="<verdana> <token>": running
 // the launcher, which forwards the token to the already-running instance (or
-// handles it itself when there is none).
+// handles it itself when there is none). Icon= points at the unpacked icon by
+// absolute path, which the desktop entry spec allows in place of a theme name.
 func writeShortcutFile(name, exe, token string) (string, error) {
 	if !strings.HasPrefix(exe, "/") {
 		// some launchers install by symlink into PATH dirs; absolute or not,
@@ -22,7 +23,7 @@ func writeShortcutFile(name, exe, token string) (string, error) {
 			exe = resolved
 		}
 	}
-	data := fmt.Sprintf(desktopTemplate, name, quoteExecField(exe), quoteExecField(token))
+	data := fmt.Sprintf(desktopTemplate, name, quoteExecField(exe), quoteExecField(token), iconLine())
 	if err := os.MkdirAll(applicationsDir(), 0755); err != nil {
 		return "", err
 	}
@@ -32,6 +33,16 @@ func writeShortcutFile(name, exe, token string) (string, error) {
 	}
 	refreshShortcutParent(applicationsDir())
 	return path, nil
+}
+
+// iconLine is the Icon= line for the desktop template, or nothing at all when
+// the icon could not be unpacked -- an entry without an Icon= key still runs.
+func iconLine() string {
+	path := iconFile()
+	if path == "" {
+		return ""
+	}
+	return "Icon=" + path + "\n"
 }
 
 func deleteShortcutFile(path string) error {
@@ -164,4 +175,4 @@ Exec=%s %s
 Terminal=false
 Categories=Network;
 StartupWMClass=Verdana
-`
+%s`
