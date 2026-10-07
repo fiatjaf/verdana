@@ -1276,79 +1276,83 @@ func renderNappCard(
 			Top: unit.Dp(12), Bottom: unit.Dp(12),
 			Left: unit.Dp(12), Right: unit.Dp(12),
 		}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return layout.Inset{Right: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						return nappIcon(gtx, napp, 40)
-					})
-				}),
-				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-					return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							label := material.Body1(th, napp.Name)
-							label.Font.Weight = font.Bold
-							return label.Layout(gtx)
-						}),
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							actions := make([]string, 0, len(napp.Actions))
-							for _, action := range napp.Actions {
-								if strings.TrimSpace(action) != "" {
-									actions = append(actions, action)
-								}
-							}
-							if len(actions) == 0 {
-								return layout.Dimensions{}
-							}
-							return layout.Inset{Top: unit.Dp(5)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-								children := make([]layout.FlexChild, 0, len(actions)*2)
-								for i, action := range actions {
-									if i > 0 {
-										children = append(children, layout.Rigid(layout.Spacer{Width: unit.Dp(4)}.Layout))
+			content := func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return layout.Inset{Right: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							return nappIcon(gtx, napp, 40)
+						})
+					}),
+					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+						return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								label := material.Body1(th, napp.Name)
+								label.Font.Weight = font.Bold
+								return label.Layout(gtx)
+							}),
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								actions := make([]string, 0, len(napp.Actions))
+								for _, action := range napp.Actions {
+									if strings.TrimSpace(action) != "" {
+										actions = append(actions, action)
 									}
-									children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-										return actionChip(gtx, th, action)
-									}))
 								}
-								return layout.Flex{Axis: layout.Horizontal}.Layout(gtx, children...)
-							})
-						}),
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							if napp.Description == "" {
-								return layout.Dimensions{}
-							}
-							return layout.Inset{Top: unit.Dp(2)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-								l := material.Body2(th, napp.Description)
-								l.Color = currentTheme().subtle
-								return l.Layout(gtx)
-							})
-						}),
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							if authorName == "" {
-								return layout.Dimensions{}
-							}
-							return layout.Inset{Top: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-								inner := func(gtx layout.Context) layout.Dimensions {
-									return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-											return avatar(gtx, authorPic, 18)
-										}),
-										layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
-										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-											c := material.Caption(th, authorName)
-											c.Color = currentTheme().muted
-											return c.Layout(gtx)
-										}),
-									)
+								if len(actions) == 0 {
+									return layout.Dimensions{}
 								}
-								if authorBtn == nil {
-									return inner(gtx)
+								return layout.Inset{Top: unit.Dp(5)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+									children := make([]layout.FlexChild, 0, len(actions)*2)
+									for i, action := range actions {
+										if i > 0 {
+											children = append(children, layout.Rigid(layout.Spacer{Width: unit.Dp(4)}.Layout))
+										}
+										children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+											return actionChip(gtx, th, action)
+										}))
+									}
+									return layout.Flex{Axis: layout.Horizontal}.Layout(gtx, children...)
+								})
+							}),
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								if napp.Description == "" {
+									return layout.Dimensions{}
 								}
-								pointer.CursorPointer.Add(gtx.Ops)
-								return authorBtn.Layout(gtx, inner)
-							})
-						}),
-					)
-				}),
+								return layout.Inset{Top: unit.Dp(2)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+									l := material.Body2(th, napp.Description)
+									l.Color = currentTheme().subtle
+									return l.Layout(gtx)
+								})
+							}),
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								if authorName == "" {
+									return layout.Dimensions{}
+								}
+								return layout.Inset{Top: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+									inner := func(gtx layout.Context) layout.Dimensions {
+										return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+											layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+												return avatar(gtx, authorPic, 18)
+											}),
+											layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
+											layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+												c := material.Caption(th, authorName)
+												c.Color = currentTheme().muted
+												return c.Layout(gtx)
+											}),
+										)
+									}
+									if authorBtn == nil {
+										return inner(gtx)
+									}
+									pointer.CursorPointer.Add(gtx.Ops)
+									return authorBtn.Layout(gtx, inner)
+								})
+							}),
+						)
+					}),
+				)
+			}
+			buttons := []layout.FlexChild{
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					if pinBtn == nil {
 						return layout.Dimensions{}
@@ -1402,6 +1406,36 @@ func renderNappCard(
 						b.Inset = layout.UniformInset(unit.Dp(8))
 						return b.Layout(gtx)
 					})
+				}),
+			}
+			actions := func(gtx layout.Context, justifyEnd bool) layout.Dimensions {
+				if gtx.Constraints.Max.X < gtx.Dp(300) {
+					return layout.Flex{Axis: layout.Vertical, Alignment: layout.End}.Layout(gtx, buttons...)
+				}
+				if !justifyEnd {
+					return layout.Flex{Axis: layout.Horizontal}.Layout(gtx, buttons...)
+				}
+				children := append([]layout.FlexChild{
+					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+						return layout.Dimensions{Size: image.Point{X: gtx.Constraints.Max.X}}
+					}),
+				}, buttons...)
+				return layout.Flex{Axis: layout.Horizontal}.Layout(gtx, children...)
+			}
+			if gtx.Constraints.Max.X < gtx.Dp(720) {
+				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+					layout.Rigid(content),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return layout.Inset{Top: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							return actions(gtx, true)
+						})
+					}),
+				)
+			}
+			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+				layout.Flexed(1, content),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return actions(gtx, false)
 				}),
 			)
 		})

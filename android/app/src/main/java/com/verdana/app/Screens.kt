@@ -8,6 +8,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -572,6 +573,7 @@ private fun DiscoveryTab(
 }
 
 @Composable
+@OptIn(ExperimentalLayoutApi::class)
 private fun NappCard(
     activity: MainActivity,
     napp: Napp,
@@ -593,99 +595,104 @@ private fun NappCard(
 ) {
     val bitmap = rememberNappIcon(activity, napp)
 
-    Row(
+    Column(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
             .background(theme.card)
             .clickable(enabled = onDetail != null) { onDetail?.invoke() }
             .padding(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
     ) {
-        NappIcon(bitmap, theme, 40)
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f)) {
-            Text(napp.name.ifBlank { napp.id }, fontWeight = FontWeight.Bold, color = theme.fg)
-            if (napp.description.isNotBlank()) {
-                Text(napp.description, color = theme.subtle, fontSize = 13.sp, maxLines = 2)
-            }
-            if (napp.actions.any { it.isNotBlank() }) {
-                Row(
-                    Modifier
-                        .padding(top = 5.dp)
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    napp.actions.filter { it.isNotBlank() }.forEach { action ->
-                        Surface(
-                            color = theme.chipBg,
-                            shape = RoundedCornerShape(5.dp),
-                        ) {
-                            Text(
-                                action,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
-                                color = theme.chipFg,
-                                fontSize = 11.sp,
-                            )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            NappIcon(bitmap, theme, 40)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(napp.name.ifBlank { napp.id }, fontWeight = FontWeight.Bold, color = theme.fg)
+                if (napp.description.isNotBlank()) {
+                    Text(napp.description, color = theme.subtle, fontSize = 13.sp, maxLines = 2)
+                }
+                if (napp.actions.any { it.isNotBlank() }) {
+                    Row(
+                        Modifier
+                            .padding(top = 5.dp)
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        napp.actions.filter { it.isNotBlank() }.forEach { action ->
+                            Surface(
+                                color = theme.chipBg,
+                                shape = RoundedCornerShape(5.dp),
+                            ) {
+                                Text(
+                                    action,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                                    color = theme.chipFg,
+                                    fontSize = 11.sp,
+                                )
+                            }
                         }
                     }
                 }
-            }
-            if (napp.author.isNotBlank()) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .padding(top = 6.dp)
-                        .clickable(enabled = onAuthor != null) { onAuthor?.invoke() },
-                ) {
-                    Text(
-                        napp.authorName.ifBlank { napp.author.take(16) + "…" }.take(40),
-                        color = theme.muted,
-                        fontSize = 11.sp,
-                        maxLines = 1,
-                    )
+                if (napp.author.isNotBlank()) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .padding(top = 6.dp)
+                            .clickable(enabled = onAuthor != null) { onAuthor?.invoke() },
+                    ) {
+                        Text(
+                            napp.authorName.ifBlank { napp.author.take(16) + "…" }.take(40),
+                            color = theme.muted,
+                            fontSize = 11.sp,
+                            maxLines = 1,
+                        )
+                    }
                 }
             }
         }
-        Spacer(Modifier.width(8.dp))
-        if (onPin != null) {
-            Button(
-                onClick = onPin,
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = theme.chipBg, contentColor = theme.chipFg),
-            ) {
-                Text(if (pinned) "Unpin" else "Pin", fontSize = 13.sp)
-            }
-            Spacer(Modifier.width(6.dp))
-        }
-        if (showOpen && onLaunch != null) {
-            Button(
-                onClick = onLaunch,
-                enabled = primaryLabel != "Working…",
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = theme.suggestBg, contentColor = theme.suggestFg),
-            ) {
-                Text("Open", fontSize = 13.sp)
-            }
-            Spacer(Modifier.width(6.dp))
-        }
-        if (secondaryLabel != null && onSecondary != null) {
-            Button(
-                onClick = onSecondary,
-                enabled = primaryLabel != "Working…",
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = theme.accent, contentColor = theme.accentText),
-            ) {
-                Text(secondaryLabel, fontSize = 13.sp)
-            }
-            Spacer(Modifier.width(6.dp))
-        }
-        Button(
-            onClick = onPrimary,
-            enabled = primaryLabel != "Working…",
-            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+        FlowRow(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Text(primaryLabel, fontSize = 13.sp)
+            if (onPin != null) {
+                Button(
+                    onClick = onPin,
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = theme.chipBg, contentColor = theme.chipFg),
+                ) {
+                    Text(if (pinned) "Unpin" else "Pin", fontSize = 13.sp)
+                }
+            }
+            if (showOpen && onLaunch != null) {
+                Button(
+                    onClick = onLaunch,
+                    enabled = primaryLabel != "Working…",
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = theme.suggestBg, contentColor = theme.suggestFg),
+                ) {
+                    Text("Open", fontSize = 13.sp)
+                }
+            }
+            if (secondaryLabel != null && onSecondary != null) {
+                Button(
+                    onClick = onSecondary,
+                    enabled = primaryLabel != "Working…",
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = theme.accent, contentColor = theme.accentText),
+                ) {
+                    Text(secondaryLabel, fontSize = 13.sp)
+                }
+            }
+            Button(
+                onClick = onPrimary,
+                enabled = primaryLabel != "Working…",
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+            ) {
+                Text(primaryLabel, fontSize = 13.sp)
+            }
         }
     }
 }
