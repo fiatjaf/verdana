@@ -353,6 +353,22 @@ func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 			}
 			return nil, nil
 
+		case "napp.log":
+			// one printable line of a napp's own report, the way nostrapps
+			// takes it: {message} from bridge.js, or a bare string
+			var p struct {
+				Message string `json:"message"`
+			}
+			if err := json.Unmarshal([]byte(params), &p); err != nil {
+				json.Unmarshal([]byte(params), &p.Message)
+			}
+			line := preview(p.Message, 400)
+			if line == "" {
+				return false, nil
+			}
+			log.Info().Str("napp", ci.napp.ID).Str("instance", ci.instance).Msg(line)
+			return true, nil
+
 		case "napp.close":
 			log.Info().Str("instance", ci.instance).Msg("napp asked to close its window")
 			ci.send(WireMsg{T: "close"})

@@ -778,6 +778,8 @@
       )
     },
 
+    log: message => rpc("napp.log", { message: String(message) }).catch(() => false),
+
     close: () => {
       rpc("napp.close").catch(() => {})
     },
