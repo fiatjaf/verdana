@@ -53,5 +53,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("androidx.webkit:webkit:1.12.1")
     implementation("androidx.core:core-ktx:1.15.0")
+    // drag-and-drop reordering of the home tab's pinned napps
+    implementation("sh.calvin.reorderable:reorderable:2.4.3")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

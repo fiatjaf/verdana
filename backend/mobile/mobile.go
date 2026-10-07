@@ -241,6 +241,9 @@ func Pin(id string) { backend.Pin(id) }
 // Unpin takes a napp off the home tab.
 func Unpin(id string) { backend.Unpin(id) }
 
+// MovePin moves a pinned napp to position to of the home tab.
+func MovePin(id string, to int) { backend.MovePin(id, to) }
+
 // Launch opens an installed napp, or surfaces the window it already has.
 func Launch(id string) { backend.LaunchByID(id) }
 

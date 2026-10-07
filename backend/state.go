@@ -93,6 +93,12 @@ func loadState() {
 		}
 	}
 	state.LastLaunched = nil
+	// pins only ever name installed napps, so a position on the home tab
+	// is a position in this list (see MovePin)
+	state.Pinned = slices.DeleteFunc(state.Pinned, func(id string) bool {
+		_, ok := state.InstalledNapps[id]
+		return !ok
+	})
 	if state.Rules == nil {
 		state.Rules = make(map[string]Rule)
 	}
@@ -224,6 +230,26 @@ func Unpin(id string) {
 		return
 	}
 	state.Pinned = slices.DeleteFunc(state.Pinned, func(p string) bool { return p == id })
+	saveState()
+	stateMu.Unlock()
+	notifyState()
+}
+
+// MovePin puts a pinned napp at position to of the home tab, shifting the
+// ones in between (a drag-and-drop reorder). to is clamped to the list.
+func MovePin(id string, to int) {
+	stateMu.Lock()
+	from := slices.Index(state.Pinned, id)
+	if from < 0 {
+		stateMu.Unlock()
+		return
+	}
+	to = max(0, min(to, len(state.Pinned)-1))
+	if from == to {
+		stateMu.Unlock()
+		return
+	}
+	state.Pinned = slices.Insert(slices.Delete(state.Pinned, from, from+1), to, id)
 	saveState()
 	stateMu.Unlock()
 	notifyState()

@@ -12,6 +12,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import sh.calvin.reorderable.ReorderableItem
+import sh.calvin.reorderable.rememberReorderableLazyGridState
 import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -707,37 +710,53 @@ private fun rememberNappIcon(activity: MainActivity, napp: Napp): ImageBitmap? {
 }
 
 // HomeTab is the pinned napps as a home-screen grid: the icon with its name
-// below, a tap opens it.
+// below, a tap opens it, a long press picks it up to drag it somewhere else.
 @Composable
 private fun HomeTab(activity: MainActivity, st: LauncherState, theme: Theme) {
     if (st.pinned.isEmpty()) {
         Text("Nothing pinned yet. Pin napps from the Installed tab to have them here.", color = theme.muted)
         return
     }
+    // the grid is drawn from a local copy that the drag reorders as it
+    // goes; the backend only hears about the final position, on drop. A
+    // fresh snapshot with a different set or order replaces the copy.
+    var order by remember(st.pinned.map { it.id }) { mutableStateOf(st.pinned) }
+    val gridState = rememberLazyGridState()
+    val reorderState = rememberReorderableLazyGridState(gridState) { from, to ->
+        order = order.toMutableList().apply { add(to.index, removeAt(from.index)) }
+    }
     LazyVerticalGrid(
         columns = GridCells.Adaptive(84.dp),
+        state = gridState,
         verticalArrangement = Arrangement.spacedBy(16.dp),
         modifier = Modifier.fillMaxSize(),
     ) {
-        gridItems(st.pinned, key = { it.id }) { napp ->
+        gridItems(order, key = { it.id }) { napp ->
             val bitmap = rememberNappIcon(activity, napp)
-            Column(
-                Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .clickable { activity.launch(napp.id) }
-                    .padding(6.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                NappIcon(bitmap, theme, 56)
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    napp.name.ifBlank { napp.id },
-                    color = theme.fg,
-                    fontSize = 12.sp,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    textAlign = TextAlign.Center,
-                )
+            ReorderableItem(reorderState, key = napp.id) { dragging ->
+                Column(
+                    Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (dragging) theme.card else Color.Transparent)
+                        .clickable { activity.launch(napp.id) }
+                        .longPressDraggableHandle(onDragStopped = {
+                            val to = order.indexOfFirst { it.id == napp.id }
+                            if (to >= 0) activity.movePin(napp.id, to)
+                        })
+                        .padding(6.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    NappIcon(bitmap, theme, 56)
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        napp.name.ifBlank { napp.id },
+                        color = theme.fg,
+                        fontSize = 12.sp,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.Center,
+                    )
+                }
             }
         }
     }

@@ -162,6 +162,7 @@ func main() {
 
 func setTab(t int) {
 	ui.tab = t
+	home.reset()
 	if t != tabExtra {
 		clearExtraTab()
 	}
@@ -272,8 +273,6 @@ func gioMain() {
 		installedOpenBtns   []widget.Clickable
 		installedAuthorBtns []widget.Clickable
 		installedPinBtns    []widget.Clickable
-		homeList            widget.List
-		homeBtns            []widget.Clickable
 		actionBtns          []widget.Clickable
 		updateBtns          []widget.Clickable
 		discoCardBtns       []widget.Clickable
@@ -311,7 +310,6 @@ func gioMain() {
 	devList.Axis = layout.Vertical
 	windowsList.Axis = layout.Vertical
 	profileList.Axis = layout.Vertical
-	homeList.Axis = layout.Vertical
 	relaysEd.SetText(strings.Join(backend.Relays(), "\n"))
 
 	var ops op.Ops
@@ -453,9 +451,6 @@ func gioMain() {
 					for len(installedPinBtns) < len(st.Installed) {
 						installedPinBtns = append(installedPinBtns, widget.Clickable{})
 					}
-					for len(homeBtns) < len(st.Pinned) {
-						homeBtns = append(homeBtns, widget.Clickable{})
-					}
 					for len(actionBtns) < len(st.Discovery) {
 						actionBtns = append(actionBtns, widget.Clickable{})
 					}
@@ -497,11 +492,7 @@ func gioMain() {
 					vis := discoveryFilter(st)
 					instVis := installedFilter(st)
 					if tab == tabHome {
-						for i, n := range st.Pinned {
-							if homeBtns[i].Clicked(gtx) {
-								backend.Launch(n)
-							}
-						}
+						// the home grid takes its own pointer events (see home.go)
 					} else if tab == 0 {
 						for i, w := range st.ManagedWindows {
 							if w.Open {
@@ -851,8 +842,6 @@ func gioMain() {
 						profileOpenBtns,
 						profileActionBtns,
 						profileUpdateBtns,
-						&homeList,
-						homeBtns,
 						installedPinBtns,
 					)
 				default:
