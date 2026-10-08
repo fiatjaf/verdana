@@ -6,6 +6,8 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.Bundle
 import android.util.Log
+import android.view.View
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -17,6 +19,7 @@ import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
@@ -25,7 +28,8 @@ import kotlinx.coroutines.withContext
 import mobile.Mobile
 
 // NappActivity is one napp's window: its own task, its own card in Recents,
-// its own WebView filling the screen. Android keys the task off the intent's
+// its own WebView filling the screen (or, for a wasm napp, the NappCanvas its
+// module paints). Android keys the task off the intent's
 // data (verdana://napp/<instance>), so launching a different instance gets a
 // window of its own and launching the same one brings this window back
 // instead of opening a second.
@@ -41,7 +45,9 @@ class NappActivity : ComponentActivity() {
     lateinit var nappId: String
         private set
 
+    // one of the two, depending on the napp's mode
     private var shell: NappWebView? = null
+    private var canvas: NappCanvas? = null
 
     // NIP-55: while this window is in front it is the one forwarding signer
     // requests, whatever napp asked for them
@@ -88,22 +94,41 @@ class NappActivity : ComponentActivity() {
         }
         nappId = spec.nappId
 
-        // The webview goes up before the claim is made: claiming hands over
+        // The view goes up before the claim is made: claiming hands over
         // whatever the backend sent while this window was starting, and that
         // has to land on a webview that already exists.
-        val web = NappWebView(
-            activity = this,
-            instance = instance,
-            name = spec.name,
-            spec = spec,
-            onClose = { finishWindow() },
-        )
+        val web: NappWebView?
+        val view: View
+        if (spec.mode == "wasm") {
+            web = null
+            canvas = NappCanvas(
+                context = this,
+                instance = instance,
+                background = themeByName(VerdanaHost.state.theme).bg.toArgb(),
+                onFail = { msg ->
+                    Toast.makeText(this, "${spec.name.ifBlank { "The napp" }}: $msg", Toast.LENGTH_LONG).show()
+                    finishWindow()
+                },
+            )
+            view = canvas!!
+        } else {
+            web = NappWebView(
+                activity = this,
+                instance = instance,
+                name = spec.name,
+                spec = spec,
+                onClose = { finishWindow() },
+            )
+            view = web.view
+        }
 
         // intoExisting should have brought this window back instead of
         // making a second one; if a duplicate task showed up anyway, hand
         // the user to the window that is really running the napp and leave.
         if (!VerdanaHost.claim(this)) {
-            web.destroy()
+            web?.destroy()
+            canvas?.destroy()
+            canvas = null
             window.decorView.post { VerdanaHost.surface(instance) }
             finish()
             return
@@ -113,7 +138,11 @@ class NappActivity : ComponentActivity() {
 
         describeTask(spec)
 
-        setContent { NappWindow(web) }
+        // a canvas has no history: back leaves the window
+        val back = {
+            if (web != null && web.view.canGoBack()) web.view.goBack() else finish()
+        }
+        setContent { NappWindow(view, back) }
     }
 
     // onNewIntent is what intoExisting delivers when the same instance is
@@ -128,6 +157,8 @@ class NappActivity : ComponentActivity() {
         super.onDestroy()
         shell?.destroy()
         shell = null
+        canvas?.destroy()
+        canvas = null
         if (!ownsWindow) return
         ownsWindow = false
         VerdanaHost.unregister(instance, this)
@@ -145,6 +176,12 @@ class NappActivity : ComponentActivity() {
     // deliver is one wire message from the backend for this window.
     fun deliver(msgJSON: String) {
         runOnUiThread { shell?.applyMessage(msgJSON) }
+    }
+
+    // wasmInvalidate is the backend saying a wasm napp has something new to
+    // show.
+    fun wasmInvalidate() {
+        canvas?.requestFrame()
     }
 
     // onScreen says whether the user is looking at this window right now.
@@ -197,20 +234,18 @@ class NappActivity : ComponentActivity() {
     }
 
     @androidx.compose.runtime.Composable
-    private fun NappWindow(web: NappWebView) {
+    private fun NappWindow(view: View, back: () -> Unit) {
         val theme = themeByName(VerdanaHost.state.theme)
         val prompt = VerdanaHost.promptFor(instance)
         MaterialTheme(colorScheme = theme.compose()) {
             Surface(color = theme.bg, modifier = Modifier.fillMaxSize()) {
                 // a prompt is a blocking question: back must not dismiss it
                 BackHandler(enabled = prompt != null) {}
-                BackHandler(enabled = prompt == null) {
-                    if (web.view.canGoBack()) web.view.goBack() else finish()
-                }
+                BackHandler(enabled = prompt == null) { back() }
 
                 Box(Modifier.fillMaxSize()) {
                     AndroidView(
-                        factory = { web.view },
+                        factory = { view },
                         modifier = Modifier.fillMaxSize().systemBarsPadding(),
                     )
                     if (prompt != null) {

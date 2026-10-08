@@ -3,7 +3,7 @@ module fiatjaf.com/verdana/desktop
 go 1.26.2
 
 require (
-	fiatjaf.com/nostr v0.0.0-20261005012418-685c38fc6629
+	fiatjaf.com/nostr v0.0.0-20261005012418-685c38fc6629 // indirect
 	gioui.org v0.10.0
 )
 
@@ -44,7 +44,7 @@ require (
 	golang.org/x/crypto v0.57.0 // indirect
 	golang.org/x/exp v0.0.0-20250408133849-7e4ce0ab07d0 // indirect
 	golang.org/x/exp/shiny v0.0.0-20260824195058-e88cd73687aa // indirect
-	golang.org/x/image v0.46.0
+	golang.org/x/image v0.46.0 // indirect
 	golang.org/x/net v0.59.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
@@ -56,10 +56,7 @@ require (
 	github.com/ebitengine/purego v0.8.2 // indirect
 )
 
-require (
-	github.com/tetratelabs/wazero v1.12.0
-	verdana/backend v0.0.0
-)
+require verdana/backend v0.0.0
 
 require (
 	github.com/RoaringBitmap/roaring v1.9.4 // indirect
@@ -68,6 +65,7 @@ require (
 	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/kljensen/snowball v0.10.0 // indirect
 	github.com/mschoch/smat v0.2.0 // indirect
+	github.com/tetratelabs/wazero v1.12.0 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasthttp v1.59.0 // indirect
 	github.com/wizenheimer/blaze v0.0.0-20251014083344-98727d655839 // indirect

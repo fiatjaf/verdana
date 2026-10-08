@@ -261,9 +261,9 @@ for it:
   two sides is a square of that side. An animated image gives its first
   frame.
 
-Both read at most 16MB and give up after 20 seconds. They run in the window's
-own process (`desktop/wasmchild/http.go`), beside the frame loop, so a slow
-server never holds up a frame. There is no CORS here, as there is none for a
+Both read at most 16MB and give up after 20 seconds. They run beside the
+frame loop (`backend/wasmhost/http.go`), so a slow server never holds up a
+frame. There is no CORS here, as there is none for a
 web napp's page in verdana; in nostrapps the browser's rules apply.
 
 ### Subscriptions
@@ -319,21 +319,45 @@ No history: a web napp's actions also become history entries it can go
 back and forward through; a canvas has no history, so an action is only ever
 the message.
 
-Android has no wasm host yet and says so rather than opening a blank WebView.
+## On Android
+
+The same contract, with what a phone changes:
+
+- **The canvas is in dp**, not device pixels: a napp has no idea of screen
+  density, so at a phone's real resolution it would draw the size of a
+  stamp. It gets the size a desktop window of the same dp would give it, and
+  the canvas is scaled up to the screen.
+- **A finger is a mouse** with its primary button held: move, press, drag,
+  release, and then a move to `(-1, -1)`, so no hover is left behind. A mouse
+  or touchpad plugged in hovers and scrolls as on the desktop.
+- **Keys come from a hardware keyboard only.** There is no way yet for a napp
+  to ask for the on-screen keyboard.
+- **No compositor between frames**: `napp_frame` returning non-zero gets the
+  next frame on the next vsync, never faster.
+- The first open of a napp compiles its module, which takes seconds on a
+  phone; the compiled code is kept (keyed on the module's bytes) and later
+  opens skip it.
 
 ## How it is put together
 
-A wasm napp window is its own process, like a web napp's — a hung or trapping
-module is its own crash, not the launcher's. The two shells are:
+`backend/wasmhost` is the host: the module (wazero, no WASI) and the bridge
+that carries its `napp_call`s to the launcher and the answers back. It knows
+nothing about windows. Around it:
 
-|                     |                                                            |
-| ---                 | ---                                                        |
-| `desktop/child`     | the webview shell: serves the napp's files, loads the page |
-| `desktop/wasmchild` | the canvas shell: runs the module, paints the canvas       |
+|                     |                                                                       |
+| ---                 | ---                                                                   |
+| `desktop/child`     | the desktop webview shell: serves the napp's files, loads the page    |
+| `desktop/wasmchild` | the desktop canvas shell: a Gio window running `wasmhost`             |
+| `backend/mobile`    | on Android, runs `wasmhost` inside the launcher (`wasm.go`)           |
+| `NappCanvas.kt`     | the Android window: shows the frames, passes the touches and keys on  |
 
-Both speak the same wire protocol (`backend.WireMsg`) over stdin/stdout, so the
-backend does not know the difference — `backend.WindowSpec.Mode` is the only
-thing that says which shell gets used.
+On the desktop a wasm napp window is its own process, like a web napp's — a
+hung or trapping module is its own crash, not the launcher's. Both desktop
+shells speak the same wire protocol (`backend.WireMsg`) over stdin/stdout, so
+the backend does not know the difference — `backend.WindowSpec.Mode` is the
+only thing that says which shell gets used. On Android there is one process,
+so the module runs on its window's own thread instead: a stuck napp freezes
+its window, not the launcher, and a trap closes the window saying why.
 
 `backend/wasm/abi.go` is the single place the names come from.
 
@@ -349,5 +373,5 @@ the napp's own directory and the window's reload button is the whole loop.
 
 ## Where the names live
 
-`backend/wasm/abi.go`, with the reference above. `desktop/wasmchild/napp.go`
+`backend/wasm/abi.go`, with the reference above. `backend/wasmhost/napp.go`
 is the host side; `../napps/wasm-egui` is a working module that needs no GPU.

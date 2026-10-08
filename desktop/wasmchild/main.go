@@ -40,6 +40,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"verdana/backend/wasm"
+	"verdana/backend/wasmhost"
 )
 
 var log = zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr}).With().
@@ -63,7 +64,7 @@ var meta nappMeta
 
 // br is this window's bridge to the launcher: napp_call goes out through it,
 // and everything the launcher sends comes in through it.
-var br *bridge
+var br *wasmhost.Bridge
 
 func main() {
 	meta = nappMeta{
@@ -85,7 +86,20 @@ func main() {
 	log.Info().Str("napp", meta.ID).Str("instance", meta.Instance).Str("wasm", meta.Wasm).
 		Msg("wasm napp window started")
 
-	br = newBridge(os.Stdout)
+	wasmhost.SetLogger(log)
+	storage, _ := os.ReadFile(os.Getenv("VERDANA_NAPP_STORAGE_FILE"))
+	out := json.NewEncoder(os.Stdout)
+	br = wasmhost.NewBridge(wasmhost.Config{
+		Instance:  meta.Instance,
+		Storage:   storage,
+		Theme:     os.Getenv("VERDANA_THEME"),
+		ThemeVars: os.Getenv("VERDANA_THEME_VARS"),
+		Send: func(m wasmhost.WireMsg) {
+			if err := out.Encode(m); err != nil {
+				log.Debug().Err(err).Msg("could not write to the launcher")
+			}
+		},
+	})
 
 	// Everything the launcher says comes down stdin, the same pipe the
 	// webview shell reads: answers to the napp's calls, actions, feeds,
@@ -96,11 +110,11 @@ func main() {
 	go func() {
 		dec := json.NewDecoder(os.Stdin)
 		for {
-			var m wireMsg
+			var m wasmhost.WireMsg
 			if err := dec.Decode(&m); err != nil {
 				break
 			}
-			if !br.handleWire(m) {
+			if !br.HandleWire(m) {
 				break
 			}
 		}
@@ -157,7 +171,7 @@ func runWindow() {
 	w.Option(app.Title(windowTitle(meta.Name, meta.Number)),
 		app.Size(unit.Dp(meta.Width), unit.Dp(meta.Height)))
 
-	loaded := make(chan *napp, 1)
+	loaded := make(chan *wasmhost.Napp, 1)
 	failures := make(chan error, 1)
 
 	// Compiling the module takes a moment and must not hold up the window, so
@@ -166,7 +180,7 @@ func runWindow() {
 	// ready while nothing else is happening would sit there unseen until the
 	// user moved the mouse.
 	go func() {
-		n, err := loadWasmNapp(meta.Wasm, nowMS, br.call)
+		n, err := wasmhost.Load(meta.Wasm, nowMS, br.Call)
 		if err != nil {
 			failures <- err
 		} else {
@@ -176,7 +190,7 @@ func runWindow() {
 	}()
 
 	var (
-		n      *napp
+		n      *wasmhost.Napp
 		canvas = image.NewRGBA(image.Rect(0, 0, 1, 1))
 		ops    op.Ops
 		last   = time.Now()
@@ -187,7 +201,7 @@ func runWindow() {
 
 	// Whatever the launcher sends wakes the window, so a napp parked on an
 	// idle canvas still hears its answers on the frame right after.
-	br.setWake(w.Invalidate)
+	br.SetWake(w.Invalidate)
 
 	for {
 		ev := w.Event()
@@ -232,8 +246,8 @@ func runWindow() {
 			// actions all land before the frame that can show them. A
 			// module that is still loading keeps its messages queued.
 			if n != nil {
-				for _, m := range br.drain() {
-					if err := n.Deliver(m.kind, m.id, m.data); err != nil {
+				for _, m := range br.Drain() {
+					if err := n.Deliver(m.Kind, m.ID, m.Data); err != nil {
 						fail("wasm napp trapped on a message: " + err.Error())
 					}
 				}
@@ -241,7 +255,7 @@ func runWindow() {
 
 			// A prompt covers the canvas and takes the input with it: the
 			// napp must not be clicked through a question about itself.
-			pv := br.currentPrompt()
+			pv := br.CurrentPrompt()
 
 			// Gio hands pointer events only to a target that registered
 			// for them, and only through the frame's context. They go to
@@ -317,8 +331,8 @@ func runWindow() {
 			}
 
 			if pv != nil {
-				prompt.Layout(gtx, pv, br.themeName(), func(id int, ok bool, index int, scope string) {
-					br.answerPrompt(id, ok, index, scope)
+				prompt.Layout(gtx, pv, br.ThemeName(), func(id int, ok bool, index int, scope string) {
+					br.AnswerPrompt(id, ok, index, scope)
 					w.Invalidate()
 				})
 			} else {
@@ -380,7 +394,7 @@ func drawCanvas(gtx layout.Context, canvas *image.RGBA, ready bool) {
 // the parts a canvas napp has no use for (hover, leave, per-pointer ids). A
 // scroll carries its position too, so a napp can scroll whatever is under the
 // pointer.
-func sendPointer(n *napp, e pointer.Event) {
+func sendPointer(n *wasmhost.Napp, e pointer.Event) {
 	pos := [2]int32{int32(e.Position.X + 0.5), int32(e.Position.Y + 0.5)}
 	buttons := nappButtons(e.Buttons)
 
@@ -403,7 +417,7 @@ func sendPointer(n *napp, e pointer.Event) {
 
 // sendKey turns one Gio key event into the ABI's key down or up. Keys the ABI
 // has no name for (modifiers on their own, function keys) are not reported.
-func sendKey(n *napp, e key.Event) {
+func sendKey(n *wasmhost.Napp, e key.Event) {
 	code, ok := nappKey(e.Name)
 	if !ok {
 		return

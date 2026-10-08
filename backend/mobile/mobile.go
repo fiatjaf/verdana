@@ -11,9 +11,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"strings"
 	"time"
 	"verdana/backend"
+	"verdana/backend/wasmhost"
 	"verdana/backend/webview"
 )
 
@@ -21,9 +23,12 @@ import (
 // thread, so implementations that touch views must post to the main looper.
 type UI interface {
 	// OpenWindow asks for a napp to be put on screen. spec is a JSON object:
-	// { instance, nappId, name, description, dir, requires, theme, themeVars }.
-	// The dir is where the napp's files are: serve them to the WebView, inject
-	// BridgeJS(), and send everything the page posts up to HandleMessage.
+	// { instance, nappId, name, description, mode, dir, requires, theme,
+	// themeVars, … }. For a web napp (mode "web") the dir is where the napp's
+	// files are: serve them to the WebView, inject BridgeJS(), and send
+	// everything the page posts up to HandleMessage. A wasm napp (mode
+	// "wasm") is already running in Go by the time this is called: its window
+	// paints what WasmFrame returns and hands its input to WasmInput.
 	OpenWindow(instance string, specJSON string) error
 
 	// SendToWindow delivers one wire message to a napp's shell. It is a JSON
@@ -53,6 +58,11 @@ type UI interface {
 	// deliver the answer back to AnswerAmber carrying the same id. False
 	// when no signer could be launched at all.
 	AmberRequest(id, op, payload, pubkey, counterpart, pkg string) bool
+
+	// WasmInvalidate says a wasm napp's window has something new to show
+	// (an answer arrived, the module finished loading): call WasmFrame
+	// again soon. May come from any thread, including from inside WasmFrame.
+	WasmInvalidate(instance string)
 }
 
 // ─── host adapter ────────────────────────────────────────────────
@@ -60,17 +70,12 @@ type UI interface {
 type mobileHost struct{ ui UI }
 
 func (h mobileHost) OpenWindow(spec backend.WindowSpec) (backend.Transport, error) {
-	// A napp window on the phone is a WebView, so there is nowhere to run a
-	// wasm module: it gets a window only if the desktop can, which it can't
-	// here. Saying so beats opening a blank tab.
-	if spec.Mode == backend.ModeWasm {
-		return nil, errors.New("wasm napps don't run on android yet")
-	}
 	payload, err := json.Marshal(map[string]any{
 		"instance":    spec.Instance,
 		"nappId":      spec.NappID,
 		"name":        spec.Name,
 		"description": spec.Description,
+		"mode":        spec.Mode,
 		"dir":         spec.Dir,
 		"url":         spec.URL,
 		"requires":    spec.Requires,
@@ -83,6 +88,18 @@ func (h mobileHost) OpenWindow(spec backend.WindowSpec) (backend.Transport, erro
 	if err != nil {
 		return nil, err
 	}
+
+	// A wasm napp runs in Go, so it is started before its window exists
+	// and its transport is the module's bridge, not the window.
+	if spec.Mode == backend.ModeWasm {
+		w := openWasm(h.ui, spec)
+		if err := h.ui.OpenWindow(spec.Instance, string(payload)); err != nil {
+			w.close()
+			return nil, err
+		}
+		return wasmTransport{w: w}, nil
+	}
+
 	if err := h.ui.OpenWindow(spec.Instance, string(payload)); err != nil {
 		return nil, err
 	}
@@ -134,6 +151,14 @@ func Start(dataDir string, ui UI) error {
 		return err
 	}
 	closeStores = stop
+
+	// wasm napps run in this process, so this process keeps what they
+	// compile to
+	logger := backend.Logger()
+	wasmhost.SetLogger(logger)
+	if err := wasmhost.SetCacheDir(filepath.Join(dataDir, "wasm-cache")); err != nil {
+		logger.Warn().Err(err).Msg("wasm napps will be compiled every time they open")
+	}
 	return nil
 }
 
@@ -302,7 +327,12 @@ func HandleMessage(instance string, msgJSON string) {
 
 // WindowClosed says a napp's window is gone, so whatever was waiting on it
 // stops waiting.
-func WindowClosed(instance string) { backend.WindowClosed(instance) }
+func WindowClosed(instance string) {
+	if w := lookupWasm(instance); w != nil {
+		w.close()
+	}
+	backend.WindowClosed(instance)
+}
 
 // CloseWindow asks a napp to close (the user swiped its tab away).
 func CloseWindow(instance string) { backend.CloseWindow(instance) }

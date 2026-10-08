@@ -1,4 +1,4 @@
-package main
+package wasmhost
 
 import (
 	"bytes"
@@ -59,7 +59,7 @@ func assemble(t *testing.T, src string) string {
 	return out
 }
 
-func global(t *testing.T, n *napp, name string) int32 {
+func global(t *testing.T, n *Napp, name string) int32 {
 	t.Helper()
 	g := n.mod.ExportedGlobal(name)
 	if g == nil {
@@ -70,7 +70,7 @@ func global(t *testing.T, n *napp, name string) int32 {
 
 func TestCallAndReceive(t *testing.T) {
 	var gotMethod, gotParams string
-	n, err := loadWasmNapp(assemble(t, callingModule), func() float64 { return 0 },
+	n, err := Load(assemble(t, callingModule), func() float64 { return 0 },
 		func(method string, params []byte) int32 {
 			gotMethod, gotParams = method, string(params)
 			return 7
@@ -119,23 +119,23 @@ func TestRefusesCallWithoutReceive(t *testing.T) {
 	  (memory (export "memory") 1)
 	  (func (export "napp_canvas_ptr") (result i32) (i32.const 0))
 	  (func (export "napp_frame") (param f64) (result i32) (i32.const 0)))`
-	_, err := loadWasmNapp(assemble(t, src), func() float64 { return 0 }, nil)
+	_, err := Load(assemble(t, src), func() float64 { return 0 }, nil)
 	if err == nil || !strings.Contains(err.Error(), wasm.ExportReceive) {
 		t.Fatalf("a module that calls out but cannot be answered should be refused, got %v", err)
 	}
 }
 
 // testBridge is a bridge writing to a buffer instead of the launcher.
-func testBridge(t *testing.T) (*bridge, *bytes.Buffer) {
-	t.Setenv("VERDANA_NAPP_STORAGE_FILE", filepath.Join(t.TempDir(), "none.json"))
-	var out bytes.Buffer
-	return newBridge(&out), &out
+func testBridge(t *testing.T) (*Bridge, *bytes.Buffer) {
+	out := new(bytes.Buffer)
+	enc := json.NewEncoder(out)
+	return NewBridge(Config{Send: func(m WireMsg) { enc.Encode(m) }}), out
 }
 
-func lastSent(t *testing.T, out *bytes.Buffer) wireMsg {
+func lastSent(t *testing.T, out *bytes.Buffer) WireMsg {
 	t.Helper()
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	var m wireMsg
+	var m WireMsg
 	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &m); err != nil {
 		t.Fatal(err)
 	}
@@ -147,69 +147,69 @@ func TestBridgeAnswersLocally(t *testing.T) {
 	const pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
 	const npub = "npub180cvv07tjdrrgpa0j7j7tmnyl2yr6yr7l8j4s3evf6u64th6gkwsyjh6w6"
 
-	id := b.call("nip19.npubEncode", []byte(`"`+pk+`"`))
-	id2 := b.call("nip19.decode", []byte(`"`+npub+`"`))
-	naddrID := b.call("nip19.naddrEncode", []byte(`{"identifier":"x","pubkey":"`+pk+`","kind":30023,"relays":["wss://r"]}`))
-	sats := b.call("fx.satsFromBolt11", []byte(`"lnbc2500u1pvjluez"`))
+	id := b.Call("nip19.npubEncode", []byte(`"`+pk+`"`))
+	id2 := b.Call("nip19.decode", []byte(`"`+npub+`"`))
+	naddrID := b.Call("nip19.naddrEncode", []byte(`{"identifier":"x","pubkey":"`+pk+`","kind":30023,"relays":["wss://r"]}`))
+	sats := b.Call("fx.satsFromBolt11", []byte(`"lnbc2500u1pvjluez"`))
 	if out.Len() != 0 {
 		t.Fatalf("local calls went to the launcher: %s", out.String())
 	}
 
-	msgs := b.drain()
+	msgs := b.Drain()
 	if len(msgs) != 4 {
 		t.Fatalf("got %d answers, want 4", len(msgs))
 	}
-	if msgs[0].id != id || string(msgs[0].data) != `"`+npub+`"` {
-		t.Errorf("npubEncode answered %d %s", msgs[0].id, msgs[0].data)
+	if msgs[0].ID != id || string(msgs[0].Data) != `"`+npub+`"` {
+		t.Errorf("npubEncode answered %d %s", msgs[0].ID, msgs[0].Data)
 	}
-	if msgs[1].id != id2 || string(msgs[1].data) != `{"type":"npub","data":"`+pk+`"}` {
-		t.Errorf("decode answered %d %s", msgs[1].id, msgs[1].data)
+	if msgs[1].ID != id2 || string(msgs[1].Data) != `{"type":"npub","data":"`+pk+`"}` {
+		t.Errorf("decode answered %d %s", msgs[1].ID, msgs[1].Data)
 	}
-	if string(msgs[3].data) != "250000" || msgs[3].id != sats {
-		t.Errorf("satsFromBolt11 answered %s", msgs[3].data)
+	if string(msgs[3].Data) != "250000" || msgs[3].ID != sats {
+		t.Errorf("satsFromBolt11 answered %s", msgs[3].Data)
 	}
 
 	// and the naddr decodes back to what went in
 	var naddr string
-	json.Unmarshal(msgs[2].data, &naddr)
-	if msgs[2].id != naddrID || !strings.HasPrefix(naddr, "naddr1") {
-		t.Fatalf("naddrEncode answered %s", msgs[2].data)
+	json.Unmarshal(msgs[2].Data, &naddr)
+	if msgs[2].ID != naddrID || !strings.HasPrefix(naddr, "naddr1") {
+		t.Fatalf("naddrEncode answered %s", msgs[2].Data)
 	}
-	b.call("nip19.decode", msgs[2].data)
-	back := b.drain()[0]
+	b.Call("nip19.decode", msgs[2].Data)
+	back := b.Drain()[0]
 	want := `{"type":"naddr","data":{"identifier":"x","kind":30023,"pubkey":"` + pk + `","relays":["wss://r"]}}`
-	if string(back.data) != want {
-		t.Errorf("naddr round trip gave %s", back.data)
+	if string(back.Data) != want {
+		t.Errorf("naddr round trip gave %s", back.Data)
 	}
 }
 
 func TestBridgeStorage(t *testing.T) {
 	b, out := testBridge(t)
-	b.call("napp.storageSet", []byte(`{"key":"a","value":"1"}`))
+	b.Call("napp.storageSet", []byte(`{"key":"a","value":"1"}`))
 	if m := lastSent(t, out); m.T != "rpc" || m.Method != "napp.storageSet" {
 		t.Fatalf("a write should be persisted by the launcher, sent %+v", m)
 	}
-	b.call("napp.storageGet", []byte(`"a"`))
-	b.call("napp.storageGet", []byte(`"missing"`))
-	msgs := b.drain()
-	if len(msgs) != 2 || string(msgs[0].data) != `"1"` || string(msgs[1].data) != "null" {
+	b.Call("napp.storageGet", []byte(`"a"`))
+	b.Call("napp.storageGet", []byte(`"missing"`))
+	msgs := b.Drain()
+	if len(msgs) != 2 || string(msgs[0].Data) != `"1"` || string(msgs[1].Data) != "null" {
 		t.Fatalf("reads answered %+v", msgs)
 	}
 
 	// another window's change lands here and is announced
-	b.handleWire(wireMsg{T: "storage", Params: `{"op":"set","key":"b","value":"2"}`})
-	if m := b.drain(); len(m) != 1 || m[0].kind != wasm.MsgStorage {
+	b.HandleWire(WireMsg{T: "storage", Params: `{"op":"set","key":"b","value":"2"}`})
+	if m := b.Drain(); len(m) != 1 || m[0].Kind != wasm.MsgStorage {
 		t.Fatalf("a synced change should be announced, got %+v", m)
 	}
-	b.call("napp.storageKeys", []byte("null"))
-	if m := b.drain(); string(m[0].data) != `["a","b"]` {
-		t.Fatalf("keys answered %s", m[0].data)
+	b.Call("napp.storageKeys", []byte("null"))
+	if m := b.Drain(); string(m[0].Data) != `["a","b"]` {
+		t.Fatalf("keys answered %s", m[0].Data)
 	}
 
-	if b.call("napp.storageSet", []byte(`{"key":"big","value":"`+strings.Repeat("x", storageQuota)+`"}`)) == 0 {
+	if b.Call("napp.storageSet", []byte(`{"key":"big","value":"`+strings.Repeat("x", storageQuota)+`"}`)) == 0 {
 		t.Fatal("no id")
 	}
-	if m := b.drain(); len(m) != 1 || m[0].kind != wasm.MsgError {
+	if m := b.Drain(); len(m) != 1 || m[0].Kind != wasm.MsgError {
 		t.Fatalf("a write over the quota should fail locally, got %+v", m)
 	}
 }
@@ -217,24 +217,24 @@ func TestBridgeStorage(t *testing.T) {
 func TestBridgeForwardsAndRoutes(t *testing.T) {
 	b, out := testBridge(t)
 
-	id := b.call("nostrdb.query", []byte(`{"filters":{"kinds":[1]}}`))
+	id := b.Call("nostrdb.query", []byte(`{"filters":{"kinds":[1]}}`))
 	sent := lastSent(t, out)
 	if sent.T != "rpc" || sent.ID != int(id) || sent.Method != "nostrdb.query" {
 		t.Fatalf("sent %+v", sent)
 	}
-	b.handleWire(wireMsg{T: "resp", ID: int(id), Result: json.RawMessage(`[]`)})
-	b.handleWire(wireMsg{T: "resp", ID: 99, Error: "nope"})
-	msgs := b.drain()
-	if msgs[0].kind != wasm.MsgResult || msgs[0].id != id || string(msgs[0].data) != "[]" {
+	b.HandleWire(WireMsg{T: "resp", ID: int(id), Result: json.RawMessage(`[]`)})
+	b.HandleWire(WireMsg{T: "resp", ID: 99, Error: "nope"})
+	msgs := b.Drain()
+	if msgs[0].Kind != wasm.MsgResult || msgs[0].ID != id || string(msgs[0].Data) != "[]" {
 		t.Errorf("result arrived as %+v", msgs[0])
 	}
-	if msgs[1].kind != wasm.MsgError || string(msgs[1].data) != "nope" {
+	if msgs[1].Kind != wasm.MsgError || string(msgs[1].Data) != "nope" {
 		t.Errorf("error arrived as %+v", msgs[1])
 	}
 
 	// a feed's callbackId is the call's own id, and batches stop once it
 	// is cancelled
-	feed := b.call("napp.feeds.profile", []byte(`{"pubkey":"x","kinds":[1]}`))
+	feed := b.Call("napp.feeds.profile", []byte(`{"pubkey":"x","kinds":[1]}`))
 	var p struct {
 		CallbackID int32 `json:"callbackId"`
 	}
@@ -242,34 +242,34 @@ func TestBridgeForwardsAndRoutes(t *testing.T) {
 	if p.CallbackID != feed {
 		t.Fatalf("feed went up with callbackId %d, want %d", p.CallbackID, feed)
 	}
-	b.handleWire(wireMsg{T: "feed", ID: int(feed), Params: `{"events":[],"synced":true}`})
-	if m := b.drain(); len(m) != 1 || m[0].kind != wasm.MsgFeed || m[0].id != feed {
+	b.HandleWire(WireMsg{T: "feed", ID: int(feed), Params: `{"events":[],"synced":true}`})
+	if m := b.Drain(); len(m) != 1 || m[0].Kind != wasm.MsgFeed || m[0].ID != feed {
 		t.Fatalf("feed batch arrived as %+v", m)
 	}
-	b.call("napp.feeds.cancel", []byte(fmt.Sprintf(`{"callbackId":%d}`, feed)))
-	b.handleWire(wireMsg{T: "feed", ID: int(feed), Params: `{"events":[],"synced":true}`})
-	if m := b.drain(); len(m) != 0 {
+	b.Call("napp.feeds.cancel", []byte(fmt.Sprintf(`{"callbackId":%d}`, feed)))
+	b.HandleWire(WireMsg{T: "feed", ID: int(feed), Params: `{"events":[],"synced":true}`})
+	if m := b.Drain(); len(m) != 0 {
 		t.Fatalf("a cancelled feed still delivered %+v", m)
 	}
 
 	// registering defaults idx to 0, and an action comes back with it
-	b.call("napp.registerAction", []byte(`{"pattern":"view:1"}`))
+	b.Call("napp.registerAction", []byte(`{"pattern":"view:1"}`))
 	if got := lastSent(t, out).Params; !strings.Contains(got, `"idx":0`) {
 		t.Fatalf("registerAction went up as %s", got)
 	}
 	idx := 0
-	b.handleWire(wireMsg{T: "action", ID: 3, Method: "view:1", Params: `{"id":"e"}`, Idx: &idx})
-	m := b.drain()
-	if len(m) != 1 || m[0].kind != wasm.MsgAction || m[0].id != 3 ||
-		string(m[0].data) != `{"name":"view:1","payload":{"id":"e"},"idx":0}` {
-		t.Fatalf("action arrived as %+v %s", m, m[0].data)
+	b.HandleWire(WireMsg{T: "action", ID: 3, Method: "view:1", Params: `{"id":"e"}`, Idx: &idx})
+	m := b.Drain()
+	if len(m) != 1 || m[0].Kind != wasm.MsgAction || m[0].ID != 3 ||
+		string(m[0].Data) != `{"name":"view:1","payload":{"id":"e"},"idx":0}` {
+		t.Fatalf("action arrived as %+v %s", m, m[0].Data)
 	}
 }
 
 func TestBridgeSubscription(t *testing.T) {
 	b, out := testBridge(t)
 
-	sub := b.call("napp.subscribe", []byte(`{"relays":["wss://r"],"filter":{"kinds":[1]}}`))
+	sub := b.Call("napp.subscribe", []byte(`{"relays":["wss://r"],"filter":{"kinds":[1]}}`))
 	sent := lastSent(t, out)
 	var p struct {
 		CallbackID int32 `json:"callbackId"`
@@ -279,19 +279,19 @@ func TestBridgeSubscription(t *testing.T) {
 		t.Fatalf("subscribe went up as %+v", sent)
 	}
 
-	b.handleWire(wireMsg{T: "subscription", ID: int(sub), Params: `{"type":"eose","events":[]}`})
-	b.handleWire(wireMsg{T: "subscription", ID: int(sub), Params: `{"type":"closed","reasons":{"wss://r/":"bye"}}`})
-	b.handleWire(wireMsg{T: "subscription", ID: int(sub), Params: `{"type":"event","event":{}}`})
-	m := b.drain()
-	if len(m) != 2 || m[0].kind != wasm.MsgSubscription || m[0].id != sub || m[1].kind != wasm.MsgSubscription {
+	b.HandleWire(WireMsg{T: "subscription", ID: int(sub), Params: `{"type":"eose","events":[]}`})
+	b.HandleWire(WireMsg{T: "subscription", ID: int(sub), Params: `{"type":"closed","reasons":{"wss://r/":"bye"}}`})
+	b.HandleWire(WireMsg{T: "subscription", ID: int(sub), Params: `{"type":"event","event":{}}`})
+	m := b.Drain()
+	if len(m) != 2 || m[0].Kind != wasm.MsgSubscription || m[0].ID != sub || m[1].Kind != wasm.MsgSubscription {
 		t.Fatalf("subscription messages arrived as %+v", m)
 	}
 
 	// and nothing arrives once the napp unsubscribes
-	sub2 := b.call("napp.subscribe", []byte(`{"relays":["wss://r"],"filter":{}}`))
-	b.call("napp.unsubscribe", []byte(fmt.Sprintf(`{"callbackId":%d}`, sub2)))
-	b.handleWire(wireMsg{T: "subscription", ID: int(sub2), Params: `{"type":"eose","events":[]}`})
-	if m := b.drain(); len(m) != 0 {
+	sub2 := b.Call("napp.subscribe", []byte(`{"relays":["wss://r"],"filter":{}}`))
+	b.Call("napp.unsubscribe", []byte(fmt.Sprintf(`{"callbackId":%d}`, sub2)))
+	b.HandleWire(WireMsg{T: "subscription", ID: int(sub2), Params: `{"type":"eose","events":[]}`})
+	if m := b.Drain(); len(m) != 0 {
 		t.Fatalf("a closed subscription still delivered %+v", m)
 	}
 }

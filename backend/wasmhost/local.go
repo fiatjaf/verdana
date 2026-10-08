@@ -1,11 +1,10 @@
-package main
+package wasmhost
 
 import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"math"
-	"os"
 	"regexp"
 	"slices"
 	"strconv"
@@ -21,8 +20,8 @@ import (
 // storageQuota is the same 5MB bridge.js gives a web napp.
 const storageQuota = 5 * 1024 * 1024
 
-// store is this window's copy of the napp's storage: seeded from the file
-// the launcher persists, written through on every change, and kept in step
+// store is this window's copy of the napp's storage: seeded from what the
+// launcher persists, written through on every change, and kept in step
 // with the napp's other windows by the launcher's storage messages.
 type store struct {
 	mu   sync.Mutex
@@ -30,12 +29,8 @@ type store struct {
 	size int
 }
 
-func loadStore(path string) *store {
+func loadStore(raw []byte) *store {
 	s := &store{m: make(map[string]string)}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return s
-	}
 	var seed map[string]string
 	if json.Unmarshal(raw, &seed) != nil {
 		return s

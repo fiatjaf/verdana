@@ -176,6 +176,10 @@ class WindowSpec(json: String) {
     val nappId: String
     val name: String
     val description: String
+
+    // mode is "wasm" for a napp that is a module painting a canvas (see
+    // NappCanvas), "web" for the usual page
+    val mode: String
     val dir: String
     val requires: List<String>
     val theme: String
@@ -188,6 +192,7 @@ class WindowSpec(json: String) {
         nappId = o.optString("nappId")
         name = o.optString("name")
         description = o.optString("description")
+        mode = o.optString("mode", "web")
         dir = o.optString("dir")
         requires = (0 until (o.optJSONArray("requires")?.length() ?: 0)).map {
             o.optJSONArray("requires")!!.getString(it)

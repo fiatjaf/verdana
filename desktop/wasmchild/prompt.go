@@ -13,31 +13,14 @@ import (
 	"gioui.org/unit"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
+
+	"verdana/backend/wasmhost"
 )
 
 // A prompt fired by this napp (signing, publishing, picking a handler…) is
 // shown over its own window, as the webview shell does it: an opaque cover
 // that hides the canvas until the user answers. The launcher decides what is
 // asked and remembers the answer; this only draws the question.
-
-// promptView and promptOptionView mirror backend.Prompt as the overlay needs
-// to see it.
-type promptView struct {
-	ID       int                `json:"id"`
-	Title    string             `json:"title"`
-	Detail   string             `json:"detail"`
-	Code     string             `json:"code"`
-	Options  []promptOptionView `json:"options"`
-	Remember bool               `json:"remember"`
-}
-
-type promptOptionView struct {
-	Label     string `json:"label"`
-	Detail    string `json:"detail"`
-	Instance  string `json:"instance"`
-	Dev       bool   `json:"dev"`
-	Suggested bool   `json:"suggested"`
-}
 
 // promptButton is one answer the overlay offers.
 type promptButton struct {
@@ -70,7 +53,7 @@ func newPromptOverlay() *promptOverlay {
 
 // build makes the buttons for a prompt the first time it is shown, so their
 // click state survives from frame to frame.
-func (p *promptOverlay) build(pv *promptView) {
+func (p *promptOverlay) build(pv *wasmhost.Prompt) {
 	if p.shownID == pv.ID && p.buttons != nil {
 		return
 	}
@@ -149,7 +132,7 @@ func (pal palette) tone(t string) (bg, fg color.NRGBA) {
 
 // Layout draws the prompt over the whole window and reports a click on one
 // of its answers through answer.
-func (p *promptOverlay) Layout(gtx layout.Context, pv *promptView, theme string,
+func (p *promptOverlay) Layout(gtx layout.Context, pv *wasmhost.Prompt, theme string,
 	answer func(id int, ok bool, index int, scope string)) layout.Dimensions {
 	p.build(pv)
 	for _, b := range p.buttons {

@@ -252,6 +252,10 @@ object VerdanaHost : UI {
         }
     }
 
+    override fun wasmInvalidate(instance: String) {
+        windows[instance]?.wasmInvalidate()
+    }
+
     // amberRequest is the Go side's one entry into the phone's signer app:
     // launch the request off the main thread and answer how it went. The
     // signer's answer itself arrives later, through the launcher callback,

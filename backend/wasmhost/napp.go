@@ -1,4 +1,4 @@
-package main
+package wasmhost
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"runtime"
 
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
@@ -13,14 +14,15 @@ import (
 	"verdana/backend/wasm"
 )
 
-// napp is one wasm napp running inside this process: the module wazero
+// Napp is one wasm napp running inside this process: the module wazero
 // instantiated, the functions it exports, and the canvas it last painted.
 //
 // The module gets the canvas imports and napp_call, and nothing else. There
 // is no WASI here, and no way to add one: a napp that wants a file, a socket
 // or a clock of its own asks the launcher for it through napp_call like every
 // other napp does, so the capability stays somewhere permission can see it.
-type napp struct {
+type Napp struct {
+	rt    wazero.Runtime
 	mod   api.Module
 	frame api.Function
 	ptr   api.Function
@@ -49,21 +51,21 @@ type napp struct {
 	animating bool
 }
 
-// loadWasmNapp compiles and instantiates the module at path. call is what the
+// Load compiles and instantiates the module at path. call is what the
 // module's napp_call reaches; nil answers every call with id 0.
-func loadWasmNapp(path string, nowMS func() float64, call func(method string, params []byte) int32) (*napp, error) {
+func Load(path string, nowMS func() float64, call func(method string, params []byte) int32) (*Napp, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
 
 	ctx := context.Background()
-	rt := wazero.NewRuntime(ctx)
+	rt := wazero.NewRuntimeWithConfig(ctx, runtimeConfig())
 	// An empty start-function list is the whole point: a napp has no _start
 	// to run, the launcher drives it a frame at a time.
 	cfg := wazero.NewModuleConfig().WithName("").WithStartFunctions()
 
-	n := &napp{started: nowMS(), call: call}
+	n := &Napp{started: nowMS(), call: call}
 
 	if _, err := rt.NewHostModuleBuilder(wasm.HostModule).
 		NewFunctionBuilder().
@@ -112,6 +114,7 @@ func loadWasmNapp(path string, nowMS func() float64, call func(method string, pa
 		return nil, fmt.Errorf("could not start this wasm module: %w", err)
 	}
 	n.mod = mod
+	n.rt = rt
 
 	for _, name := range []string{wasm.ExportFrame, wasm.ExportCanvasPtr} {
 		if mod.ExportedFunction(name) == nil {
@@ -140,6 +143,42 @@ func loadWasmNapp(path string, nowMS func() float64, call func(method string, pa
 	log.Info().Str("wasm", path).Bool("input", n.event != nil).Bool("calls", n.receive != nil).
 		Msg("wasm napp ready")
 	return n, nil
+}
+
+// runtimeConfig is wazero's default (its compiler where it supports the
+// platform, its interpreter elsewhere), except on Android: wazero leaves
+// GOOS=android off the compiler's list, though Android is a Linux kernel and
+// the compiler's code is built for it, and the interpreter is two orders of
+// magnitude slower — a frame of an egui napp takes over half a second. So on
+// the 64-bit phones the compiler is asked for by name.
+func runtimeConfig() wazero.RuntimeConfig {
+	cfg := wazero.NewRuntimeConfig()
+	if runtime.GOOS == "android" && (runtime.GOARCH == "arm64" || runtime.GOARCH == "amd64") {
+		cfg = wazero.NewRuntimeConfigCompiler()
+	}
+	if compileCache != nil {
+		cfg = cfg.WithCompilationCache(compileCache)
+	}
+	// No WithCloseOnContextDone, though it would let Close stop a module
+	// stuck in a loop: it makes an egui napp's frames six times slower.
+	return cfg
+}
+
+// compileCache is where compiled modules are kept between windows, if anywhere.
+var compileCache wazero.CompilationCache
+
+// SetCacheDir keeps what the compiler makes of a module in dir, so a napp is
+// compiled the first time it opens and not again: a phone takes seconds to
+// compile an egui napp, which is seconds of a blank window every time. The
+// cache is keyed on the module's bytes, so an update is compiled afresh. Call
+// it before the first Load; one process at a time per dir.
+func SetCacheDir(dir string) error {
+	c, err := wazero.NewCompilationCacheWithDir(dir)
+	if err != nil {
+		return err
+	}
+	compileCache = c
+	return nil
 }
 
 // missingImports is everything the module imports as functions that a host
@@ -175,7 +214,7 @@ func importsCall(compiled wazero.CompiledModule) bool {
 
 // Resize tells the module the canvas it should paint at. The next frame sees
 // it.
-func (n *napp) Resize(width, height int) {
+func (n *Napp) Resize(width, height int) {
 	n.width, n.height = int32(width), int32(height)
 }
 
@@ -186,7 +225,7 @@ func (n *napp) Resize(width, height int) {
 // result only says whether the napp wants another frame without being
 // poked, not whether this one painted. A napp that settles on its very first
 // frame (which is most of them) has still painted that frame.
-func (n *napp) Frame(dt float64) error {
+func (n *Napp) Frame(dt float64) error {
 	res, err := n.frame.Call(context.Background(), math.Float64bits(dt))
 	if err != nil {
 		return err
@@ -201,7 +240,7 @@ func (n *napp) Frame(dt float64) error {
 // readCanvas copies width*height*4 bytes from wherever the module says its
 // canvas is. The module is free to move it (a new allocation, a bigger one
 // after a resize), so this is a fresh copy every time.
-func (n *napp) readCanvas() error {
+func (n *Napp) readCanvas() error {
 	res, err := n.ptr.Call(context.Background())
 	if err != nil {
 		return err
@@ -231,21 +270,21 @@ func (n *napp) readCanvas() error {
 }
 
 // Pixels is the canvas as RGBA8888, valid after a Frame.
-func (n *napp) Pixels() []byte { return n.img }
+func (n *Napp) Pixels() []byte { return n.img }
 
 // HasCanvas says whether there is anything to show yet.
-func (n *napp) HasCanvas() bool { return len(n.img) > 0 }
+func (n *Napp) HasCanvas() bool { return len(n.img) > 0 }
 
 // Width and Height are the canvas size the module was last told about.
-func (n *napp) Width() int  { return int(n.width) }
-func (n *napp) Height() int { return int(n.height) }
+func (n *Napp) Width() int  { return int(n.width) }
+func (n *Napp) Height() int { return int(n.height) }
 
 // Animating says whether the module asked for another frame without being
 // poked.
-func (n *napp) Animating() bool { return n.animating }
+func (n *Napp) Animating() bool { return n.animating }
 
 // Input hands the module one event, if it takes input.
-func (n *napp) Input(kind int32, x, y int32, buttons int32, a, b float32) {
+func (n *Napp) Input(kind int32, x, y int32, buttons int32, a, b float32) {
 	if n.event == nil {
 		return
 	}
@@ -260,7 +299,7 @@ func (n *napp) Input(kind int32, x, y int32, buttons int32, a, b float32) {
 // hostCall is the body of the napp_call import: read the method and params
 // out of the module's memory and hand them to the bridge, which answers
 // later. Never blocks, never calls back into the module.
-func (n *napp) hostCall(m api.Module, mPtr, mLen, pPtr, pLen uint32) int32 {
+func (n *Napp) hostCall(m api.Module, mPtr, mLen, pPtr, pLen uint32) int32 {
 	if n.call == nil || mLen == 0 || mLen > 256 || pLen > maxMessage {
 		return 0
 	}
@@ -285,7 +324,7 @@ const maxMessage = 64 << 20
 // Deliver hands the module one message through napp_receive: the bytes go
 // into room it allocates with napp_alloc, which it then owns. A module with
 // no napp_receive called nothing and has nothing coming.
-func (n *napp) Deliver(kind, id int32, data []byte) error {
+func (n *Napp) Deliver(kind, id int32, data []byte) error {
 	if n.receive == nil {
 		return nil
 	}
@@ -313,7 +352,7 @@ func (n *napp) Deliver(kind, id int32, data []byte) error {
 // say passes one of the module's log lines on to the launcher's own log.
 // It is the body of the napp_log import, so it runs on the module's thread
 // and must not do anything slow.
-func (n *napp) say(offset, length int32) {
+func (n *Napp) say(offset, length int32) {
 	if length <= 0 || length > 64<<10 {
 		return
 	}
@@ -328,10 +367,14 @@ func (n *napp) say(offset, length int32) {
 	log.Info().Str("napp", string(b)).Msg("wasm napp")
 }
 
-// Close gives the module and the runtime back.
-func (n *napp) Close() {
+// Close gives the module and the runtime back. Not while the module is
+// running: the runtime's compiled code goes with it.
+func (n *Napp) Close() {
 	ctx := context.Background()
 	if n.mod != nil {
 		n.mod.Close(ctx)
+	}
+	if n.rt != nil {
+		n.rt.Close(ctx)
 	}
 }

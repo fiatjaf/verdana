@@ -1,4 +1,4 @@
-package main
+package wasmhost
 
 import (
 	"bytes"
@@ -46,7 +46,7 @@ var httpClient = &http.Client{Timeout: 20 * time.Second}
 
 // httpCall answers http_fetch and http_fetch_image; ok is false for every
 // other method.
-func (b *bridge) httpCall(id int32, method string, params []byte) (ok bool) {
+func (b *Bridge) httpCall(id int32, method string, params []byte) (ok bool) {
 	switch method {
 	case "http_fetch":
 		go func() {
@@ -60,7 +60,7 @@ func (b *bridge) httpCall(id int32, method string, params []byte) (ok bool) {
 				b.answer(id, nil, err)
 				return
 			}
-			b.push(message{kind: wasm.MsgBitmap, id: id, data: bitmap})
+			b.push(Message{Kind: wasm.MsgBitmap, ID: id, Data: bitmap})
 		}()
 	default:
 		return false

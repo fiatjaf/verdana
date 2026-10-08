@@ -1,11 +1,9 @@
-package main
+package wasmhost
 
 import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"io"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -26,9 +24,10 @@ import (
 // module, which is what lets napp_call be called from anywhere — inside a
 // frame, inside an event, inside another message.
 
-// wireMsg is backend.WireMsg, restated so this binary does not have to link
-// the whole backend just for one struct (desktop/child does the same).
-type wireMsg struct {
+// WireMsg is backend.WireMsg, restated so a shell using this package does
+// not have to link the whole backend just for one struct (desktop/child does
+// the same).
+type WireMsg struct {
 	T      string          `json:"t"`
 	ID     int             `json:"id,omitempty"`
 	Method string          `json:"method,omitempty"`
@@ -39,12 +38,31 @@ type wireMsg struct {
 	Idx    *int            `json:"idx,omitempty"`
 }
 
-// message is one thing waiting to be handed to the module through
-// napp_receive.
-type message struct {
-	kind int32
-	id   int32
-	data []byte
+// Message is one thing waiting to be handed to the module through
+// napp_receive (see Napp.Deliver).
+type Message struct {
+	Kind int32
+	ID   int32
+	Data []byte
+}
+
+// Prompt and PromptOption mirror backend.Prompt as a shell drawing the
+// overlay needs to see it.
+type Prompt struct {
+	ID       int            `json:"id"`
+	Title    string         `json:"title"`
+	Detail   string         `json:"detail"`
+	Code     string         `json:"code"`
+	Options  []PromptOption `json:"options"`
+	Remember bool           `json:"remember"`
+}
+
+type PromptOption struct {
+	Label     string `json:"label"`
+	Detail    string `json:"detail"`
+	Instance  string `json:"instance"`
+	Dev       bool   `json:"dev"`
+	Suggested bool   `json:"suggested"`
 }
 
 type themeState struct {
@@ -52,13 +70,36 @@ type themeState struct {
 	Vars json.RawMessage `json:"vars"`
 }
 
-type bridge struct {
+// Config is what a bridge needs to know about its window.
+type Config struct {
+	// Instance is window.napp.instance.
+	Instance string
+
+	// Storage is the napp's storage as the launcher has it, a JSON object
+	// of strings; anything else starts empty.
+	Storage []byte
+
+	// Theme and ThemeVars are the launcher's theme when the window opened.
+	Theme     string
+	ThemeVars string
+
+	// Send takes every wire message going up to the launcher. Calls to it
+	// are serialized.
+	Send func(WireMsg)
+}
+
+// Bridge is one window's bridge to the launcher: napp_call goes out through
+// it, and everything the launcher sends comes in through it, to be handed to
+// the module between frames.
+type Bridge struct {
 	outMu sync.Mutex
-	out   *json.Encoder
+	out   func(WireMsg)
+
+	instance string
 
 	mu     sync.Mutex
 	serial int32
-	inbox  []message
+	inbox  []Message
 	wake   func()
 
 	// feeds are the feed calls still open, by call id (which is also the
@@ -70,18 +111,19 @@ type bridge struct {
 	subs map[int32]bool
 
 	theme  themeState
-	prompt *promptView
+	prompt *Prompt
 
 	store *store
 }
 
-func newBridge(out io.Writer) *bridge {
-	b := &bridge{
-		out:   json.NewEncoder(out),
-		feeds: make(map[int32]bool),
-		subs:  make(map[int32]bool),
-		store: loadStore(os.Getenv("VERDANA_NAPP_STORAGE_FILE")),
-		theme: themeState{Name: os.Getenv("VERDANA_THEME"), Vars: json.RawMessage(os.Getenv("VERDANA_THEME_VARS"))},
+func NewBridge(cfg Config) *Bridge {
+	b := &Bridge{
+		out:      cfg.Send,
+		instance: cfg.Instance,
+		feeds:    make(map[int32]bool),
+		subs:     make(map[int32]bool),
+		store:    loadStore(cfg.Storage),
+		theme:    themeState{Name: cfg.Theme, Vars: json.RawMessage(cfg.ThemeVars)},
 	}
 	if b.theme.Name == "" {
 		b.theme.Name = "light"
@@ -92,9 +134,9 @@ func newBridge(out io.Writer) *bridge {
 	return b
 }
 
-// setWake is how the window asks to be woken when there is something for the
+// SetWake is how the window asks to be woken when there is something for the
 // module. Anything queued before it existed is waiting already.
-func (b *bridge) setWake(fn func()) {
+func (b *Bridge) SetWake(fn func()) {
 	b.mu.Lock()
 	b.wake = fn
 	pending := len(b.inbox) > 0 || b.prompt != nil
@@ -104,7 +146,7 @@ func (b *bridge) setWake(fn func()) {
 	}
 }
 
-func (b *bridge) push(m message) {
+func (b *Bridge) push(m Message) {
 	b.mu.Lock()
 	b.inbox = append(b.inbox, m)
 	wake := b.wake
@@ -114,8 +156,8 @@ func (b *bridge) push(m message) {
 	}
 }
 
-// drain hands over everything queued for the module, in order.
-func (b *bridge) drain() []message {
+// Drain hands over everything queued for the module, in order.
+func (b *Bridge) Drain() []Message {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	out := b.inbox
@@ -123,33 +165,34 @@ func (b *bridge) drain() []message {
 	return out
 }
 
-func (b *bridge) send(m wireMsg) {
+func (b *Bridge) send(m WireMsg) {
+	if b.out == nil {
+		return
+	}
 	b.outMu.Lock()
 	defer b.outMu.Unlock()
-	if err := b.out.Encode(m); err != nil {
-		log.Debug().Err(err).Msg("could not write to the launcher")
-	}
+	b.out(m)
 }
 
 // answer queues the result of call id for the module.
-func (b *bridge) answer(id int32, result any, err error) {
+func (b *Bridge) answer(id int32, result any, err error) {
 	if err != nil {
-		b.push(message{kind: wasm.MsgError, id: id, data: []byte(err.Error())})
+		b.push(Message{Kind: wasm.MsgError, ID: id, Data: []byte(err.Error())})
 		return
 	}
 	raw, merr := json.Marshal(result)
 	if merr != nil {
-		b.push(message{kind: wasm.MsgError, id: id, data: []byte(merr.Error())})
+		b.push(Message{Kind: wasm.MsgError, ID: id, Data: []byte(merr.Error())})
 		return
 	}
-	b.push(message{kind: wasm.MsgResult, id: id, data: raw})
+	b.push(Message{Kind: wasm.MsgResult, ID: id, Data: raw})
 }
 
 // ─── napp → launcher ─────────────────────────────────────────────
 
-// call is the body of napp_call: it returns the call's id right away and
+// Call is the body of napp_call: it returns the call's id right away and
 // answers later.
-func (b *bridge) call(method string, params []byte) int32 {
+func (b *Bridge) Call(method string, params []byte) int32 {
 	b.mu.Lock()
 	b.serial++
 	id := b.serial
@@ -239,16 +282,16 @@ func (b *bridge) call(method string, params []byte) int32 {
 		b.mu.Unlock()
 	}
 
-	b.send(wireMsg{T: "rpc", ID: int(id), Method: method, Params: string(params)})
+	b.send(WireMsg{T: "rpc", ID: int(id), Method: method, Params: string(params)})
 	return id
 }
 
 // local answers the calls bridge.js answers without asking the launcher. ok
 // is false for everything that has to go up.
-func (b *bridge) local(id int32, method string, params []byte) (result any, err error, ok bool) {
+func (b *Bridge) local(id int32, method string, params []byte) (result any, err error, ok bool) {
 	switch method {
 	case "napp.instance":
-		return meta.Instance, nil, true
+		return b.instance, nil, true
 
 	case "napp.theme":
 		b.mu.Lock()
@@ -317,23 +360,23 @@ func (b *bridge) local(id int32, method string, params []byte) (result any, err 
 
 // ─── launcher → napp ─────────────────────────────────────────────
 
-// handleWire takes one message from the launcher. It returns false when the
+// HandleWire takes one message from the launcher. It returns false when the
 // window should go away.
-func (b *bridge) handleWire(m wireMsg) bool {
+func (b *Bridge) HandleWire(m WireMsg) bool {
 	switch m.T {
 	case "close":
 		return false
 
 	case "resp":
 		if m.Error != "" {
-			b.push(message{kind: wasm.MsgError, id: int32(m.ID), data: []byte(m.Error)})
+			b.push(Message{Kind: wasm.MsgError, ID: int32(m.ID), Data: []byte(m.Error)})
 			return true
 		}
 		result := []byte(m.Result)
 		if len(result) == 0 {
 			result = []byte("null")
 		}
-		b.push(message{kind: wasm.MsgResult, id: int32(m.ID), data: result})
+		b.push(Message{Kind: wasm.MsgResult, ID: int32(m.ID), Data: result})
 
 	case "action":
 		idx := -1
@@ -349,14 +392,14 @@ func (b *bridge) handleWire(m wireMsg) bool {
 			Payload json.RawMessage `json:"payload"`
 			Idx     int             `json:"idx"`
 		}{m.Method, payload, idx})
-		b.push(message{kind: wasm.MsgAction, id: int32(m.ID), data: raw})
+		b.push(Message{Kind: wasm.MsgAction, ID: int32(m.ID), Data: raw})
 
 	case "feed":
 		b.mu.Lock()
 		open := b.feeds[int32(m.ID)]
 		b.mu.Unlock()
 		if open {
-			b.push(message{kind: wasm.MsgFeed, id: int32(m.ID), data: []byte(m.Params)})
+			b.push(Message{Kind: wasm.MsgFeed, ID: int32(m.ID), Data: []byte(m.Params)})
 		}
 
 	case "subscription":
@@ -371,7 +414,7 @@ func (b *bridge) handleWire(m wireMsg) bool {
 		}
 		b.mu.Unlock()
 		if open {
-			b.push(message{kind: wasm.MsgSubscription, id: int32(m.ID), data: []byte(m.Params)})
+			b.push(Message{Kind: wasm.MsgSubscription, ID: int32(m.ID), Data: []byte(m.Params)})
 		}
 
 	case "storage":
@@ -384,7 +427,7 @@ func (b *bridge) handleWire(m wireMsg) bool {
 			return true
 		}
 		b.store.apply(p.Op, p.Key, p.Value)
-		b.push(message{kind: wasm.MsgStorage, data: []byte(m.Params)})
+		b.push(Message{Kind: wasm.MsgStorage, Data: []byte(m.Params)})
 
 	case "theme":
 		vars := json.RawMessage(m.Params)
@@ -395,12 +438,12 @@ func (b *bridge) handleWire(m wireMsg) bool {
 		b.theme = themeState{Name: m.Method, Vars: vars}
 		raw, _ := json.Marshal(b.theme)
 		b.mu.Unlock()
-		b.push(message{kind: wasm.MsgTheme, data: raw})
+		b.push(Message{Kind: wasm.MsgTheme, Data: raw})
 
 	case "prompt":
-		var pv *promptView
+		var pv *Prompt
 		if strings.TrimSpace(m.Params) != "" {
-			pv = new(promptView)
+			pv = new(Prompt)
 			if err := json.Unmarshal([]byte(m.Params), pv); err != nil {
 				log.Warn().Err(err).Msg("unreadable prompt from launcher")
 				return true
@@ -417,24 +460,24 @@ func (b *bridge) handleWire(m wireMsg) bool {
 	return true
 }
 
-func (b *bridge) themeName() string {
+func (b *Bridge) ThemeName() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.theme.Name
 }
 
-// currentPrompt is the prompt covering the window, if any.
-func (b *bridge) currentPrompt() *promptView {
+// CurrentPrompt is the prompt covering the window, if any.
+func (b *Bridge) CurrentPrompt() *Prompt {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.prompt
 }
 
-// answerPrompt sends the user's answer up and takes the overlay down; if the
+// AnswerPrompt sends the user's answer up and takes the overlay down; if the
 // launcher has another prompt for this window it sends it right back.
-func (b *bridge) answerPrompt(id int, ok bool, index int, scope string) {
+func (b *Bridge) AnswerPrompt(id int, ok bool, index int, scope string) {
 	raw, _ := json.Marshal(map[string]any{"ok": ok, "index": index, "scope": scope})
-	b.send(wireMsg{T: "promptAnswer", ID: id, Params: string(raw)})
+	b.send(WireMsg{T: "promptAnswer", ID: id, Params: string(raw)})
 	b.mu.Lock()
 	if b.prompt != nil && b.prompt.ID == id {
 		b.prompt = nil
