@@ -246,7 +246,9 @@ func layoutLogin(
 	th *material.Theme,
 	ed *widget.Editor,
 	btn *widget.Clickable,
+	googleBtn *widget.Clickable,
 	loginErr string,
+	loginStatus string,
 ) layout.Dimensions {
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -268,6 +270,21 @@ func layoutLogin(
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			pointer.CursorPointer.Add(gtx.Ops)
 			return material.Button(th, btn, "Log in").Layout(gtx)
+		}),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(20)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			pointer.CursorPointer.Add(gtx.Ops)
+			return material.Button(th, googleBtn, "Log in with Google").Layout(gtx)
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if loginStatus == "" {
+				return layout.Dimensions{}
+			}
+			return layout.Inset{Top: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				l := material.Body2(th, loginStatus)
+				l.Color = currentTheme().subtle
+				return l.Layout(gtx)
+			})
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			if loginErr == "" {

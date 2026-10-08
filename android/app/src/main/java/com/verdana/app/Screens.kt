@@ -194,6 +194,14 @@ fun LoginScreen(activity: MainActivity, st: LauncherState) {
             Text("Log in")
         }
         Spacer(Modifier.height(26.dp))
+        OutlinedButton(onClick = { activity.loginWithGoogle() }, modifier = Modifier.fillMaxWidth()) {
+            Text("Log in with Google", color = theme.fg)
+        }
+        if (st.loginStatus.isNotBlank()) {
+            Spacer(Modifier.height(8.dp))
+            Text(st.loginStatus, color = theme.subtle, style = MaterialTheme.typography.bodySmall)
+        }
+        Spacer(Modifier.height(12.dp))
         if (Amber.installed(activity)) {
             var amberErr by remember { mutableStateOf("") }
             AmberLogin(activity, theme) { amberErr = it }

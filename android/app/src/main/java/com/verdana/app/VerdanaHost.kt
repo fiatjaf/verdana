@@ -44,7 +44,7 @@ object VerdanaHost : UI {
     private var appContext: Context? = null
 
     private fun emptyState() = LauncherState(
-        phase = "loading", loginErr = "", profileName = "", profilePicture = "",
+        phase = "loading", loginErr = "", loginStatus = "", profileName = "", profilePicture = "",
         pubkey = "", fetchErr = "", fetching = false, theme = "light",
         relays = emptyList(), installed = emptyList(), discovery = emptyList(),
         busy = emptyList(), windows = emptyList(),

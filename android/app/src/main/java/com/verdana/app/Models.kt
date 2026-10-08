@@ -66,6 +66,7 @@ data class Prompt(
 data class LauncherState(
     val phase: String,
     val loginErr: String,
+    val loginStatus: String,
     val profileName: String,
     val profilePicture: String,
     val pubkey: String,
@@ -122,6 +123,7 @@ fun parseState(json: String): LauncherState {
     return LauncherState(
         phase = o.optString("phase"),
         loginErr = o.optString("loginErr"),
+        loginStatus = o.optString("loginStatus"),
         profileName = o.optString("profileName"),
         profilePicture = o.optString("profilePicture"),
         pubkey = o.optString("pubkey"),

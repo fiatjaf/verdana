@@ -242,6 +242,7 @@ func gioMain() {
 	var (
 		loginEd             widget.Editor
 		loginBtn            widget.Clickable
+		googleBtn           widget.Clickable
 		relaysEd            widget.Editor
 		fetchBtn            widget.Clickable
 		tabHomeBtn          widget.Clickable
@@ -403,7 +404,10 @@ func gioMain() {
 							go backend.Login(input)
 						}
 					}
-					return layoutLogin(gtx, th, &loginEd, &loginBtn, st.LoginErr)
+					if googleBtn.Clicked(gtx) {
+						go backend.LoginWithGoogle()
+					}
+					return layoutLogin(gtx, th, &loginEd, &loginBtn, &googleBtn, st.LoginErr, st.LoginStatus)
 				case backend.PhaseMain:
 					if tabHomeBtn.Clicked(gtx) {
 						setTab(tabHome)

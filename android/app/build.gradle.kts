@@ -53,6 +53,10 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("androidx.webkit:webkit:1.12.1")
     implementation("androidx.core:core-ktx:1.15.0")
+    // native "log in with google" (Credential Manager → ID token)
+    implementation("androidx.credentials:credentials:1.3.0")
+    implementation("androidx.credentials:credentials-play-services-auth:1.3.0")
+    implementation("com.google.android.libraries.identity.googleid:googleid:1.1.1")
     // drag-and-drop reordering of the home tab's pinned napps
     implementation("sh.calvin.reorderable:reorderable:2.4.3")
     debugImplementation("androidx.compose.ui:ui-tooling")

@@ -62,6 +62,9 @@ class MainActivity : ComponentActivity() {
     // ─── launcher actions (called from composables) ──────────────────
 
     fun login(input: String) = Mobile.login(input)
+    fun loginWithGoogle() {
+        lifecycleScope.launch { GoogleLogin.login(this@MainActivity) }
+    }
     fun logout() = Mobile.logout()
     fun fetchNapps() = Mobile.fetch()
     fun saveRelays(text: String) = Mobile.setRelays(text)

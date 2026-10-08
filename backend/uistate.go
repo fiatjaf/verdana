@@ -31,6 +31,10 @@ type State struct {
 	// LoginErr is why the last login attempt failed, if it did.
 	LoginErr string `json:"loginErr"`
 
+	// LoginStatus is what a login that takes a while (the Google one) is
+	// doing right now, "" when none is running.
+	LoginStatus string `json:"loginStatus"`
+
 	// ProfileName and ProfilePicture describe the logged-in user.
 	ProfileName    string `json:"profileName"`
 	ProfilePicture string `json:"profilePicture"`
@@ -112,6 +116,7 @@ type launcherState struct {
 
 	phase      string
 	loginErr   string
+	loginStat  string
 	profName   string
 	profPic    string
 	pubkey     string
@@ -164,6 +169,7 @@ func Snapshot() State {
 	s := State{
 		Phase:          ls.phase,
 		LoginErr:       ls.loginErr,
+		LoginStatus:    ls.loginStat,
 		ProfileName:    ls.profName,
 		ProfilePicture: ls.profPic,
 		Pubkey:         ls.pubkey,
@@ -293,7 +299,24 @@ func waitStartupLogin(ctx context.Context) {
 func setLoginErr(msg string) {
 	ls.mu.Lock()
 	ls.loginErr = msg
+	ls.loginStat = ""
 	setPhaseLocked(PhaseLogin)
+	ls.mu.Unlock()
+	notifyState()
+}
+
+// LoginFailed puts a login error on the login screen, for a platform whose
+// part of a login failed.
+func LoginFailed(msg string) { setLoginErr(msg) }
+
+// setLoginStatus shows how a long login is going (and that the last error
+// is no longer the news).
+func setLoginStatus(msg string) {
+	ls.mu.Lock()
+	ls.loginStat = msg
+	if msg != "" {
+		ls.loginErr = ""
+	}
 	ls.mu.Unlock()
 	notifyState()
 }

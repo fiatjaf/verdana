@@ -228,6 +228,16 @@ func AnswerPrompt(id int, ok bool, index int, scope string) {
 // state's phase and loginErr for the outcome.
 func Login(input string) { go backend.Login(input) }
 
+// LoginWithGoogle takes the ID token Credential Manager got from Google (for
+// Pomegranate central's web client id) and runs the rest of the Google
+// login. It returns immediately; the state's loginStatus tracks it, then
+// phase and loginErr as with Login.
+func LoginWithGoogle(idToken string) { go backend.LoginWithGoogleIDToken(idToken) }
+
+// LoginFailed shows an error on the login screen, for logins that fail on
+// the Android side before the backend ever sees them.
+func LoginFailed(msg string) { backend.LoginFailed(msg) }
+
 // Logout forgets the key and closes every napp.
 func Logout() { backend.Logout() }
 
