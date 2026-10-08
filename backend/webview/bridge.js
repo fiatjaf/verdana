@@ -309,11 +309,10 @@
         waiter.reject(new Error(msg.error))
         return
       }
-      try {
-        waiter.resolve(msg.result === undefined ? null : decode(msg.result))
-      } catch (err) {
-        waiter.reject(err)
-      }
+      // msg.result is already a value here (it came embedded in the resp
+      // object), not JSON text like __bridge_rpc gives: parsing it again
+      // would break every rpc that answers with a string
+      waiter.resolve(msg.result === undefined ? null : msg.result)
     }
     return (method, params) =>
       new Promise((resolve, reject) => {
