@@ -19,11 +19,13 @@ import "encoding/json"
 // A wasm napp's canvas shell has no page to eval code in, so the two things
 // that otherwise arrive as eval come to it as data instead:
 //
-//	{t:"feed",    id:<callbackId>, params:{"events","synced"}}  a feed batch
+//	{t:"stored",  id:<callbackId>, params:<event>}  an event just saved
+//	                                 that matches a nostrdb.subscribe
 //	{t:"storage", params:{"op","key","value"}}  another window of the same
 //	                                 napp changed its storage
 //	{t:"subscription", id:<callbackId>, params:{"type",…}}  news from a
-//	                                 napp.subscribe (see wasm.MsgSubscription)
+//	                                 napp.subscribe or napp.outbox (see
+//	                                 wasm.MsgSubscription)
 //
 // Shell → backend (all through HandleWireMessage):
 //

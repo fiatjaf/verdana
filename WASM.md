@@ -150,7 +150,7 @@ its answer at once.
 | ---            | ---                  | ---                                 | ---                                                           |
 | 0 result       | the call's           | JSON                                | what the call returned                                        |
 | 1 error        | the call's           | text                                | why the call failed (including "denied by the user")          |
-| 2 feed         | the feed call's      | `{"events": [...], "synced": bool}` | one batch from a feed                                         |
+| 2 stored       | the subscribe call's | the event                           | stored: see [Store subscriptions](#store-subscriptions)       |
 | 3 action       | the dispatch's       | `{"name", "payload", "idx"}`        | someone dispatched an action to this window                   |
 | 4 storage      | 0                    | `{"op", "key", "value"}`            | another window of this napp changed its storage               |
 | 5 theme        | 0                    | `{"name", "vars"}`                  | the user switched the launcher's theme                        |
@@ -176,19 +176,19 @@ window until it is answered, exactly like a web napp's overlay.
 | `nostrdb.event`                            | `{id}`                                      | event or null                           | `nostrdb.event`                |
 | `nostrdb.remove`                           | `{ids}`                                     | removed ids                             | `nostrdb.remove`               |
 | `nostrdb.replaceable`                      | `{kind, author, identifier?}`               | event or null                           | `nostrdb.replaceable`          |
+| `nostrdb.subscribe`                        | `{filters}` (one or an array)               | null, then stored messages              | `nostrdb.subscribe`            |
+| `nostrdb.unsubscribe`                      | `{callbackId}`                              | null                                    | leaving the `for await` loop   |
 | `nostrdb.supports`                         | —                                           | `[]`                                    | `nostrdb.supports`             |
 | `napp.instance`                            | —                                           | instance id                             | `napp.instance`                |
 | `napp.theme`                               | —                                           | `{name, vars}`                          | `window.__nappTheme`           |
+| `napp.now`                                 | —                                           | unix time, seconds                      | `Date.now()` (no clock here)   |
 | `napp.action`                              | `{name, payload, options?}`                 | the handler's result                    | `napp.action`                  |
 | `napp.registerAction`                      | `{pattern, idx?}`                           | null                                    | `napp.registerAction`          |
 | `napp.dispatchResult`                      | `{id, result}` or `{id, error}`             | null                                    | (answering an action)          |
 | `napp.close`                               | —                                           | null                                    | `napp.close`                   |
 | `napp.link`                                | url string                                  | null                                    | `napp.link`                    |
-| `napp.feeds.profile`                       | `{pubkey, kinds, ...opts}`                  | null, then feed messages                | `napp.feeds.profile`           |
-| `napp.feeds.following`                     | `{source, kinds, ...opts}`                  | 〃                                      | `napp.feeds.following`         |
-| `napp.feeds.inbox`                         | `{pubkey, kinds, ...opts}`                  | 〃                                      | `napp.feeds.inbox`             |
-| `napp.feeds.outbox`                        | `{pubkeys, kinds, ...opts}`                 | 〃                                      | `napp.feeds.outbox`            |
-| `napp.feeds.cancel`                        | `{callbackId}`                              | null                                    | `feed.close()`                 |
+| `napp.sync`                                | `{authors, kinds, since?, until?, limit?}`  | `{success, newEvents, error?}`          | `napp.sync`                    |
+| `napp.outbox`                              | `{filter, label?, maxEoseTimeout?}`         | null, then subscription messages        | `napp.outbox`                  |
 | `napp.load*`, `napp.fetch*WithSets`        | user (hex, npub, nprofile, nip05)           | the list                                | `napp.utils.load*` / `fetch*`  |
 | `napp.loadRelayInfo`                       | url string                                  | NIP-11 info                             | `napp.utils.loadRelayInfo`     |
 | `napp.loadNostrUser`                       | user, or `{pubkey, relays}`                 | profile                                 | `napp.utils.loadNostrUser`     |
@@ -220,23 +220,26 @@ window until it is answered, exactly like a web napp's overlay.
 | `http_fetch`                               | `{url, method?, headers?, body?}` or a url  | `{status, url, headers, body}`          | `fetch()`; see [The web](#the-web) |
 | `http_fetch_image`                         | `{url, width?, height?, fit?}` or a url     | a bitmap message                        | see [The web](#the-web)        |
 
-The `napp.storage*`, `nip19.*`, `fx.*`, `napp.instance`, `napp.theme` and
-`nostrdb.supports` calls are answered by the window itself, without a round
+The `napp.storage*`, `nip19.*`, `fx.*`, `napp.instance`, `napp.theme`,
+`napp.now` and `nostrdb.supports` calls are answered by the window itself, without a round
 trip, the way bridge.js answers them inside the page — but they still answer
 through `napp_receive`, like everything else. Storage is the same 5MB store
 per napp a web napp's `localStorage` is, shared by all its windows (web or
 wasm), and a write over the quota fails with an error message.
 
 `signEvent` may leave `created_at` out: a wasm napp has no wall clock, so a
-template without one is stamped with the time it is signed at.
+template without one is stamped with the time it is signed at. For the time
+itself (a `since` for `napp.sync`, say), ask `napp.now`.
 
-### Feeds
+### Store subscriptions
 
-A feed call's own id is its `callbackId`. The call answers `null` once the
-subscription is up; the events then keep arriving as feed messages under that
-same id, `synced` turning true once the relays have sent what they had stored.
-`napp.feeds.cancel` with `{"callbackId": id}` ends it, and nothing more is
-delivered for it after that.
+`nostrdb.subscribe` holds `filters` open on the launcher's store. The call's
+own id is its `callbackId`: it answers `null` once the subscription is up,
+then every event saved to the store from then on that matches one of the
+filters arrives as a stored message under that id, one by one — whatever
+saved it: a `napp.sync`, a subscription, another napp. What was stored before
+comes from `nostrdb.query`. `nostrdb.unsubscribe` with `{"callbackId": id}`
+ends it, and nothing more is delivered for it after that.
 
 ### The web
 
@@ -269,7 +272,7 @@ web napp's page in verdana; in nostrapps the browser's rules apply.
 ### Subscriptions
 
 `napp.subscribe` is a plain REQ with `filter` to exactly `relays`. Like a
-feed, the call's own id is its `callbackId`: it answers `null` once the
+store subscription, the call's own id is its `callbackId`: it answers `null` once the
 subscription is up, then subscription messages arrive under that id:
 
 1. `{"type": "eose", "events": [...]}` once, with every event that came before
@@ -285,6 +288,10 @@ subscription is up, then subscription messages arrive under that id:
 `<author prefix>-<d tag>` by default. `napp.unsubscribe` with
 `{"callbackId": id}` ends it, and nothing more is delivered for it after
 that.
+
+`napp.outbox` is the same, with the same messages, except that there are no
+`relays`: `filter` must have `authors`, and goes to each author's write relays
+(two per author, each relay asked only for its own authors).
 
 ### Actions
 

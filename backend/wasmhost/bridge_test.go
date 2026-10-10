@@ -232,24 +232,24 @@ func TestBridgeForwardsAndRoutes(t *testing.T) {
 		t.Errorf("error arrived as %+v", msgs[1])
 	}
 
-	// a feed's callbackId is the call's own id, and batches stop once it
-	// is cancelled
-	feed := b.Call("napp.feeds.profile", []byte(`{"pubkey":"x","kinds":[1]}`))
+	// a store subscription's callbackId is the call's own id, and events
+	// stop once it is closed
+	sub := b.Call("nostrdb.subscribe", []byte(`{"filters":{"kinds":[1]}}`))
 	var p struct {
 		CallbackID int32 `json:"callbackId"`
 	}
 	json.Unmarshal([]byte(lastSent(t, out).Params), &p)
-	if p.CallbackID != feed {
-		t.Fatalf("feed went up with callbackId %d, want %d", p.CallbackID, feed)
+	if p.CallbackID != sub {
+		t.Fatalf("subscribe went up with callbackId %d, want %d", p.CallbackID, sub)
 	}
-	b.HandleWire(WireMsg{T: "feed", ID: int(feed), Params: `{"events":[],"synced":true}`})
-	if m := b.Drain(); len(m) != 1 || m[0].Kind != wasm.MsgFeed || m[0].ID != feed {
-		t.Fatalf("feed batch arrived as %+v", m)
+	b.HandleWire(WireMsg{T: "stored", ID: int(sub), Params: `{"kind":1}`})
+	if m := b.Drain(); len(m) != 1 || m[0].Kind != wasm.MsgStored || m[0].ID != sub {
+		t.Fatalf("stored event arrived as %+v", m)
 	}
-	b.Call("napp.feeds.cancel", []byte(fmt.Sprintf(`{"callbackId":%d}`, feed)))
-	b.HandleWire(WireMsg{T: "feed", ID: int(feed), Params: `{"events":[],"synced":true}`})
+	b.Call("nostrdb.unsubscribe", []byte(fmt.Sprintf(`{"callbackId":%d}`, sub)))
+	b.HandleWire(WireMsg{T: "stored", ID: int(sub), Params: `{"kind":1}`})
 	if m := b.Drain(); len(m) != 0 {
-		t.Fatalf("a cancelled feed still delivered %+v", m)
+		t.Fatalf("a closed store subscription still delivered %+v", m)
 	}
 
 	// registering defaults idx to 0, and an action comes back with it

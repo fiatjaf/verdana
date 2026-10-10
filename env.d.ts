@@ -48,6 +48,9 @@ type NostrDB = {
   event(id: string): Promise<NostrEvent | undefined>
   remove(ids: string[]): Promise<string[]>
   replaceable(kind: number, author: string, identifier?: string): Promise<NostrEvent | undefined>
+  // Every event saved to the store from now on that matches filters, one by
+  // one. What is already stored comes from query(). Leaving the loop ends it.
+  subscribe(filters: NostrFilter | NostrFilter[]): AsyncGenerator<NostrEvent>
   supports(): string[]
 }
 
@@ -155,34 +158,13 @@ type PublishResult = {
   failed: number
 }
 
-// ── Feed subscription ────────────────────────────────────────────────────
-type FeedHandle = {
-  close(): void
-}
-
-type FeedCallback = (events: NostrEvent[], synced: boolean) => void
-
-type FeedOpts = {
-  since?: number
-  until?: number
-  limit?: number
-}
-
-type NappFeeds = {
-  profile(pubkey: string, kinds: number[], callback: FeedCallback, opts?: FeedOpts): FeedHandle
-  following(source: string, kinds: number[], callback: FeedCallback, opts?: FeedOpts): FeedHandle
-  inbox(
-    pubkey: string | string[],
-    kinds: number[],
-    callback: FeedCallback,
-    opts?: FeedOpts
-  ): FeedHandle
-  outbox(
-    pubkeys: string | string[],
-    kinds: number[],
-    callback: FeedCallback,
-    opts?: FeedOpts
-  ): FeedHandle
+// ── Sync into the store ──────────────────────────────────────────────────
+type SyncResult = {
+  // false when some author/kind could not be fetched; error says which
+  success: boolean
+  // events saved to the store that it did not have before
+  newEvents: number
+  error?: string
 }
 
 // ── Raw relay subscription ───────────────────────────────────────────────
@@ -348,7 +330,22 @@ type Napp = {
   // Local addition, missing upstream: implemented by bridge.js (posts
   // "napp-link", host validates + prompts + opens) and documented in README.
   link(url: string): void
-  feeds: NappFeeds
+  // Fetches into the store, from each author's write relays, their events of
+  // these kinds between since and until (default now), skipping what an
+  // earlier sync already brought. With limit, only the newest
+  // that many per author and kind before until (and not before since), asking
+  // relays just for what the store lacks; with neither since nor limit, limit
+  // is 10. Read them back with nostrdb.query, or see them arrive with
+  // nostrdb.subscribe. All syncs share at most 16 REQs open at a time.
+  sync(
+    authors: string[],
+    kinds: number[],
+    opts?: { since?: number; until?: number; limit?: number }
+  ): Promise<SyncResult>
+  // A live subscription to filter, which must have authors, on each author's
+  // write relays (two per author, each relay asked only for its own authors).
+  // Calls back like utils.subscribe. Every event is also saved to the store.
+  outbox(filter: NostrFilter, opts?: SubscribeOpts): { close(): void }
   utils: NappUtils
   /** Sync bech32/nip19 helpers. */
   nip19: NappNip19

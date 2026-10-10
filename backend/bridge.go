@@ -174,10 +174,7 @@ func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 			if !p.Event.CheckID() || !p.Event.VerifySignature() {
 				return false, errors.New("invalid event id or signature")
 			}
-			if err := sys.Store.SaveEvent(p.Event); err != nil {
-				return false, err
-			}
-			return true, nil
+			return saveEvent(p.Event)
 
 		case "nostrdb.query":
 			var p struct {
@@ -390,20 +387,48 @@ func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 			}
 			return nil, openExternalLink(url)
 
-		// ─── feeds ───────────────────────────────────────────────
-		case "napp.feeds.profile", "napp.feeds.following", "napp.feeds.inbox", "napp.feeds.outbox":
-			var p feedParams
+		// ─── store subscriptions and sync ───────────────────────
+		case "nostrdb.subscribe":
+			var p struct {
+				Filters    json.RawMessage `json:"filters"`
+				CallbackID int             `json:"callbackId"`
+			}
 			if err := json.Unmarshal([]byte(params), &p); err != nil {
 				return nil, err
 			}
-			ctx, cancel := context.WithCancel(context.Background())
-			ci.subMu.Lock()
-			if old, ok := ci.subs[p.CallbackID]; ok {
-				old()
+			filters, err := parseFilters(p.Filters)
+			if err != nil {
+				return nil, err
 			}
-			ci.subs[p.CallbackID] = cancel
-			ci.subMu.Unlock()
-			go startFeed(ctx, ci, method, p)
+			if len(filters) == 0 {
+				return nil, errors.New("subscribe: invalid filter")
+			}
+			ctx := ci.trackSub(p.CallbackID)
+			startStoreSub(ctx, ci, p.CallbackID, filters)
+			return nil, nil
+
+		case "napp.sync":
+			var p syncParams
+			if err := json.Unmarshal([]byte(params), &p); err != nil {
+				return nil, err
+			}
+			if sys == nil {
+				return syncResult{Error: "no nostr system"}, nil
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer cancel()
+			return runSync(ctx, p), nil
+
+		case "napp.outbox":
+			var p outboxParams
+			if err := json.Unmarshal([]byte(params), &p); err != nil {
+				return nil, err
+			}
+			ctx := ci.trackSub(p.CallbackID)
+			if err := startOutboxSubscription(ctx, ci, p); err != nil {
+				ci.untrackSub(p.CallbackID)
+				return nil, err
+			}
 			return nil, nil
 
 		case "napp.subscribe":
@@ -411,34 +436,20 @@ func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 			if err := json.Unmarshal([]byte(params), &p); err != nil {
 				return nil, err
 			}
-			ctx, cancel := context.WithCancel(context.Background())
-			ci.subMu.Lock()
-			if old, ok := ci.subs[p.CallbackID]; ok {
-				old()
-			}
-			ci.subs[p.CallbackID] = cancel
-			ci.subMu.Unlock()
+			ctx := ci.trackSub(p.CallbackID)
 			if err := startSubscription(ctx, ci, p); err != nil {
-				ci.subMu.Lock()
-				delete(ci.subs, p.CallbackID)
-				ci.subMu.Unlock()
-				cancel()
+				ci.untrackSub(p.CallbackID)
 				return nil, err
 			}
 			return nil, nil
 
-		// a subscription is closed the same way a feed is
-		case "napp.feeds.cancel", "napp.unsubscribe":
+		// a store subscription is closed the same way a relay one is
+		case "nostrdb.unsubscribe", "napp.unsubscribe":
 			var p struct {
 				CallbackID int `json:"callbackId"`
 			}
 			json.Unmarshal([]byte(params), &p)
-			ci.subMu.Lock()
-			if cancel, ok := ci.subs[p.CallbackID]; ok {
-				cancel()
-				delete(ci.subs, p.CallbackID)
-			}
-			ci.subMu.Unlock()
+			ci.untrackSub(p.CallbackID)
 			return nil, nil
 
 		// ─── NIP-51 lists ────────────────────────────────────────
@@ -880,10 +891,8 @@ func publishEvent(ci *Instance, evt nostr.Event, requested []string) (any, error
 	}
 
 	// keep it locally first, so the napp can query it back right away
-	if _, err := sys.Store.ReplaceEvent(evt); err != nil {
-		if err := sys.Store.SaveEvent(evt); err != nil {
-			log.Warn().Err(err).Msg("failed to store published event locally")
-		}
+	if _, err := saveEvent(evt); err != nil {
+		log.Warn().Err(err).Msg("failed to store published event locally")
 	}
 	// and let the load* caches know they're stale for this kind+author
 	invalidateList(evt.Kind, evt.PubKey)

@@ -12,9 +12,10 @@ import (
 )
 
 // A subscription is window.napp.utils.subscribe(relays, filter, opts): a plain
-// REQ to the relays the napp names, with no outbox logic in between. Unlike a
-// feed it is not batched on a timer: everything stored arrives in one go at
-// EOSE, and after that every live event is handed over on its own.
+// REQ to the relays the napp names, with no outbox logic in between (or
+// window.napp.outbox(filter, opts), the same with the authors' write relays).
+// Everything stored arrives in one go at EOSE, and after that every live
+// event is handed over on its own. Every event is also saved to the store.
 //
 // The pool gives us either an EOSE channel or the CLOSED reasons, never both,
 // so each relay is driven here directly.
@@ -43,36 +44,97 @@ func startSubscription(ctx context.Context, ci *Instance, p subscribeParams) err
 		return errors.New("no nostr system")
 	}
 
-	relays := make([]string, 0, len(p.Relays))
+	filters := make(map[string]nostr.Filter, len(p.Relays))
 	for _, url := range p.Relays {
 		if url = strings.TrimSpace(url); url != "" {
-			relays = nostr.AppendUnique(relays, nostr.NormalizeURL(url))
+			filters[nostr.NormalizeURL(url)] = p.Filter
 		}
 	}
-	if len(relays) == 0 {
+	if len(filters) == 0 {
 		return errors.New("no relays to subscribe to")
 	}
 
-	label := p.Label
+	runSubscription(ctx, ci, p.CallbackID, p.Label, p.MaxEoseTimeout, filters)
+	return nil
+}
+
+// startOutboxSubscription is napp.outbox: the same as a subscription, but the
+// filter goes to each of its authors' write relays (two per author), each
+// relay asked only for its own authors.
+func startOutboxSubscription(ctx context.Context, ci *Instance, p outboxParams) error {
+	if sys == nil {
+		return errors.New("no nostr system")
+	}
+	if len(p.Filter.Authors) == 0 {
+		return errors.New("outbox: the filter must have authors")
+	}
+
+	authorsByRelay := make(map[string][]nostr.PubKey)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	slots := make(chan struct{}, 16)
+	for _, pk := range p.Filter.Authors {
+		wg.Add(1)
+		slots <- struct{}{}
+		go func() {
+			defer func() { <-slots; wg.Done() }()
+			relays := sys.FetchOutboxRelays(ctx, pk, 2)
+			mu.Lock()
+			for _, url := range relays {
+				url = nostr.NormalizeURL(url)
+				authorsByRelay[url] = append(authorsByRelay[url], pk)
+			}
+			mu.Unlock()
+		}()
+	}
+	wg.Wait()
+	if ctx.Err() != nil {
+		return nil
+	}
+
+	filters := make(map[string]nostr.Filter, len(authorsByRelay))
+	for url, authors := range authorsByRelay {
+		f := p.Filter.Clone()
+		f.Authors = authors
+		filters[url] = f
+	}
+	if len(filters) == 0 {
+		return errors.New("outbox: no relays for these authors")
+	}
+
+	runSubscription(ctx, ci, p.CallbackID, p.Label, p.MaxEoseTimeout, filters)
+	return nil
+}
+
+type outboxParams struct {
+	Filter         nostr.Filter `json:"filter"`
+	Label          string       `json:"label"`
+	MaxEoseTimeout int          `json:"maxEoseTimeout"`
+	CallbackID     int          `json:"callbackId"`
+}
+
+// runSubscription drives filters (one per relay) until ctx is done or every
+// relay has ended it.
+func runSubscription(ctx context.Context, ci *Instance, callbackID int, label string, maxEoseTimeout int, filters map[string]nostr.Filter) {
 	if label == "" {
 		label = nappSubscriptionLabel(ci.napp)
 	}
 	timeout := DefaultMaxEoseTimeout
-	if p.MaxEoseTimeout > 0 {
-		timeout = time.Duration(p.MaxEoseTimeout) * time.Millisecond
+	if maxEoseTimeout > 0 {
+		timeout = time.Duration(maxEoseTimeout) * time.Millisecond
 	}
 
-	log.Debug().Str("label", label).Int("relays", len(relays)).
-		Int("callback", p.CallbackID).Msg("starting subscription")
+	log.Debug().Str("label", label).Int("relays", len(filters)).
+		Int("callback", callbackID).Msg("starting subscription")
 
 	s := &subscription{
 		ci:         ci,
-		callbackID: p.CallbackID,
+		callbackID: callbackID,
 		seen:       make(map[nostr.ID]bool, 128),
 		stored:     make([]nostr.Event, 0, 64),
-		pending:    len(relays),
-		live:       len(relays),
-		reasons:    make(map[string]string, len(relays)),
+		pending:    len(filters),
+		live:       len(filters),
+		reasons:    make(map[string]string, len(filters)),
 	}
 
 	timer := time.AfterFunc(timeout, s.eose)
@@ -82,10 +144,9 @@ func startSubscription(ctx context.Context, ci *Instance, p subscribeParams) err
 	}()
 
 	opts := nostr.SubscriptionOptions{Label: label, MaxWaitForEOSE: timeout}
-	for _, url := range relays {
-		go s.drive(ctx, url, p.Filter, opts)
+	for url, filter := range filters {
+		go s.drive(ctx, url, filter, opts)
 	}
-	return nil
 }
 
 type subscription struct {

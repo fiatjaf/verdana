@@ -105,11 +105,9 @@ const (
 	// error message, as plain text.
 	MsgError
 
-	// MsgFeed is one batch from the feed the napp_call with this id
-	// started: {"events": [...], "synced": bool}. synced turns true once
-	// the relays have sent everything stored, after which only live events
-	// follow.
-	MsgFeed
+	// MsgStored is an event just saved to the launcher's store that matches
+	// the nostrdb.subscribe call with this id; the bytes are the event.
+	MsgStored
 
 	// MsgAction is the outside world calling the napp: an action it
 	// registered with napp.registerAction was dispatched to this window.
@@ -128,7 +126,8 @@ const (
 	// "vars"}, the same thing napp.theme answers with.
 	MsgTheme
 
-	// MsgSubscription is news from the napp.subscribe call with this id:
+	// MsgSubscription is news from the napp.subscribe (or napp.outbox) call
+	// with this id:
 	// {"type": "eose", "events": [...]} once, with everything stored, then
 	// {"type": "event", "event": {...}} for each live event, and
 	// {"type": "closed", "reasons": {relay: reason}} if every relay ends

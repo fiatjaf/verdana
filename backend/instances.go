@@ -40,7 +40,8 @@ type Instance struct {
 	gone     chan struct{}
 	goneOnce sync.Once
 
-	// subs maps a feed callbackId to the canceller of its subscription.
+	// subs maps a subscription's callbackId (a relay one or a store one) to
+	// its canceller.
 	subs  map[int]context.CancelFunc
 	subMu sync.Mutex
 
@@ -1015,4 +1016,27 @@ func resolveViewPayload(ctx context.Context, payload json.RawMessage) (json.RawM
 		return payload, false
 	}
 	return out, true
+}
+
+// trackSub gives the subscription with this callbackId the context it runs
+// in, ending whatever held that id before.
+func (ci *Instance) trackSub(callbackID int) context.Context {
+	ctx, cancel := context.WithCancel(context.Background())
+	ci.subMu.Lock()
+	if old, ok := ci.subs[callbackID]; ok {
+		old()
+	}
+	ci.subs[callbackID] = cancel
+	ci.subMu.Unlock()
+	return ctx
+}
+
+// untrackSub ends the subscription with this callbackId.
+func (ci *Instance) untrackSub(callbackID int) {
+	ci.subMu.Lock()
+	if cancel, ok := ci.subs[callbackID]; ok {
+		cancel()
+		delete(ci.subs, callbackID)
+	}
+	ci.subMu.Unlock()
 }

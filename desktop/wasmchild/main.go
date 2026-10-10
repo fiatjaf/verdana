@@ -102,7 +102,7 @@ func main() {
 	})
 
 	// Everything the launcher says comes down stdin, the same pipe the
-	// webview shell reads: answers to the napp's calls, actions, feeds,
+	// webview shell reads: answers to the napp's calls, actions, store events,
 	// prompts, and "close", which is the one thing about a window's lifetime
 	// that is not ours to decide. The module is in this process's memory and
 	// goes away with it, so leaving is the whole cleanup there is.
@@ -242,7 +242,7 @@ func runWindow() {
 
 			gtx := app.NewContext(&ops, e)
 
-			// What the launcher sent goes in first: answers, feeds and
+			// What the launcher sent goes in first: answers, store events and
 			// actions all land before the frame that can show them. A
 			// module that is still loading keeps its messages queued.
 			if n != nil {

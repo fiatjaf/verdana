@@ -267,7 +267,7 @@
   // or the local eventstore is an rpc to the Go host; the bech32/hex helpers
   // below are pure, so they stay here and answer synchronously.
 
-  const feedCallbacks = new Map()
+  const storeSubCallbacks = new Map()
   const subCallbacks = new Map()
   const actionHandlers = []
   let serial = 0
@@ -330,18 +330,12 @@
   installCustomStorage(rpc)
 
   // ── host → napp hooks ───────────────────────────────────────────
-  window.__bridge_feed_callback = function (callbackId, eventsJSON, synced) {
-    const cb = feedCallbacks.get(callbackId)
+  window.__bridge_store_callback = function (callbackId, eventJSON) {
+    const cb = storeSubCallbacks.get(callbackId)
     if (!cb) return
-    let events = []
     try {
-      events = JSON.parse(eventsJSON)
+      cb(JSON.parse(eventJSON))
     } catch {}
-    try {
-      cb(events, !!synced)
-    } catch (err) {
-      console.error("[napp] feed callback threw", err)
-    }
   }
 
   window.__bridge_sub_callback = function (callbackId, msgJSON) {
@@ -478,42 +472,60 @@
     remove: ids => rpc("nostrdb.remove", { ids }),
     replaceable: (kind, author, identifier) =>
       rpc("nostrdb.replaceable", { kind, author, identifier }),
+    // Every event saved to the store from now on that matches filters (one or
+    // an array), one by one. What is already stored comes from query().
+    // Leaving the loop (break, return, throw) ends the subscription.
+    subscribe: async function* (filters) {
+      const callbackId = serial++
+      const queue = []
+      let wake = null
+      storeSubCallbacks.set(callbackId, event => {
+        queue.push(event)
+        wake?.()
+      })
+      try {
+        await rpc("nostrdb.subscribe", { filters, callbackId })
+        while (true) {
+          while (queue.length) yield queue.shift()
+          await new Promise(resolve => (wake = resolve))
+          wake = null
+        }
+      } finally {
+        storeSubCallbacks.delete(callbackId)
+        rpc("nostrdb.unsubscribe", { callbackId }).catch(() => {})
+      }
+    },
     supports: async () => []
   }
 
-  function feedRpc(method, params, callback) {
-    if (typeof callback !== "function") throw new Error("no callback specified")
-    const callbackId = serial++
-    params.callbackId = callbackId
-    feedCallbacks.set(callbackId, callback)
-    rpc(method, params).catch(err => console.error("[napp] feed failed", err))
-    return {
-      close() {
-        feedCallbacks.delete(callbackId)
-        rpc("napp.feeds.cancel", { callbackId }).catch(() => {})
-      }
-    }
-  }
-
-  function subscribe(relays, filter, opts) {
+  // A subscription on the host (napp.subscribe, napp.outbox): everything
+  // stored comes in one go to eoseEventsCallback, then each new event to
+  // liveEventCallback. Answers the closer.
+  function hostSubscription(method, params, opts) {
     const { label, maxEoseTimeout, eoseEventsCallback, liveEventCallback, closedCallback } =
       opts || {}
     const callbackId = serial++
     subCallbacks.set(callbackId, { eoseEventsCallback, liveEventCallback, closedCallback })
-    rpc("napp.subscribe", { relays, filter, label, maxEoseTimeout, callbackId }).catch(err => {
+    rpc(method, { ...params, label, maxEoseTimeout, callbackId }).catch(err => {
       const cbs = subCallbacks.get(callbackId)
       if (!cbs) return
       subCallbacks.delete(callbackId)
       console.error("[napp] subscription failed", err)
       const reason = "error: " + String(err?.message || err)
       try {
-        cbs.closedCallback?.(Object.fromEntries((relays || []).map(url => [url, reason])))
+        const relays = params.relays || [""]
+        cbs.closedCallback?.(Object.fromEntries(relays.map(url => [url, reason])))
       } catch {}
     })
     return () => {
       if (!subCallbacks.delete(callbackId)) return
       rpc("napp.unsubscribe", { callbackId }).catch(() => {})
     }
+  }
+
+  // A plain REQ to exactly these relays.
+  function subscribe(relays, filter, opts) {
+    return hostSubscription("napp.subscribe", { relays, filter }, opts)
   }
 
   // ── bech32 / nip19 (sync, pure) ─────────────────────────────────
@@ -787,15 +799,15 @@
       rpc("napp.link", String(url)).catch(err => console.error("[napp] link failed", err))
     },
 
-    feeds: {
-      profile: (pubkey, kinds, callback, opts) =>
-        feedRpc("napp.feeds.profile", { pubkey, kinds, ...(opts || {}) }, callback),
-      following: (source, kinds, callback, opts) =>
-        feedRpc("napp.feeds.following", { source, kinds, ...(opts || {}) }, callback),
-      inbox: (pubkey, kinds, callback, opts) =>
-        feedRpc("napp.feeds.inbox", { pubkey, kinds, ...(opts || {}) }, callback),
-      outbox: (pubkeys, kinds, callback, opts) =>
-        feedRpc("napp.feeds.outbox", { pubkeys, kinds, ...(opts || {}) }, callback)
+    // Bring these authors' events of these kinds between since and until into
+    // the store from their write relays. See env.d.ts.
+    sync: (authors, kinds, { since, until, limit } = {}) =>
+      rpc("napp.sync", { authors, kinds, since, until, limit }),
+    // A live subscription to filter (which must have authors) on each
+    // author's write relays. Same opts as utils.subscribe.
+    outbox: (filter, opts) => {
+      const close = hostSubscription("napp.outbox", { filter }, opts)
+      return { close }
     },
 
     nip19: { decode: nip19Decode, npubEncode, noteEncode, neventEncode, naddrEncode },

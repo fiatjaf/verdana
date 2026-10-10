@@ -24,6 +24,7 @@ func initSystem(dataDir string) (func(), error) {
 	sys = sdk.NewSystem()
 	sys.KVStore = kv
 	sys.Store = db
+	sys.Publisher = storePublisher{}
 
 	sys.Pool.QueryMiddleware = sys.TrackQueryAttempts
 	sys.Pool.EventMiddleware = sys.TrackEventHintsAndRelays

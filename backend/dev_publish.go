@@ -200,7 +200,7 @@ func PublishDev(ctx context.Context, id string, servers, relays []string, protec
 	}
 	step("done: published to %d relay(s), %d failed", results, failed)
 	if results > 0 {
-		if _, err := sys.Store.ReplaceEvent(event); err != nil {
+		if _, err := saveEvent(event); err != nil {
 			log.Warn().Err(err).Msg("failed to store published dev napp")
 		}
 		invalidateList(event.Kind, event.PubKey)

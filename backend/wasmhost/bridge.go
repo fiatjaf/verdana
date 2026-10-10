@@ -16,8 +16,8 @@ import (
 // reaches through one import, napp_call(method, params), with the same
 // method names and the same JSON the bridge's rpcs carry. Most calls go up
 // to the launcher unchanged. The ones bridge.js answers inside the page
-// (nip19, fx, localStorage reads, the instance, the theme) are answered here,
-// so they cost no round trip.
+// (nip19, fx, localStorage reads, the instance, the theme, the time) are
+// answered here, so they cost no round trip.
 //
 // Every answer, local or not, comes back the same way: queued as a message
 // and handed to the module between two frames. A call never re-enters the
@@ -102,12 +102,13 @@ type Bridge struct {
 	inbox  []Message
 	wake   func()
 
-	// feeds are the feed calls still open, by call id (which is also the
-	// callbackId the launcher knows them by). A batch for a feed the napp
-	// already closed is dropped instead of delivered.
-	feeds map[int32]bool
+	// storeSubs are the nostrdb.subscribe calls still open, by call id
+	// (which is also the callbackId the launcher knows them by). An event
+	// for one the napp already closed is dropped instead of delivered.
+	storeSubs map[int32]bool
 
-	// subs are the napp.subscribe calls still open, the same way.
+	// subs are the napp.subscribe and napp.outbox calls still open, the
+	// same way.
 	subs map[int32]bool
 
 	theme  themeState
@@ -118,12 +119,12 @@ type Bridge struct {
 
 func NewBridge(cfg Config) *Bridge {
 	b := &Bridge{
-		out:      cfg.Send,
-		instance: cfg.Instance,
-		feeds:    make(map[int32]bool),
-		subs:     make(map[int32]bool),
-		store:    loadStore(cfg.Storage),
-		theme:    themeState{Name: cfg.Theme, Vars: json.RawMessage(cfg.ThemeVars)},
+		out:       cfg.Send,
+		instance:  cfg.Instance,
+		storeSubs: make(map[int32]bool),
+		subs:      make(map[int32]bool),
+		store:     loadStore(cfg.Storage),
+		theme:     themeState{Name: cfg.Theme, Vars: json.RawMessage(cfg.ThemeVars)},
 	}
 	if b.theme.Name == "" {
 		b.theme.Name = "light"
@@ -231,9 +232,9 @@ func (b *Bridge) Call(method string, params []byte) int32 {
 		}
 		params, _ = json.Marshal(p)
 
-	case strings.HasPrefix(method, "napp.feeds.") && method != "napp.feeds.cancel":
-		// The call's own id is the feed's callbackId: batches come back
-		// under the id the napp already has.
+	case method == "nostrdb.subscribe", method == "napp.subscribe", method == "napp.outbox":
+		// The call's own id is the subscription's callbackId: what it
+		// brings comes back under the id the napp already has.
 		var p map[string]json.RawMessage
 		if err := json.Unmarshal(params, &p); err != nil || p == nil {
 			b.answer(id, nil, errors.New(method+": params must be an object"))
@@ -242,20 +243,11 @@ func (b *Bridge) Call(method string, params []byte) int32 {
 		p["callbackId"], _ = json.Marshal(id)
 		params, _ = json.Marshal(p)
 		b.mu.Lock()
-		b.feeds[id] = true
-		b.mu.Unlock()
-
-	case method == "napp.subscribe":
-		// like a feed: the call's own id is the subscription's callbackId
-		var p map[string]json.RawMessage
-		if err := json.Unmarshal(params, &p); err != nil || p == nil {
-			b.answer(id, nil, errors.New(method+": params must be {relays, filter, label?, maxEoseTimeout?}"))
-			return id
+		if method == "nostrdb.subscribe" {
+			b.storeSubs[id] = true
+		} else {
+			b.subs[id] = true
 		}
-		p["callbackId"], _ = json.Marshal(id)
-		params, _ = json.Marshal(p)
-		b.mu.Lock()
-		b.subs[id] = true
 		b.mu.Unlock()
 
 	case method == "signEvent":
@@ -271,13 +263,13 @@ func (b *Bridge) Call(method string, params []byte) int32 {
 			}
 		}
 
-	case method == "napp.feeds.cancel", method == "napp.unsubscribe":
+	case method == "nostrdb.unsubscribe", method == "napp.unsubscribe":
 		var p struct {
 			CallbackID int32 `json:"callbackId"`
 		}
 		json.Unmarshal(params, &p)
 		b.mu.Lock()
-		delete(b.feeds, p.CallbackID)
+		delete(b.storeSubs, p.CallbackID)
 		delete(b.subs, p.CallbackID)
 		b.mu.Unlock()
 	}
@@ -297,6 +289,11 @@ func (b *Bridge) local(id int32, method string, params []byte) (result any, err 
 		b.mu.Lock()
 		defer b.mu.Unlock()
 		return b.theme, nil, true
+
+	case "napp.now":
+		// a wasm napp has no wall clock: napp_now_ms counts from the window
+		// opening
+		return time.Now().Unix(), nil, true
 
 	case "nostrdb.supports":
 		return []string{}, nil, true
@@ -394,12 +391,12 @@ func (b *Bridge) HandleWire(m WireMsg) bool {
 		}{m.Method, payload, idx})
 		b.push(Message{Kind: wasm.MsgAction, ID: int32(m.ID), Data: raw})
 
-	case "feed":
+	case "stored":
 		b.mu.Lock()
-		open := b.feeds[int32(m.ID)]
+		open := b.storeSubs[int32(m.ID)]
 		b.mu.Unlock()
 		if open {
-			b.push(Message{Kind: wasm.MsgFeed, ID: int32(m.ID), Data: []byte(m.Params)})
+			b.push(Message{Kind: wasm.MsgStored, ID: int32(m.ID), Data: []byte(m.Params)})
 		}
 
 	case "subscription":

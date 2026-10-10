@@ -199,8 +199,8 @@ func WasmFrame(instance string, width, height int) ([]byte, error) {
 	}
 	w.last = now
 
-	// what the launcher sent goes in first: answers, feeds and actions all
-	// land before the frame that can show them
+	// what the launcher sent goes in first: answers, store events and
+	// actions all land before the frame that can show them
 	for _, m := range w.br.Drain() {
 		if err := w.n.Deliver(m.Kind, m.ID, m.Data); err != nil {
 			return nil, w.fail("the napp crashed on a message: " + err.Error())
