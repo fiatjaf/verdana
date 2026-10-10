@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -383,6 +384,25 @@ func (ci *Instance) handlerFor(name string) (int, bool) {
 		}
 	}
 	return 0, false
+}
+
+// deliveredName is the action name the napp is sent: a "view:<kind>" action
+// reaches a napp that registered or declared only "view" as a raw "view".
+func (ci *Instance) deliveredName(name string) string {
+	if !strings.HasPrefix(name, "view:") {
+		return name
+	}
+	ci.actionsMu.Lock()
+	_, exact := ci.actions[name]
+	_, raw := ci.actions["view"]
+	ci.actionsMu.Unlock()
+	if exact {
+		return name
+	}
+	if raw || !slices.Contains(ci.napp.Actions, name) {
+		return "view"
+	}
+	return name
 }
 
 // waitForHandler blocks until the napp has registered a handler for this
@@ -886,14 +906,15 @@ func dispatchToInstance(ctx context.Context, ci *Instance, req *actionRequest) (
 	if !ok {
 		// The napp may only be listening on popstate: still deliver it, but
 		// there is no result to wait for.
-		ci.sendAction(-1, req.name, payload, nil)
+		ci.sendAction(-1, ci.deliveredName(req.name), payload, nil)
 		return nil, nil
 	}
 	ci.lastAction.Store(&actionRequest{name: req.name, payload: payload})
 	notifyState()
 
+	name := ci.deliveredName(req.name)
 	if idx < 0 {
-		ci.sendAction(-1, req.name, payload, nil)
+		ci.sendAction(-1, name, payload, nil)
 		return nil, nil
 	}
 
@@ -913,7 +934,7 @@ func dispatchToInstance(ctx context.Context, ci *Instance, req *actionRequest) (
 		ci.dispMu.Unlock()
 	}()
 
-	ci.sendAction(id, req.name, payload, &idx)
+	ci.sendAction(id, name, payload, &idx)
 
 	select {
 	case <-ci.gone:

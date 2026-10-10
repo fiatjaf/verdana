@@ -304,7 +304,9 @@ does:
    left out; `-1` says it wants to hear about the action but will not answer.
 2. When another napp, the launcher or a shortcut dispatches the action, it
    arrives as an action message: `id` is the dispatch, and the bytes carry
-   the action's `name`, its `payload` and that `idx`.
+   the action's `name`, its `payload` and that `idx`. A napp declaring
+   `view` gets every `view:<kind>` action, named just `view`; only a napp
+   declaring `view:<kind>` itself sees the kind in the name.
 3. The napp answers with `napp.dispatchResult`, `{"id": <the dispatch id>,
    "result": ...}` or `{"id", "error": "..."}`, and whoever dispatched it gets
    the result. An id of `-1` means nobody is waiting, so there is nothing to
