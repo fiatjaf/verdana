@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -191,12 +192,12 @@ func detailRow(th *material.Theme, label, value string) layout.FlexChild {
 }
 
 // layoutNappDetail is the ephemeral napp page: everything the launcher
-// knows, plus install/uninstall and open (when installed).
+// knows, plus install/uninstall, and open and pin/unpin (when installed).
 func layoutNappDetail(
 	gtx layout.Context,
 	th *material.Theme,
 	tab *extraTab,
-	openBtn, primaryBtn, updateBtn, authorBtn *widget.Clickable,
+	openBtn, primaryBtn, updateBtn, authorBtn, pinBtn *widget.Clickable,
 	installedSet map[string]bool,
 	busy map[string]bool,
 	st backend.State,
@@ -217,6 +218,7 @@ func layoutNappDetail(
 		primaryLabel = "Working…"
 	}
 	hasUpdate := n.UpdateAvailable != nil
+	pinned := slices.ContainsFunc(st.Pinned, func(p backend.Napp) bool { return p.ID == n.ID })
 
 	authorName, authorPic := "", ""
 	if n.Author.Hex() != "" {
@@ -300,6 +302,20 @@ func layoutNappDetail(
 						return layout.Dimensions{}
 					}
 					return layout.Spacer{Width: unit.Dp(8)}.Layout(gtx)
+				}),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					if !installed || pinBtn == nil {
+						return layout.Dimensions{}
+					}
+					pointer.CursorPointer.Add(gtx.Ops)
+					label := "Pin"
+					if pinned {
+						label = "Unpin"
+					}
+					b := material.Button(th, pinBtn, label)
+					b.Background = currentTheme().chipBg
+					b.Color = currentTheme().chipFg
+					return layout.Inset{Right: unit.Dp(8)}.Layout(gtx, b.Layout)
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					if primaryBtn == nil {

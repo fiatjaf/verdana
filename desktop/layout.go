@@ -150,6 +150,11 @@ func layoutPrompt(
 						bg := clip.RRect{Rect: image.Rectangle{Max: image.Point{X: gtx.Constraints.Max.X, Y: dims.Size.Y}}, NW: 6, NE: 6, SW: 6, SE: 6}
 						defer bg.Push(gtx.Ops).Pop()
 						paint.Fill(gtx.Ops, bgColor)
+						if open {
+							stripe := clip.Rect{Max: image.Point{X: gtx.Dp(5), Y: dims.Size.Y}}.Push(gtx.Ops)
+							paint.Fill(gtx.Ops, p.contrastBg)
+							stripe.Pop()
+						}
 						call.Add(gtx.Ops)
 						return dims
 					})
@@ -359,7 +364,8 @@ func layoutMain(
 	detailOpenBtn,
 	detailPrimaryBtn,
 	detailUpdateBtn,
-	detailAuthorBtn *widget.Clickable,
+	detailAuthorBtn,
+	detailPinBtn *widget.Clickable,
 	profileList *widget.List,
 	profileCardBtns,
 	profileOpenBtns,
@@ -397,7 +403,7 @@ func layoutMain(
 			}
 			if tab == 4 && extra != nil {
 				if extra.kind == "napp" {
-					return layoutNappDetail(gtx, th, extra, detailOpenBtn, detailPrimaryBtn, detailUpdateBtn, detailAuthorBtn, installedSet, busy, st)
+					return layoutNappDetail(gtx, th, extra, detailOpenBtn, detailPrimaryBtn, detailUpdateBtn, detailAuthorBtn, detailPinBtn, installedSet, busy, st)
 				}
 				return layoutProfileDetail(gtx, th, extra, profileList, profileCardBtns, profileOpenBtns, profileActionBtns, profileUpdateBtns, installedSet, busy)
 			}

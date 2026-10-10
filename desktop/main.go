@@ -286,6 +286,7 @@ func gioMain() {
 		detailPrimaryBtn    widget.Clickable
 		detailUpdateBtn     widget.Clickable
 		detailAuthorBtn     widget.Clickable
+		detailPinBtn        widget.Clickable
 		profileList         widget.List
 		profileCardBtns     []widget.Clickable
 		profileOpenBtns     []widget.Clickable
@@ -686,6 +687,12 @@ func gioMain() {
 								}
 							} else if detailUpdateBtn.Clicked(gtx) {
 								go backend.Update(n.ID)
+							} else if detailPinBtn.Clicked(gtx) && installedSet[n.ID] {
+								if backend.IsPinned(n.ID) {
+									backend.Unpin(n.ID)
+								} else {
+									backend.Pin(n.ID)
+								}
 							}
 						} else {
 							// profile tab: size buttons to its napps list
@@ -846,6 +853,7 @@ func gioMain() {
 						&detailPrimaryBtn,
 						&detailUpdateBtn,
 						&detailAuthorBtn,
+						&detailPinBtn,
 						&profileList,
 						profileCardBtns,
 						profileOpenBtns,

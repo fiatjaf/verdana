@@ -1134,6 +1134,7 @@ fun NappDetailScreen(
     onOpenNapp: (Napp) -> Unit,
 ) {
     val installed = st.installed.any { it.id == napp.id }
+    val pinned = st.pinned.any { it.id == napp.id }
     val busy = st.busy.contains(napp.id)
     Column(
         Modifier
@@ -1182,6 +1183,11 @@ fun NappDetailScreen(
                     onClick = { activity.launch(napp.id) },
                     colors = ButtonDefaults.buttonColors(containerColor = theme.suggestBg, contentColor = theme.suggestFg),
                 ) { Text("Open") }
+                Spacer(Modifier.width(8.dp))
+                Button(
+                    onClick = { if (pinned) activity.unpin(napp.id) else activity.pin(napp.id) },
+                    colors = ButtonDefaults.buttonColors(containerColor = theme.chipBg, contentColor = theme.chipFg),
+                ) { Text(if (pinned) "Unpin" else "Pin") }
                 Spacer(Modifier.width(8.dp))
             }
             Button(
