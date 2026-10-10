@@ -3,6 +3,7 @@ package main
 import (
 	"image"
 	"image/color"
+	"time"
 	"verdana/backend"
 
 	"gioui.org/f32"
@@ -19,8 +20,8 @@ import (
 )
 
 // The home tab: the pinned napps as a grid of icons with their names below,
-// like a phone's home screen. A click opens a napp; dragging one puts it
-// somewhere else in the grid.
+// like a phone's home screen. A click opens a napp; holding the press on it
+// opens its tab instead; dragging one puts it somewhere else in the grid.
 //
 // Gio has no drag and drop between widgets, so the grid takes the pointer
 // itself: one event area over the whole thing, cells found by position.
@@ -39,6 +40,10 @@ const (
 	// homeEdgeDp is the band at the top and bottom of the grid where a
 	// drag scrolls the list.
 	homeEdgeDp = 32
+
+	// homeHold is how long a press has to stay put before it opens the
+	// napp's tab instead of launching it.
+	homeHold = 500 * time.Millisecond
 )
 
 type homeGrid struct {
@@ -53,6 +58,7 @@ type homeGrid struct {
 	pressed  bool
 	pressIdx int
 	pressPos f32.Point
+	pressAt  time.Time
 	pid      pointer.ID
 
 	// dragging is true once the press moved past the slop: dragID is the
@@ -124,6 +130,7 @@ func (g *homeGrid) update(gtx layout.Context, pinned []backend.Napp) {
 			g.pressed = true
 			g.pid = e.PointerID
 			g.pressPos = e.Position
+			g.pressAt = gtx.Now
 		case pointer.Drag:
 			if !g.pressed || e.PointerID != g.pid {
 				continue
@@ -155,6 +162,20 @@ func (g *homeGrid) update(gtx layout.Context, pinned []backend.Napp) {
 			g.reset()
 		case pointer.Cancel:
 			g.reset()
+		}
+	}
+
+	// a press held in place long enough opens the napp's tab; until then
+	// come back when it would be due
+	if g.pressed && !g.dragging {
+		if g.pressIdx >= len(pinned) {
+			g.reset()
+		} else if gtx.Now.Sub(g.pressAt) >= homeHold {
+			n := pinned[g.pressIdx]
+			g.reset()
+			openNappTab(n)
+		} else {
+			gtx.Execute(op.InvalidateCmd{At: g.pressAt.Add(homeHold)})
 		}
 	}
 

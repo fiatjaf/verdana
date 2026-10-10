@@ -289,7 +289,7 @@ fun LauncherScreen(activity: MainActivity, st: LauncherState) {
             detailProfile != null -> AuthorProfileDetailScreen(activity, st, theme, detailProfile!!,
                 onBack = { detailProfile = null },
                 onOpenNapp = { openNapp(it) })
-            tab == 0 -> HomeTab(activity, st, theme)
+            tab == 0 -> HomeTab(activity, st, theme, onDetail = { openNapp(it) })
             tab == 1 -> InstalledTab(activity, st, theme, installedFilter, { installedFilter = it },
                 onDetail = { openNapp(it) }, onAuthor = { openProfile(it) })
             else -> DiscoveryTab(activity, st, theme, relaysEd, { relaysEd = it }, discoveryFilter, { discoveryFilter = it },
@@ -734,9 +734,10 @@ private fun rememberNappIcon(activity: MainActivity, napp: Napp): ImageBitmap? {
 }
 
 // HomeTab is the pinned napps as a home-screen grid: the icon with its name
-// below, a tap opens it, a long press picks it up to drag it somewhere else.
+// below, a tap opens it, a long press picks it up to drag it somewhere else
+// (let go without moving it and it opens the napp's page instead).
 @Composable
-private fun HomeTab(activity: MainActivity, st: LauncherState, theme: Theme) {
+private fun HomeTab(activity: MainActivity, st: LauncherState, theme: Theme, onDetail: (Napp) -> Unit) {
     if (st.pinned.isEmpty()) {
         Text("Nothing pinned yet. Pin napps from the Installed tab to have them here.", color = theme.muted)
         return
@@ -757,16 +758,23 @@ private fun HomeTab(activity: MainActivity, st: LauncherState, theme: Theme) {
     ) {
         gridItems(order, key = { it.id }) { napp ->
             val bitmap = rememberNappIcon(activity, napp)
+            // where a long press picked it up, to tell a drop back in place
+            // (open its page) from a move
+            var from by remember { mutableStateOf(-1) }
             ReorderableItem(reorderState, key = napp.id) { dragging ->
                 Column(
                     Modifier
                         .clip(RoundedCornerShape(8.dp))
                         .background(if (dragging) theme.card else Color.Transparent)
                         .clickable { activity.launch(napp.id) }
-                        .longPressDraggableHandle(onDragStopped = {
-                            val to = order.indexOfFirst { it.id == napp.id }
-                            if (to >= 0) activity.movePin(napp.id, to)
-                        })
+                        .longPressDraggableHandle(
+                            onDragStarted = { from = order.indexOfFirst { it.id == napp.id } },
+                            onDragStopped = {
+                                val to = order.indexOfFirst { it.id == napp.id }
+                                if (to >= 0 && to == from) onDetail(napp)
+                                else if (to >= 0) activity.movePin(napp.id, to)
+                            },
+                        )
                         .padding(6.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
