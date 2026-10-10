@@ -280,6 +280,7 @@ func gioMain() {
 		discoOpenBtns       []widget.Clickable
 		discoAuthorBtns     []widget.Clickable
 		checkUpdBtn         widget.Clickable
+		updateAllBtn        widget.Clickable
 		tabExtraBtn         widget.Clickable
 		detailOpenBtn       widget.Clickable
 		detailPrimaryBtn    widget.Clickable
@@ -608,6 +609,9 @@ func gioMain() {
 						if checkUpdBtn.Clicked(gtx) && !st.UpdateCheckRunning {
 							go backend.CheckForUpdates()
 						}
+						if updateAllBtn.Clicked(gtx) {
+							go backend.UpdateAll()
+						}
 					} else if tab == tabDiscovery {
 						acted := false
 						for _, i := range vis {
@@ -802,6 +806,7 @@ func gioMain() {
 						&devPathEd,
 						&fetchBtn,
 						&checkUpdBtn,
+						&updateAllBtn,
 						&loadURLBtn,
 						&browseBtn,
 						&loadFolderBtn,

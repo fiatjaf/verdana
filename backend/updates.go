@@ -2,6 +2,7 @@ package backend
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"fiatjaf.com/nostr"
@@ -132,6 +133,18 @@ func Update(id string) {
 	}
 
 	applyUpdate(n, *latest)
+}
+
+// UpdateAll applies every update the last check found, all at once. Blocks
+// until they are all done.
+func UpdateAll() {
+	var wg sync.WaitGroup
+	for _, n := range Snapshot().Installed {
+		if n.UpdateAvailable != nil {
+			wg.Go(func() { Update(n.ID) })
+		}
+	}
+	wg.Wait()
 }
 
 // applyUpdate does the shared re-download: fetch every path of newer into the

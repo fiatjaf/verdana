@@ -70,6 +70,7 @@ class MainActivity : ComponentActivity() {
     fun saveRelays(text: String) = Mobile.setRelays(text)
     fun install(id: String) = Mobile.install(id)
     fun update(id: String) = Mobile.update(id)
+    fun updateAll() = Mobile.updateAll()
     fun uninstall(id: String) = Mobile.uninstall(id)
     fun launch(id: String) = Mobile.launch(id)
     fun pin(id: String) = Mobile.pin(id)

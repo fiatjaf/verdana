@@ -480,13 +480,22 @@ private fun InstalledTab(activity: MainActivity, st: LauncherState, theme: Theme
             }
         }
         Spacer(Modifier.height(8.dp))
-        Button(
-            onClick = { activity.checkForUpdates() },
-            enabled = !st.updateCheckRunning,
-            modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.buttonColors(containerColor = theme.chipBg, contentColor = theme.chipFg),
-        ) {
-            Text(if (st.updateCheckRunning) "Checking…" else "Check for updates")
+        val updates = st.installed.count { it.updateAvailable }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                onClick = { activity.checkForUpdates() },
+                enabled = !st.updateCheckRunning,
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.buttonColors(containerColor = theme.chipBg, contentColor = theme.chipFg),
+            ) {
+                Text(if (st.updateCheckRunning) "Checking…" else "Check for updates")
+            }
+            // only when a check found something
+            if (updates > 0) {
+                Button(onClick = { activity.updateAll() }, modifier = Modifier.weight(1f)) {
+                    Text("Update all ($updates)")
+                }
+            }
         }
     }
 }

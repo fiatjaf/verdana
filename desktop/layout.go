@@ -321,6 +321,7 @@ func layoutMain(
 	devPathEd *widget.Editor,
 	fetchBtn,
 	checkUpdBtn,
+	updateAllBtn,
 	loadURLBtn,
 	browseBtn,
 	loadFolderBtn *widget.Clickable,
@@ -388,7 +389,7 @@ func layoutMain(
 					shortcutDelBtns, shortcutEditBtns, st)
 			}
 			if tab == 1 {
-				return layoutNappsTab(gtx, th, installedList, installedFilterEd, cardBtns, uninstBtns, installedUpdateBtns, installedOpenBtns, installedAuthorBtns, pinBtns, checkUpdBtn, instVis, st)
+				return layoutNappsTab(gtx, th, installedList, installedFilterEd, cardBtns, uninstBtns, installedUpdateBtns, installedOpenBtns, installedAuthorBtns, pinBtns, checkUpdBtn, updateAllBtn, instVis, st)
 			}
 			if tab == 2 {
 				return layoutDiscoveryTab(gtx, th, discoveryList, relaysEd, filterEd, fetchBtn, actionBtns,
@@ -779,7 +780,8 @@ func layoutNappsTab(
 	openBtns,
 	authorBtns,
 	pinBtns []widget.Clickable,
-	checkUpdBtn *widget.Clickable,
+	checkUpdBtn,
+	updateAllBtn *widget.Clickable,
 	vis []int,
 	st backend.State,
 ) layout.Dimensions {
@@ -801,16 +803,41 @@ func layoutNappsTab(
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 					return editorBox(gtx, th, filterEd, "filter by name, author or description")
 				}),
+				// "Update all" only shows when a check found something
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					if updatesAvailable(st) == 0 {
+						return layout.Dimensions{}
+					}
+					return layout.Inset{Left: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						pointer.CursorPointer.Add(gtx.Ops)
+						b := material.Button(th, updateAllBtn, "Update all")
+						b.TextSize = unit.Sp(13)
+						b.Inset = layout.UniformInset(unit.Dp(8))
+						return b.Layout(gtx)
+					})
+				}),
 				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					pointer.CursorPointer.Add(gtx.Ops)
 					p := currentTheme()
+					// while a check runs the button turns into a spinner
+					// (clicks are ignored then anyway)
+					if st.UpdateCheckRunning {
+						b := material.ButtonLayout(th, checkUpdBtn)
+						b.Background = p.chipBg
+						return b.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+								sz := gtx.Dp(18)
+								gtx.Constraints = layout.Exact(image.Pt(sz, sz))
+								l := material.Loader(th)
+								l.Color = p.chipFg
+								return l.Layout(gtx)
+							})
+						})
+					}
+					pointer.CursorPointer.Add(gtx.Ops)
 					b := material.Button(th, checkUpdBtn, "\u21bb")
 					b.Background = p.chipBg
 					b.Color = p.chipFg
-					if st.UpdateCheckRunning {
-						b.Color = p.muted
-					}
 					b.TextSize = unit.Sp(15)
 					b.Inset = layout.UniformInset(unit.Dp(8))
 					return b.Layout(gtx)
@@ -1479,4 +1506,15 @@ func renderNappCard(
 			return layout.Dimensions{Size: image.Point{X: sz.X, Y: dims.Size.Y}}
 		})
 	})
+}
+
+// updatesAvailable counts the installed napps a newer version was found for.
+func updatesAvailable(st backend.State) int {
+	n := 0
+	for _, in := range st.Installed {
+		if in.UpdateAvailable != nil {
+			n++
+		}
+	}
+	return n
 }
