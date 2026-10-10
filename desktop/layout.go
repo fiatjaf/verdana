@@ -112,37 +112,65 @@ func layoutPrompt(
 					p := currentTheme()
 					return optBtns[i].Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 						open := opt.Instance != ""
+						// the fill says what kind of napp this is: one the user
+						// keeps picking for this action (which outranks the
+						// rest, it is the reason the list is in this order),
+						// one being developed, or any other. Whether it is a
+						// window already open is told apart by a stripe and a
+						// pill of its own, so it shows whatever the fill is.
 						bgColor, fgColor := p.chipBg, p.chipFg
-						// the napp the user keeps picking for this action gets
-						// its own color, and it outranks the other two: it is
-						// the reason the list is in this order
 						switch {
 						case opt.Suggested:
 							bgColor, fgColor = p.suggestBg, p.suggestFg
 						case opt.Dev:
 							bgColor, fgColor = p.devBg, p.devFg
-						case open:
-							bgColor, fgColor = p.contrastBg, p.contrastFg
 						}
 						macro := op.Record(gtx.Ops)
-						dims := layout.UniformInset(unit.Dp(10)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-							return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-									l := material.Body1(th, opt.Label)
-									l.Color = fgColor
-									return l.Layout(gtx)
+						dims := layout.Inset{Top: unit.Dp(10), Bottom: unit.Dp(10), Left: unit.Dp(16), Right: unit.Dp(10)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+								layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+									return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+											l := material.Body1(th, opt.Label)
+											l.Color = fgColor
+											if open {
+												l.Font.Weight = font.Bold
+											}
+											return l.Layout(gtx)
+										}),
+										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+											if opt.Detail == "" {
+												return layout.Dimensions{}
+											}
+											l := material.Caption(th, truncate(opt.Detail, 80))
+											if opt.Dev || opt.Suggested {
+												l.Color = fgColor
+											} else {
+												l.Color = p.muted
+											}
+											return l.Layout(gtx)
+										}),
+									)
 								}),
 								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-									if opt.Detail == "" {
+									if !open {
 										return layout.Dimensions{}
 									}
-									l := material.Caption(th, truncate(opt.Detail, 80))
-									if open || opt.Dev || opt.Suggested {
-										l.Color = fgColor
-									} else {
-										l.Color = p.muted
-									}
-									return l.Layout(gtx)
+									return layout.Inset{Left: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+										m := op.Record(gtx.Ops)
+										d := layout.Inset{Top: unit.Dp(2), Bottom: unit.Dp(2), Left: unit.Dp(8), Right: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+											l := material.Caption(th, "open")
+											l.Color = p.contrastFg
+											l.Font.Weight = font.Bold
+											return l.Layout(gtx)
+										})
+										c := m.Stop()
+										r := gtx.Dp(9)
+										defer clip.UniformRRect(image.Rectangle{Max: d.Size}, r).Push(gtx.Ops).Pop()
+										paint.Fill(gtx.Ops, p.contrastBg)
+										c.Add(gtx.Ops)
+										return d
+									})
 								}),
 							)
 						})

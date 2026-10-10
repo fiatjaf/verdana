@@ -1035,29 +1035,52 @@ fun PromptWindow(p: Prompt, onAnswer: (Boolean, Int, String) -> Unit) {
         Spacer(Modifier.height(16.dp))
         if (p.options.isNotEmpty()) {
             p.options.forEachIndexed { i, opt ->
-                // the napp the user keeps picking for this action gets its own
-                // color: it is why the list is in this order
-                val ink = if (opt.suggested) theme.suggestFg else theme.accentText
-                Button(
-                    onClick = { onAnswer(true, i, "once") },
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (opt.suggested) theme.suggestBg else MaterialTheme.colorScheme.primary,
-                        contentColor = ink,
-                    ),
+                // the fill says whether this is the napp the user keeps
+                // picking for this action (it is why the list is in this
+                // order); a window that is already open gets a stripe and a
+                // pill of its own, so it shows whatever the fill is
+                val open = opt.instance.isNotBlank()
+                val fill = if (opt.suggested) theme.suggestBg else theme.chipBg
+                val ink = if (opt.suggested) theme.suggestFg else theme.chipFg
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 6.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(fill)
+                        .clickable { onAnswer(true, i, "once") }
+                        .height(IntrinsicSize.Min),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    if (opt.detail.isNotBlank()) {
-                        Column {
-                            Text(opt.label, maxLines = 1)
+                    Box(
+                        Modifier
+                            .width(5.dp)
+                            .fillMaxHeight()
+                            .background(if (open) theme.accent else fill),
+                    )
+                    Column(Modifier.weight(1f).padding(start = 11.dp, top = 10.dp, bottom = 10.dp, end = 8.dp)) {
+                        Text(opt.label, color = ink, maxLines = 1, fontWeight = if (open) FontWeight.Bold else null)
+                        if (opt.detail.isNotBlank()) {
                             Text(
                                 opt.detail,
                                 fontSize = 11.sp,
-                                color = if (opt.suggested) ink else theme.subtle,
+                                color = if (opt.suggested) ink else theme.muted,
                                 maxLines = 1,
                             )
                         }
-                    } else {
-                        Text(opt.label, maxLines = 1)
+                    }
+                    if (open) {
+                        Text(
+                            "open",
+                            modifier = Modifier
+                                .padding(end = 10.dp)
+                                .clip(RoundedCornerShape(9.dp))
+                                .background(theme.accent)
+                                .padding(horizontal = 8.dp, vertical = 2.dp),
+                            color = theme.accentText,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
                     }
                 }
             }

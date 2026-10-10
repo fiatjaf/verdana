@@ -27,6 +27,7 @@ type promptButton struct {
 	label  string
 	detail string
 	tone   string
+	open   bool // a window already open: striped and marked, whatever its tone
 	ok     bool
 	index  int
 	scope  string
@@ -76,11 +77,10 @@ func (p *promptOverlay) build(pv *wasmhost.Prompt) {
 				tone = "suggest"
 			case opt.Dev:
 				tone = "dev"
-			case opt.Instance != "":
-				tone = "accent"
 			}
 			b := btn(opt.Label, tone, true, i, "once")
 			b.detail = opt.Detail
+			b.open = opt.Instance != ""
 			add(b)
 		}
 		add(btn("Cancel", "chip", false, 0, "once"))
@@ -209,25 +209,63 @@ func (p *promptOverlay) button(gtx layout.Context, pal palette, b *promptButton)
 		CornerRadius: 8,
 		Button:       &b.click,
 	}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		return layout.Inset{Top: 10, Bottom: 10, Left: 14, Right: 14}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		dims := layout.Inset{Top: 10, Bottom: 10, Left: 16, Right: 14}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			gtx.Constraints.Min.X = gtx.Constraints.Max.X
-			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					l := material.Body1(p.th, b.label)
-					l.Color = fg
-					return l.Layout(gtx)
+			return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							l := material.Body1(p.th, b.label)
+							l.Color = fg
+							if b.open {
+								l.Font.Weight = font.Bold
+							}
+							return l.Layout(gtx)
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							if b.detail == "" {
+								return layout.Dimensions{}
+							}
+							l := material.Caption(p.th, b.detail)
+							l.Color = fg
+							l.Color.A = 0xc0
+							return layout.Inset{Top: 3}.Layout(gtx, l.Layout)
+						}),
+					)
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					if b.detail == "" {
+					if !b.open {
 						return layout.Dimensions{}
 					}
-					l := material.Caption(p.th, b.detail)
-					l.Color = fg
-					l.Color.A = 0xc0
-					return layout.Inset{Top: 3}.Layout(gtx, l.Layout)
+					return layout.Inset{Left: 8}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						return layout.Background{}.Layout(gtx,
+							func(gtx layout.Context) layout.Dimensions {
+								sz := gtx.Constraints.Min
+								defer clip.UniformRRect(image.Rectangle{Max: sz}, gtx.Dp(9)).Push(gtx.Ops).Pop()
+								paint.Fill(gtx.Ops, pal.accent)
+								return layout.Dimensions{Size: sz}
+							},
+							func(gtx layout.Context) layout.Dimensions {
+								return layout.Inset{Top: 2, Bottom: 2, Left: 8, Right: 8}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+									l := material.Caption(p.th, "open")
+									l.Color = pal.accentText
+									l.Font.Weight = font.Bold
+									return l.Layout(gtx)
+								})
+							},
+						)
+					})
 				}),
 			)
 		})
+		if b.open {
+			// the button doesn't clip what it holds, so the stripe follows its
+			// rounded corners by itself
+			defer clip.UniformRRect(image.Rectangle{Max: dims.Size}, gtx.Dp(8)).Push(gtx.Ops).Pop()
+			defer clip.Rect{Max: image.Point{X: gtx.Dp(5), Y: dims.Size.Y}}.Push(gtx.Ops).Pop()
+			paint.Fill(gtx.Ops, pal.accent)
+		}
+		return dims
 	})
 }
 
