@@ -950,8 +950,11 @@ private fun WindowsTab(
             }
             items(st.bundles, key = { "b:" + it.name }) { b ->
                 BundleRow(st, b, theme,
+                    inAppMenu = b.name in activity.appMenuBundles,
                     onRun = { activity.runBundle(b.name) },
                     onPin = { if (b.pinned) activity.unpinBundle(b.name) else activity.pinBundle(b.name) },
+                    onHomeScreen = if (activity.canPinToHomeScreen()) ({ activity.pinToHomeScreen(b) }) else null,
+                    onAppMenu = { activity.toggleAppMenu(b) },
                     onEdit = {
                         bundleErr = ""
                         setEdit(BundleEdit(b.name, activity.bundleDraft(b.name)))
@@ -1148,15 +1151,21 @@ private fun rememberPillProfile(activity: MainActivity, pubkey: String): Profile
 }
 
 // BundleRow is one stored bundle: tap to open all of its windows; its napps,
-// whether it is on Home, and the buttons that change that, edit and delete.
+// whether it is on Home and in the Verdana icon's menu, and the buttons that
+// change that, put it on the phone's home screen, edit and delete. A
+// shortcut on the phone's home screen is the user's to remove from there,
+// so there is no button for that.
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
 private fun BundleRow(
     st: LauncherState,
     b: BundleInfo,
     theme: Theme,
+    inAppMenu: Boolean,
     onRun: () -> Unit,
     onPin: () -> Unit,
+    onHomeScreen: (() -> Unit)?,
+    onAppMenu: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
 ) {
@@ -1175,7 +1184,10 @@ private fun BundleRow(
         Text(b.name, color = theme.fg, fontWeight = FontWeight.Bold)
         Text(names.joinToString(" + "), color = theme.muted, fontSize = 12.sp, maxLines = 2,
             overflow = TextOverflow.Ellipsis)
-        Text(if (b.pinned) "pinned to Home" else "not pinned", color = theme.subtle, fontSize = 11.sp)
+        Text(
+            (if (b.pinned) "pinned to Home" else "not pinned") + (if (inAppMenu) " · in the Verdana icon menu" else ""),
+            color = theme.subtle, fontSize = 11.sp,
+        )
         FlowRow(
             modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End),
@@ -1185,6 +1197,14 @@ private fun BundleRow(
             val chip = ButtonDefaults.buttonColors(containerColor = theme.chipBg, contentColor = theme.chipFg)
             Button(onClick = onPin, contentPadding = small, colors = chip) {
                 Text(if (b.pinned) "Unpin" else "Pin", fontSize = 13.sp)
+            }
+            if (onHomeScreen != null) {
+                Button(onClick = onHomeScreen, contentPadding = small, colors = chip) {
+                    Text("Add to home screen", fontSize = 13.sp)
+                }
+            }
+            Button(onClick = onAppMenu, contentPadding = small, colors = chip) {
+                Text(if (inAppMenu) "Remove from icon menu" else "Add to icon menu", fontSize = 13.sp)
             }
             Button(onClick = onEdit, contentPadding = small, colors = chip) {
                 Text("Edit", fontSize = 13.sp)
@@ -1199,7 +1219,7 @@ private fun BundleRow(
         AlertDialog(
             onDismissRequest = { confirmDelete = false },
             title = { Text("Delete ${b.name}?") },
-            text = { Text("The bundle is forgotten and taken off Home. Its napps stay installed.") },
+            text = { Text("The bundle is forgotten and taken off Home and the Verdana icon menu. Its napps stay installed.") },
             confirmButton = {
                 TextButton(onClick = { confirmDelete = false; onDelete() }) {
                     Text("Delete", color = theme.danger)

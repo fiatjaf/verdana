@@ -38,6 +38,11 @@ class MainActivity : ComponentActivity() {
 
     private var showProfile by mutableStateOf(false)
 
+    // the bundles in the Verdana icon's long-press menu (see
+    // BundleShortcuts), read again whenever the launcher comes back
+    var appMenuBundles by mutableStateOf(setOf<String>())
+        private set
+
     // NIP-55: the launcher this activity hands to Amber while it is in
     // front, so signer requests started anywhere route through the window
     // the user is actually looking at
@@ -47,6 +52,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         Amber.attach(amberLauncher)
+        appMenuBundles = BundleShortcuts.inAppMenu(this)
     }
 
     override fun onPause() {
@@ -63,6 +69,21 @@ class MainActivity : ComponentActivity() {
         VerdanaHost.start(this)
 
         setContent { Launcher() }
+
+        // started by a bundle's shortcut; not again when Android recreates
+        // the activity with the same intent
+        if (savedInstanceState == null) runBundleIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        runBundleIntent(intent)
+    }
+
+    private fun runBundleIntent(intent: Intent?) {
+        val name = BundleShortcuts.bundleOf(intent) ?: return
+        setIntent(Intent(intent).setAction(Intent.ACTION_MAIN))
+        runBundle(name)
     }
 
     // ─── launcher actions (called from composables) ──────────────────
@@ -103,6 +124,12 @@ class MainActivity : ComponentActivity() {
             } catch (e: Exception) {
                 e.message ?: "could not save the bundle"
             }
+            // its shortcuts open it by name, and show its napps
+            if (err == null && oldName.isNotBlank()) {
+                BundleShortcuts.saved(this@MainActivity, oldName, name, draft.map { it.nappId })
+            }
+            val menu = BundleShortcuts.inAppMenu(this@MainActivity)
+            withContext(Dispatchers.Main) { appMenuBundles = menu }
             withContext(Dispatchers.Main) { onDone(err) }
         }
     }
@@ -110,8 +137,44 @@ class MainActivity : ComponentActivity() {
     fun deleteBundle(name: String) {
         lifecycleScope.launch(Dispatchers.IO) {
             try { Mobile.deleteBundle(name) } catch (_: Exception) {}
+            BundleShortcuts.deleted(this@MainActivity, name)
+            val menu = BundleShortcuts.inAppMenu(this@MainActivity)
+            withContext(Dispatchers.Main) { appMenuBundles = menu }
         }
     }
+
+    // a bundle's Android shortcuts: on the phone's home screen, and in the
+    // menu of the Verdana icon (see BundleShortcuts)
+    fun canPinToHomeScreen() = BundleShortcuts.canPinToHomeScreen(this)
+
+    fun pinToHomeScreen(b: BundleInfo) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            val ok = try {
+                BundleShortcuts.pinToHomeScreen(this@MainActivity, b.name, b.entries.map { it.nappId })
+            } catch (_: Exception) {
+                false
+            }
+            if (!ok) withContext(Dispatchers.Main) { toast("The home screen is not taking shortcuts") }
+        }
+    }
+
+    fun toggleAppMenu(b: BundleInfo) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            val err = if (b.name in appMenuBundles) {
+                BundleShortcuts.removeFromAppMenu(this@MainActivity, b.name)
+                null
+            } else {
+                BundleShortcuts.addToAppMenu(this@MainActivity, b.name, b.entries.map { it.nappId })
+            }
+            val menu = BundleShortcuts.inAppMenu(this@MainActivity)
+            withContext(Dispatchers.Main) {
+                appMenuBundles = menu
+                if (err != null) toast(err)
+            }
+        }
+    }
+
+    private fun toast(msg: String) = android.widget.Toast.makeText(this, msg, android.widget.Toast.LENGTH_LONG).show()
     fun checkForUpdates() = Mobile.checkForUpdates()
     fun toggleTheme() = VerdanaHost.toggleTheme()
 
