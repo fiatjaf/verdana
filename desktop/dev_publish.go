@@ -20,6 +20,8 @@ import (
 	"gioui.org/unit"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
+
+	"fiatjaf.com/verdana/desktop/tooltip"
 )
 
 func openDevPublishWindow(id string) {
@@ -71,6 +73,7 @@ func runDevPublishWindow(info backend.DevPublishInfo, servers, relays []string) 
 	logList.Axis = layout.Vertical
 	logList.ScrollToEnd = true
 	state := &devPublishState{}
+	tips := tooltip.New()
 	var ops op.Ops
 	th := material.NewTheme()
 	th.Shaper = text.NewShaper(text.WithCollection(fontCollection()))
@@ -118,10 +121,13 @@ func runDevPublishWindow(info backend.DevPublishInfo, servers, relays []string) 
 				publishing, lines = state.snapshot()
 			}
 
-			layout.UniformInset(unit.Dp(18)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return layoutPublishForm(gtx, th, &form, &logList, &serverEd, &relayEd, &protected, &confirm,
-					info, publishing, lines)
+			tips.Track(gtx, func(gtx layout.Context) layout.Dimensions {
+				return layout.UniformInset(unit.Dp(18)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return layoutPublishForm(gtx, th, tips, &form, &logList, &serverEd, &relayEd, &protected, &confirm,
+						info, publishing, lines)
+				})
 			})
+			tips.Draw(gtx, th, pal.fg, pal.bg)
 			e.Frame(gtx.Ops)
 		}
 	}
@@ -214,7 +220,7 @@ func layoutLogLine(gtx layout.Context, th *material.Theme, line string) layout.D
 	return layout.Inset{Top: unit.Dp(1), Bottom: unit.Dp(1)}.Layout(gtx, l.Layout)
 }
 
-func layoutPublishForm(gtx layout.Context, th *material.Theme, form, logList *widget.List, servers, relays *widget.Editor, protected *widget.Bool, confirm *widget.Clickable, info backend.DevPublishInfo, publishing bool, lines []string) layout.Dimensions {
+func layoutPublishForm(gtx layout.Context, th *material.Theme, tips *tooltip.Layer, form, logList *widget.List, servers, relays *widget.Editor, protected *widget.Bool, confirm *widget.Clickable, info backend.DevPublishInfo, publishing bool, lines []string) layout.Dimensions {
 	return material.List(th, form).Layout(gtx, 1, func(gtx layout.Context, _ int) layout.Dimensions {
 		var totalBytes int64
 		for _, f := range info.Files {
@@ -312,7 +318,7 @@ func layoutPublishForm(gtx layout.Context, th *material.Theme, form, logList *wi
 					if publishing {
 						label = "Publishing…"
 					}
-					return material.Button(th, confirm, label).Layout(gtx)
+					return tips.With(gtx, confirm, "Upload the napp's files to the file servers, sign its event with your key and send it to the relays", material.Button(th, confirm, label).Layout)
 				})
 			}),
 

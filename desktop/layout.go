@@ -110,81 +110,87 @@ func layoutPrompt(
 					pointer.CursorPointer.Add(gtx.Ops)
 					opt := p.Options[i]
 					p := currentTheme()
-					return optBtns[i].Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						open := opt.Instance != ""
-						// the fill says what kind of napp this is: one the user
-						// keeps picking for this action (which outranks the
-						// rest, it is the reason the list is in this order),
-						// one being developed, or any other. Whether it is a
-						// window already open is told apart by a stripe and a
-						// pill of its own, so it shows whatever the fill is.
-						bgColor, fgColor := p.chipBg, p.chipFg
-						switch {
-						case opt.Suggested:
-							bgColor, fgColor = p.suggestBg, p.suggestFg
-						case opt.Dev:
-							bgColor, fgColor = p.devBg, p.devFg
-						}
-						macro := op.Record(gtx.Ops)
-						dims := layout.Inset{Top: unit.Dp(10), Bottom: unit.Dp(10), Left: unit.Dp(16), Right: unit.Dp(10)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-							return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-								layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-									return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-											l := material.Body1(th, opt.Label)
-											l.Color = fgColor
-											if open {
-												l.Font.Weight = font.Bold
-											}
-											return l.Layout(gtx)
-										}),
-										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-											if opt.Detail == "" {
-												return layout.Dimensions{}
-											}
-											l := material.Caption(th, truncate(opt.Detail, 80))
-											if opt.Dev || opt.Suggested {
+					optTip := "Open " + opt.Label + " to handle this"
+					if opt.Instance != "" {
+						optTip = "Send this to the " + opt.Label + " window that is already open"
+					}
+					return withTooltip(gtx, &optBtns[i], optTip, func(gtx layout.Context) layout.Dimensions {
+						return optBtns[i].Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							open := opt.Instance != ""
+							// the fill says what kind of napp this is: one the user
+							// keeps picking for this action (which outranks the
+							// rest, it is the reason the list is in this order),
+							// one being developed, or any other. Whether it is a
+							// window already open is told apart by a stripe and a
+							// pill of its own, so it shows whatever the fill is.
+							bgColor, fgColor := p.chipBg, p.chipFg
+							switch {
+							case opt.Suggested:
+								bgColor, fgColor = p.suggestBg, p.suggestFg
+							case opt.Dev:
+								bgColor, fgColor = p.devBg, p.devFg
+							}
+							macro := op.Record(gtx.Ops)
+							dims := layout.Inset{Top: unit.Dp(10), Bottom: unit.Dp(10), Left: unit.Dp(16), Right: unit.Dp(10)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+								return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+									layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+										return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+											layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+												l := material.Body1(th, opt.Label)
 												l.Color = fgColor
-											} else {
-												l.Color = p.muted
-											}
-											return l.Layout(gtx)
-										}),
-									)
-								}),
-								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-									if !open {
-										return layout.Dimensions{}
-									}
-									return layout.Inset{Left: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-										m := op.Record(gtx.Ops)
-										d := layout.Inset{Top: unit.Dp(2), Bottom: unit.Dp(2), Left: unit.Dp(8), Right: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-											l := material.Caption(th, "open")
-											l.Color = p.contrastFg
-											l.Font.Weight = font.Bold
-											return l.Layout(gtx)
+												if open {
+													l.Font.Weight = font.Bold
+												}
+												return l.Layout(gtx)
+											}),
+											layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+												if opt.Detail == "" {
+													return layout.Dimensions{}
+												}
+												l := material.Caption(th, truncate(opt.Detail, 80))
+												if opt.Dev || opt.Suggested {
+													l.Color = fgColor
+												} else {
+													l.Color = p.muted
+												}
+												return l.Layout(gtx)
+											}),
+										)
+									}),
+									layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+										if !open {
+											return layout.Dimensions{}
+										}
+										return layout.Inset{Left: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+											m := op.Record(gtx.Ops)
+											d := layout.Inset{Top: unit.Dp(2), Bottom: unit.Dp(2), Left: unit.Dp(8), Right: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+												l := material.Caption(th, "open")
+												l.Color = p.contrastFg
+												l.Font.Weight = font.Bold
+												return l.Layout(gtx)
+											})
+											c := m.Stop()
+											r := gtx.Dp(9)
+											defer clip.UniformRRect(image.Rectangle{Max: d.Size}, r).Push(gtx.Ops).Pop()
+											paint.Fill(gtx.Ops, p.contrastBg)
+											c.Add(gtx.Ops)
+											return d
 										})
-										c := m.Stop()
-										r := gtx.Dp(9)
-										defer clip.UniformRRect(image.Rectangle{Max: d.Size}, r).Push(gtx.Ops).Pop()
-										paint.Fill(gtx.Ops, p.contrastBg)
-										c.Add(gtx.Ops)
-										return d
-									})
-								}),
-							)
+									}),
+								)
+							})
+							call := macro.Stop()
+							bg := clip.RRect{Rect: image.Rectangle{Max: image.Point{X: gtx.Constraints.Max.X, Y: dims.Size.Y}}, NW: 6, NE: 6, SW: 6, SE: 6}
+							defer bg.Push(gtx.Ops).Pop()
+							paint.Fill(gtx.Ops, bgColor)
+							if open {
+								stripe := clip.Rect{Max: image.Point{X: gtx.Dp(5), Y: dims.Size.Y}}.Push(gtx.Ops)
+								paint.Fill(gtx.Ops, p.contrastBg)
+								stripe.Pop()
+							}
+							call.Add(gtx.Ops)
+							return dims
 						})
-						call := macro.Stop()
-						bg := clip.RRect{Rect: image.Rectangle{Max: image.Point{X: gtx.Constraints.Max.X, Y: dims.Size.Y}}, NW: 6, NE: 6, SW: 6, SE: 6}
-						defer bg.Push(gtx.Ops).Pop()
-						paint.Fill(gtx.Ops, bgColor)
-						if open {
-							stripe := clip.Rect{Max: image.Point{X: gtx.Dp(5), Y: dims.Size.Y}}.Push(gtx.Ops)
-							paint.Fill(gtx.Ops, p.contrastBg)
-							stripe.Pop()
-						}
-						call.Add(gtx.Ops)
-						return dims
 					})
 				})
 			}))
@@ -196,7 +202,7 @@ func layoutPrompt(
 				b := material.Button(th, &btns.deny, "Cancel")
 				b.Background = currentTheme().chipBg
 				b.Color = currentTheme().chipFg
-				return b.Layout(gtx)
+				return withTooltip(gtx, &btns.deny, "Don't send this anywhere", b.Layout)
 			}),
 		)
 	} else if !p.Remember {
@@ -205,7 +211,7 @@ func layoutPrompt(
 			return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					pointer.CursorPointer.Add(gtx.Ops)
-					return material.Button(th, &btns.allow, "Allow").Layout(gtx)
+					return withTooltip(gtx, &btns.allow, "Let it go ahead", material.Button(th, &btns.allow, "Allow").Layout)
 				}),
 				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -213,7 +219,7 @@ func layoutPrompt(
 					b := material.Button(th, &btns.deny, "Deny")
 					b.Background = currentTheme().chipBg
 					b.Color = currentTheme().chipFg
-					return b.Layout(gtx)
+					return withTooltip(gtx, &btns.deny, "Refuse it", b.Layout)
 				}),
 			)
 		}))
@@ -221,7 +227,7 @@ func layoutPrompt(
 		// the scopes: a row for this prompt, a row for this session, a row
 		// for as long as the user leaves the answer there. Only the plain
 		// allow and deny are full size; the wider answers are quieter.
-		chipBtn := func(gtx layout.Context, btn *widget.Clickable, label string, textSize unit.Sp) layout.Dimensions {
+		chipBtn := func(gtx layout.Context, btn *widget.Clickable, label, tip string, textSize unit.Sp) layout.Dimensions {
 			pointer.CursorPointer.Add(gtx.Ops)
 			t := currentTheme()
 			b := material.Button(th, btn, label)
@@ -229,7 +235,7 @@ func layoutPrompt(
 			b.Color = t.chipFg
 			b.TextSize = textSize
 			b.Inset = layout.UniformInset(unit.Dp(8))
-			return b.Layout(gtx)
+			return withTooltip(gtx, btn, tip, b.Layout)
 		}
 		row := func(left, right func(gtx layout.Context) layout.Dimensions) layout.FlexChild {
 			return layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -246,26 +252,26 @@ func layoutPrompt(
 			row(
 				func(gtx layout.Context) layout.Dimensions {
 					pointer.CursorPointer.Add(gtx.Ops)
-					return material.Button(th, &btns.allow, "Allow").Layout(gtx)
+					return withTooltip(gtx, &btns.allow, "Allow it this time only: you will be asked again next time", material.Button(th, &btns.allow, "Allow").Layout)
 				},
 				func(gtx layout.Context) layout.Dimensions {
-					return chipBtn(gtx, &btns.deny, "Deny", 0)
-				},
-			),
-			row(
-				func(gtx layout.Context) layout.Dimensions {
-					return chipBtn(gtx, &btns.sessionAllow, "Allow this session", unit.Sp(13))
-				},
-				func(gtx layout.Context) layout.Dimensions {
-					return chipBtn(gtx, &btns.sessionDeny, "Deny this session", unit.Sp(13))
+					return chipBtn(gtx, &btns.deny, "Deny", "Refuse it this time only: you will be asked again next time", 0)
 				},
 			),
 			row(
 				func(gtx layout.Context) layout.Dimensions {
-					return chipBtn(gtx, &btns.alwaysAllow, "Always allow", unit.Sp(13))
+					return chipBtn(gtx, &btns.sessionAllow, "Allow this session", "Allow it without asking again until the launcher quits", unit.Sp(13))
 				},
 				func(gtx layout.Context) layout.Dimensions {
-					return chipBtn(gtx, &btns.alwaysDeny, "Always deny", unit.Sp(13))
+					return chipBtn(gtx, &btns.sessionDeny, "Deny this session", "Refuse it without asking again until the launcher quits", unit.Sp(13))
+				},
+			),
+			row(
+				func(gtx layout.Context) layout.Dimensions {
+					return chipBtn(gtx, &btns.alwaysAllow, "Always allow", "Allow it from now on, without ever asking again", unit.Sp(13))
+				},
+				func(gtx layout.Context) layout.Dimensions {
+					return chipBtn(gtx, &btns.alwaysDeny, "Always deny", "Refuse it from now on, without ever asking again", unit.Sp(13))
 				},
 			),
 		)
@@ -302,12 +308,12 @@ func layoutLogin(
 		layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			pointer.CursorPointer.Add(gtx.Ops)
-			return material.Button(th, btn, "Log in").Layout(gtx)
+			return withTooltip(gtx, btn, "Log in with the nsec or bunker:// URL pasted above", material.Button(th, btn, "Log in").Layout)
 		}),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(20)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			pointer.CursorPointer.Add(gtx.Ops)
-			return material.Button(th, googleBtn, "Log in with Google").Layout(gtx)
+			return withTooltip(gtx, googleBtn, "Log in with your Google account in the browser: a remote signer holds a key made for you, no nsec needed", material.Button(th, googleBtn, "Log in with Google").Layout)
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			if loginStatus == "" {
@@ -461,7 +467,7 @@ func layoutTabs(
 	extra *extraTab,
 	extraBtn *widget.Clickable,
 ) layout.Dimensions {
-	tabBtn := func(gtx layout.Context, btn *widget.Clickable, label string, active bool) layout.Dimensions {
+	tabBtn := func(gtx layout.Context, btn *widget.Clickable, label, tip string, active bool) layout.Dimensions {
 		pointer.CursorPointer.Add(gtx.Ops)
 		b := material.Button(th, btn, label)
 		if active {
@@ -470,23 +476,23 @@ func layoutTabs(
 			b.Background = currentTheme().chipBg
 			b.Color = currentTheme().chipFg
 		}
-		return b.Layout(gtx)
+		return withTooltip(gtx, btn, tip, b.Layout)
 	}
 	children := []layout.FlexChild{
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return tabBtn(gtx, homeBtn, "Home", tab == tabHome)
+			return tabBtn(gtx, homeBtn, "Home", "The napps and bundles you pinned, one click away", tab == tabHome)
 		}),
 		layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return tabBtn(gtx, windowsBtn, "Windows", tab == 0)
+			return tabBtn(gtx, windowsBtn, "Windows", "The napp windows opened this run, and the bundles made from them", tab == 0)
 		}),
 		layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return tabBtn(gtx, nappsBtn, "Installed", tab == 1)
+			return tabBtn(gtx, nappsBtn, "Installed", "The napps on this computer: open, pin, update or uninstall them", tab == 1)
 		}),
 		layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return tabBtn(gtx, discoBtn, "Discovery", tab == 2)
+			return tabBtn(gtx, discoBtn, "Discovery", "Find napps published on the relays and install them", tab == 2)
 		}),
 	}
 	// devBtn is nil outside dev builds: no dev tab there
@@ -494,7 +500,7 @@ func layoutTabs(
 		children = append(children,
 			layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return tabBtn(gtx, devBtn, "Dev", tab == 3)
+				return tabBtn(gtx, devBtn, "Dev", "Load a napp you are working on from a folder or a dev server", tab == 3)
 			}),
 		)
 	}
@@ -504,7 +510,7 @@ func layoutTabs(
 		children = append(children,
 			layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return tabBtn(gtx, extraBtn, extra.title, tab == 4)
+				return tabBtn(gtx, extraBtn, extra.title, "Details of "+extra.title, tab == 4)
 			}),
 		)
 	}
@@ -558,7 +564,7 @@ func layoutWindowsTab(
 			}
 			return layout.Inset{Bottom: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				pointer.CursorPointer.Add(gtx.Ops)
-				return withTooltip(gtx, th, createBundleBtn, "Make a bundle of the checked windows: one click opens them all again", material.Button(th, createBundleBtn, "Create bundle\u2026").Layout)
+				return withTooltip(gtx, createBundleBtn, "Make a bundle of the checked windows: one click opens them all again", material.Button(th, createBundleBtn, "Create bundle\u2026").Layout)
 			})
 		}),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
@@ -615,9 +621,9 @@ func layoutWindowsTab(
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 							pointer.CursorPointer.Add(gtx.Ops)
 							if w.Open {
-								return material.Button(th, &closeBtns[i], "Close").Layout(gtx)
+								return withTooltip(gtx, &closeBtns[i], "Close this window: it stays listed here so you can reopen it", material.Button(th, &closeBtns[i], "Close").Layout)
 							}
-							return material.Button(th, &reopenBtns[i], "Reopen").Layout(gtx)
+							return withTooltip(gtx, &reopenBtns[i], "Open this window again, back on what it was showing", material.Button(th, &reopenBtns[i], "Reopen").Layout)
 						}),
 					)
 				})
@@ -659,7 +665,7 @@ func bundleRows(th *material.Theme, st backend.State, btns []bundleRowBtns) (out
 		b := small(material.Button(th, btn, label))
 		b.Background = currentTheme().chipBg
 		b.Color = currentTheme().chipFg
-		return withTooltip(gtx, th, btn, tip, b.Layout)
+		return withTooltip(gtx, btn, tip, b.Layout)
 	}
 	for i, sc := range st.Bundles {
 		bb := &btns[i]
@@ -724,7 +730,7 @@ func bundleRows(th *material.Theme, st backend.State, btns []bundleRowBtns) (out
 					layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						pointer.CursorPointer.Add(gtx.Ops)
-						return withTooltip(gtx, th, &bb.edit, "Change the name, or the actions each napp gets", small(material.Button(th, &bb.edit, "Edit")).Layout)
+						return withTooltip(gtx, &bb.edit, "Change the name, or the actions each napp gets", small(material.Button(th, &bb.edit, "Edit")).Layout)
 					}),
 					layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -732,7 +738,7 @@ func bundleRows(th *material.Theme, st backend.State, btns []bundleRowBtns) (out
 						b := small(material.Button(th, &bb.del, "Delete"))
 						b.Background = currentTheme().chipBg
 						b.Color = currentTheme().danger
-						return withTooltip(gtx, th, &bb.del, "Forget this bundle, taking it off the Home tab and removing its shortcut", b.Layout)
+						return withTooltip(gtx, &bb.del, "Forget this bundle, taking it off the Home tab and removing its shortcut", b.Layout)
 					}),
 				)
 			})
@@ -809,7 +815,7 @@ func layoutBundleEditor(
 			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					pointer.CursorPointer.Add(gtx.Ops)
-					return material.Button(th, saveBtn, "Save bundle").Layout(gtx)
+					return withTooltip(gtx, saveBtn, "Store the bundle with this name and these actions", material.Button(th, saveBtn, "Save bundle").Layout)
 				}),
 				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -817,7 +823,7 @@ func layoutBundleEditor(
 					b := material.Button(th, cancelBtn, "Cancel")
 					b.Background = p.chipBg
 					b.Color = p.chipFg
-					return b.Layout(gtx)
+					return withTooltip(gtx, cancelBtn, "Close the editor without saving anything", b.Layout)
 				}),
 			)
 		}),
@@ -875,7 +881,7 @@ func layoutNappsTab(
 						b := material.Button(th, updateAllBtn, "Update all")
 						b.TextSize = unit.Sp(13)
 						b.Inset = layout.UniformInset(unit.Dp(8))
-						return b.Layout(gtx)
+						return withTooltip(gtx, updateAllBtn, "Install the newer version of every napp that has one", b.Layout)
 					})
 				}),
 				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
@@ -886,13 +892,15 @@ func layoutNappsTab(
 					if st.UpdateCheckRunning {
 						b := material.ButtonLayout(th, checkUpdBtn)
 						b.Background = p.chipBg
-						return b.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-							return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-								sz := gtx.Dp(18)
-								gtx.Constraints = layout.Exact(image.Pt(sz, sz))
-								l := material.Loader(th)
-								l.Color = p.chipFg
-								return l.Layout(gtx)
+						return withTooltip(gtx, checkUpdBtn, "Looking for newer versions of the installed napps\u2026", func(gtx layout.Context) layout.Dimensions {
+							return b.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+								return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+									sz := gtx.Dp(18)
+									gtx.Constraints = layout.Exact(image.Pt(sz, sz))
+									l := material.Loader(th)
+									l.Color = p.chipFg
+									return l.Layout(gtx)
+								})
 							})
 						})
 					}
@@ -902,7 +910,7 @@ func layoutNappsTab(
 					b.Color = p.chipFg
 					b.TextSize = unit.Sp(15)
 					b.Inset = layout.UniformInset(unit.Dp(8))
-					return b.Layout(gtx)
+					return withTooltip(gtx, checkUpdBtn, "Check the relays for newer versions of the installed napps", b.Layout)
 				}),
 			)
 		}),
@@ -993,7 +1001,7 @@ func layoutDiscoveryTab(
 					if fetching {
 						label = "Fetching\u2026"
 					}
-					return material.Button(th, fetchBtn, label).Layout(gtx)
+					return withTooltip(gtx, fetchBtn, "Search the relays above for published napps", material.Button(th, fetchBtn, label).Layout)
 				}),
 				layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -1075,12 +1083,12 @@ func layoutDevTab(
 	publishBtns []widget.Clickable,
 	st backend.State,
 ) layout.Dimensions {
-	smallBtn := func(gtx layout.Context, btn *widget.Clickable, label string) layout.Dimensions {
+	smallBtn := func(gtx layout.Context, btn *widget.Clickable, label, tip string) layout.Dimensions {
 		pointer.CursorPointer.Add(gtx.Ops)
 		b := material.Button(th, btn, label)
 		b.TextSize = unit.Sp(13)
 		b.Inset = layout.UniformInset(unit.Dp(8))
-		return b.Layout(gtx)
+		return withTooltip(gtx, btn, tip, b.Layout)
 	}
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		// a dev-server url, e.g. http://localhost:5173
@@ -1097,7 +1105,7 @@ func layoutDevTab(
 				}),
 				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return smallBtn(gtx, loadURLBtn, "Load URL")
+					return smallBtn(gtx, loadURLBtn, "Load URL", "Run the napp served at this URL, like a local dev server")
 				}),
 			)
 		}),
@@ -1116,11 +1124,11 @@ func layoutDevTab(
 				}),
 				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return smallBtn(gtx, browseBtn, "Browse…")
+					return smallBtn(gtx, browseBtn, "Browse…", "Pick the napp's folder with a file chooser")
 				}),
 				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return smallBtn(gtx, loadFolderBtn, "Load folder")
+					return smallBtn(gtx, loadFolderBtn, "Load folder", "Run the napp in this folder, straight from its files")
 				}),
 			)
 		}),
@@ -1198,7 +1206,7 @@ func layoutConfirmLogout(
 							b := material.Button(th, yesBtn, "Log out")
 							b.Background = p.chipBg
 							b.Color = p.danger
-							return b.Layout(gtx)
+							return withTooltip(gtx, yesBtn, "Log out now, closing every napp window", b.Layout)
 						}),
 						layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -1206,7 +1214,7 @@ func layoutConfirmLogout(
 							b := material.Button(th, noBtn, "Cancel")
 							b.Background = p.chipBg
 							b.Color = p.chipFg
-							return b.Layout(gtx)
+							return withTooltip(gtx, noBtn, "Stay logged in", b.Layout)
 						}),
 					)
 				}),
@@ -1253,12 +1261,16 @@ func layoutProfile(
 			if p.name == "dark" {
 				label = "\u2600 Light"
 			}
+			tip := "Switch the launcher and every napp window to the dark theme"
+			if p.name == "dark" {
+				tip = "Switch the launcher and every napp window to the light theme"
+			}
 			b := material.Button(th, themeBtn, label)
 			b.Background = p.chipBg
 			b.Color = p.chipFg
 			b.TextSize = unit.Sp(13)
 			b.Inset = layout.UniformInset(unit.Dp(8))
-			return b.Layout(gtx)
+			return withTooltip(gtx, themeBtn, tip, b.Layout)
 		}),
 		layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -1272,7 +1284,7 @@ func layoutProfile(
 			b.Color = p.danger
 			b.TextSize = unit.Sp(13)
 			b.Inset = layout.UniformInset(unit.Dp(8))
-			return b.Layout(gtx)
+			return withTooltip(gtx, logoutBtn, "Forget this login on this computer (you will be asked to confirm)", b.Layout)
 		}),
 	)
 }
@@ -1451,7 +1463,9 @@ func renderNappCard(
 										return inner(gtx)
 									}
 									pointer.CursorPointer.Add(gtx.Ops)
-									return authorBtn.Layout(gtx, inner)
+									return withTooltip(gtx, authorBtn, "See "+authorName+"'s profile and the other napps they published", func(gtx layout.Context) layout.Dimensions {
+										return authorBtn.Layout(gtx, inner)
+									})
 								})
 							}),
 						)
@@ -1474,7 +1488,7 @@ func renderNappCard(
 						b.Color = currentTheme().chipFg
 						b.TextSize = unit.Sp(13)
 						b.Inset = layout.UniformInset(unit.Dp(8))
-						return b.Layout(gtx)
+						return withTooltip(gtx, pinBtn, pinTip(pinned), b.Layout)
 					})
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -1488,7 +1502,7 @@ func renderNappCard(
 						b.Color = currentTheme().suggestFg
 						b.TextSize = unit.Sp(13)
 						b.Inset = layout.UniformInset(unit.Dp(8))
-						return b.Layout(gtx)
+						return withTooltip(gtx, openBtn, "Open "+napp.Label()+" in a new window", b.Layout)
 					})
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -1497,7 +1511,9 @@ func renderNappCard(
 						ub := material.Button(th, secondBtn, secondLabel)
 						ub.TextSize = unit.Sp(13)
 						ub.Inset = layout.UniformInset(unit.Dp(8))
-						return layout.Inset{Left: unit.Dp(8)}.Layout(gtx, ub.Layout)
+						return layout.Inset{Left: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							return withTooltip(gtx, secondBtn, nappButtonTip(secondLabel, napp), ub.Layout)
+						})
 					}
 					return layout.Dimensions{}
 				}),
@@ -1510,7 +1526,7 @@ func renderNappCard(
 						b := material.Button(th, btn, btnLabel)
 						b.TextSize = unit.Sp(13)
 						b.Inset = layout.UniformInset(unit.Dp(8))
-						return b.Layout(gtx)
+						return withTooltip(gtx, btn, nappButtonTip(btnLabel, napp), b.Layout)
 					})
 				}),
 			}
@@ -1561,11 +1577,17 @@ func renderNappCard(
 		// painted content replays on top of that (same pattern gio's
 		// material buttons use).
 		pointer.CursorPointer.Add(gtx.Ops)
-		return cardBtn.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			defer bg.Push(gtx.Ops).Pop()
-			paint.Fill(gtx.Ops, currentTheme().card)
-			call.Add(gtx.Ops)
-			return layout.Dimensions{Size: image.Point{X: sz.X, Y: dims.Size.Y}}
+		cardTip := "See everything about " + napp.Label()
+		if backend.DevSourceKind(napp.ID) != "" {
+			cardTip = "Open " + napp.Label() + " in a new window"
+		}
+		return withTooltip(gtx, cardBtn, cardTip, func(gtx layout.Context) layout.Dimensions {
+			return cardBtn.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				defer bg.Push(gtx.Ops).Pop()
+				paint.Fill(gtx.Ops, currentTheme().card)
+				call.Add(gtx.Ops)
+				return layout.Dimensions{Size: image.Point{X: sz.X, Y: dims.Size.Y}}
+			})
 		})
 	})
 }
@@ -1579,4 +1601,32 @@ func updatesAvailable(st backend.State) int {
 		}
 	}
 	return n
+}
+
+// pinTip is the tooltip of a napp's Pin/Unpin toggle.
+func pinTip(pinned bool) string {
+	if pinned {
+		return "Take this napp off the Home tab"
+	}
+	return "Put this napp on the Home tab, one click away"
+}
+
+// nappButtonTip is the tooltip of a napp card's install, uninstall, update
+// (or busy) button, by its label.
+func nappButtonTip(label string, napp backend.Napp) string {
+	switch label {
+	case "Install":
+		return "Download " + napp.Label() + " to this computer, so it can be opened"
+	case "Uninstall":
+		return "Remove " + napp.Label() + " from this computer"
+	case "Update":
+		return "Install the newer version of " + napp.Label()
+	case "Publish":
+		return "Choose where to publish this napp, so others can find and install it"
+	case "Unload":
+		return "Close this dev napp's windows and take it off the list (its folder or server is left alone)"
+	case "Working\u2026":
+		return "Hold on, this napp is being installed, updated or removed"
+	}
+	return ""
 }

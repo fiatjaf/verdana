@@ -280,7 +280,9 @@ func layoutNappDetail(
 				return inner(gtx)
 			}
 			pointer.CursorPointer.Add(gtx.Ops)
-			return authorBtn.Layout(gtx, inner)
+			return withTooltip(gtx, authorBtn, "See "+authorName+"'s profile and the other napps they published", func(gtx layout.Context) layout.Dimensions {
+				return authorBtn.Layout(gtx, inner)
+			})
 		})
 	}))
 	// action buttons row
@@ -295,7 +297,7 @@ func layoutNappDetail(
 					b := material.Button(th, openBtn, "Open")
 					b.Background = currentTheme().suggestBg
 					b.Color = currentTheme().suggestFg
-					return b.Layout(gtx)
+					return withTooltip(gtx, openBtn, "Open "+n.Label()+" in a new window", b.Layout)
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					if !installed || openBtn == nil {
@@ -315,7 +317,9 @@ func layoutNappDetail(
 					b := material.Button(th, pinBtn, label)
 					b.Background = currentTheme().chipBg
 					b.Color = currentTheme().chipFg
-					return layout.Inset{Right: unit.Dp(8)}.Layout(gtx, b.Layout)
+					return layout.Inset{Right: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						return withTooltip(gtx, pinBtn, pinTip(pinned), b.Layout)
+					})
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					if primaryBtn == nil {
@@ -327,7 +331,7 @@ func layoutNappDetail(
 						b.Background = currentTheme().chipBg
 						b.Color = currentTheme().chipFg
 					}
-					return b.Layout(gtx)
+					return withTooltip(gtx, primaryBtn, nappButtonTip(primaryLabel, n), b.Layout)
 				}),
 				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -335,7 +339,7 @@ func layoutNappDetail(
 						return layout.Dimensions{}
 					}
 					pointer.CursorPointer.Add(gtx.Ops)
-					return material.Button(th, updateBtn, "Update").Layout(gtx)
+					return withTooltip(gtx, updateBtn, nappButtonTip("Update", n), material.Button(th, updateBtn, "Update").Layout)
 				}),
 			)
 		})

@@ -6,6 +6,8 @@ import (
 	"time"
 	"verdana/backend"
 
+	"fiatjaf.com/verdana/desktop/tooltip"
+
 	"gioui.org/f32"
 	"gioui.org/io/event"
 	"gioui.org/io/pointer"
@@ -53,9 +55,11 @@ type homeGrid struct {
 	// geometry of the last layout, in pixels, for mapping positions to cells
 	cols, cellW, cellH, rowH, n int
 
-	// the pointer: where it is hovering (-1 for nowhere), and the press
-	// being tracked, if any
+	// the pointer: where it is hovering (-1 for nowhere) and since when
+	// (for the tooltip), and the press being tracked, if any
 	hover    int
+	hoverIdx int
+	hoverAt  time.Time
 	pressed  bool
 	pressIdx int
 	pressPos f32.Point
@@ -72,7 +76,7 @@ type homeGrid struct {
 	target   int
 }
 
-var home = homeGrid{list: widget.List{List: layout.List{Axis: layout.Vertical}}, hover: -1}
+var home = homeGrid{list: widget.List{List: layout.List{Axis: layout.Vertical}}, hover: -1, hoverIdx: -1}
 
 // cellAt is the index of the cell under p (relative to the grid), or -1.
 // clamp makes positions past the last cell or outside the columns count as
@@ -289,6 +293,8 @@ func (g *homeGrid) Layout(gtx layout.Context, th *material.Theme, st backend.Sta
 		})
 	})
 
+	g.tooltip(gtx, st.Home)
+
 	// the carried item floats over everything, under the pointer
 	if g.dragging {
 		if from := g.dragFrom(st.Home); from >= 0 {
@@ -395,4 +401,28 @@ func bundleIcon(gtx layout.Context, b backend.BundleInfo, size int) layout.Dimen
 		t.Pop()
 	}
 	return layout.Dimensions{Size: image.Pt(sz, sz)}
+}
+
+// tooltip asks for the hovered cell's tooltip once the pointer has rested on
+// it for a moment, like withTooltip does for buttons.
+func (g *homeGrid) tooltip(gtx layout.Context, items []backend.HomeItem) {
+	if g.hover < 0 || g.hover >= len(items) || g.pressed || g.dragging {
+		g.hoverIdx = -1
+		return
+	}
+	if g.hover != g.hoverIdx {
+		g.hoverIdx, g.hoverAt = g.hover, gtx.Now
+	}
+	if wait := g.hoverAt.Add(tooltip.Delay); gtx.Now.Before(wait) {
+		gtx.Execute(op.InvalidateCmd{At: wait})
+		return
+	}
+	item := items[g.hover]
+	tip := "Open " + item.Key + ". Hold to see its page, drag to move it"
+	if item.Bundle != nil {
+		tip = "Open all the windows of " + item.Bundle.Name + ". Hold to edit the bundle, drag to move it"
+	} else if item.Napp != nil {
+		tip = "Open " + item.Napp.Label() + ". Hold to see its page, drag to move it"
+	}
+	tooltips.Show(tip)
 }

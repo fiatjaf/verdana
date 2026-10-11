@@ -15,6 +15,8 @@ import (
 	"gioui.org/widget/material"
 
 	"verdana/backend/wasmhost"
+
+	"fiatjaf.com/verdana/desktop/tooltip"
 )
 
 // A prompt fired by this napp (signing, publishing, picking a handler…) is
@@ -26,6 +28,7 @@ import (
 type promptButton struct {
 	label  string
 	detail string
+	tip    string
 	tone   string
 	open   bool // a window already open: striped and marked, whatever its tone
 	ok     bool
@@ -42,12 +45,13 @@ type promptOverlay struct {
 	// picker's options are one per row.
 	rows [][]*promptButton
 	list widget.List
+	tips *tooltip.Layer
 }
 
 func newPromptOverlay() *promptOverlay {
 	th := material.NewTheme()
 	th.Shaper = text.NewShaper(text.WithCollection(gofont.Collection()))
-	p := &promptOverlay{th: th}
+	p := &promptOverlay{th: th, tips: tooltip.New()}
 	p.list.Axis = layout.Vertical
 	return p
 }
@@ -65,7 +69,7 @@ func (p *promptOverlay) build(pv *wasmhost.Prompt) {
 		p.buttons = append(p.buttons, row...)
 	}
 	btn := func(label, tone string, ok bool, index int, scope string) *promptButton {
-		return &promptButton{label: label, tone: tone, ok: ok, index: index, scope: scope}
+		return &promptButton{label: label, tone: tone, ok: ok, index: index, scope: scope, tip: promptTip(label, ok, scope)}
 	}
 
 	switch {
@@ -81,6 +85,10 @@ func (p *promptOverlay) build(pv *wasmhost.Prompt) {
 			b := btn(opt.Label, tone, true, i, "once")
 			b.detail = opt.Detail
 			b.open = opt.Instance != ""
+			b.tip = "Open " + opt.Label + " to handle this"
+			if b.open {
+				b.tip = "Send this to the " + opt.Label + " window that is already open"
+			}
 			add(b)
 		}
 		add(btn("Cancel", "chip", false, 0, "once"))
@@ -92,6 +100,26 @@ func (p *promptOverlay) build(pv *wasmhost.Prompt) {
 		add(btn("Allow", "accent", true, 0, "once"))
 		add(btn("Deny", "chip", false, 0, "once"))
 	}
+}
+
+// promptTip is what an answer button says it does, on hover.
+func promptTip(label string, ok bool, scope string) string {
+	if label == "Cancel" {
+		return "Don't send this anywhere"
+	}
+	switch {
+	case ok && scope == "session":
+		return "Allow it without asking again until the launcher quits"
+	case !ok && scope == "session":
+		return "Refuse it without asking again until the launcher quits"
+	case ok && scope == "always":
+		return "Allow it from now on, without ever asking again"
+	case !ok && scope == "always":
+		return "Refuse it from now on, without ever asking again"
+	case ok:
+		return "Allow it this time only"
+	}
+	return "Refuse it this time only"
 }
 
 // palette is the overlay's colours for the launcher's current theme.
@@ -189,20 +217,30 @@ func (p *promptOverlay) Layout(gtx layout.Context, pv *wasmhost.Prompt, theme st
 		})
 	}
 
-	return layout.UniformInset(24).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			if max := gtx.Dp(520); gtx.Constraints.Max.X > max {
-				gtx.Constraints.Max.X = max
-			}
-			gtx.Constraints.Min.X = gtx.Constraints.Max.X
-			return material.List(th, &p.list).Layout(gtx, len(children), func(gtx layout.Context, i int) layout.Dimensions {
-				return children[i](gtx)
+	dims := p.tips.Track(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.UniformInset(24).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				if max := gtx.Dp(520); gtx.Constraints.Max.X > max {
+					gtx.Constraints.Max.X = max
+				}
+				gtx.Constraints.Min.X = gtx.Constraints.Max.X
+				return material.List(th, &p.list).Layout(gtx, len(children), func(gtx layout.Context, i int) layout.Dimensions {
+					return children[i](gtx)
+				})
 			})
 		})
 	})
+	p.tips.Draw(gtx, th, pal.fg, pal.bg)
+	return dims
 }
 
 func (p *promptOverlay) button(gtx layout.Context, pal palette, b *promptButton) layout.Dimensions {
+	return p.tips.With(gtx, &b.click, b.tip, func(gtx layout.Context) layout.Dimensions {
+		return p.buttonBody(gtx, pal, b)
+	})
+}
+
+func (p *promptOverlay) buttonBody(gtx layout.Context, pal palette, b *promptButton) layout.Dimensions {
 	bg, fg := pal.tone(b.tone)
 	return material.ButtonLayoutStyle{
 		Background:   bg,

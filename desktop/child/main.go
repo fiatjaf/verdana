@@ -447,8 +447,16 @@ const promptLibScript = "(function(){" +
 	";border:0;border-radius:8px;background:' + bgc + ';color:' + fgc + ';font-size:14px;text-align:left" +
 	";cursor:pointer;';" +
 	"b.textContent = label;" +
+	"b.title = tip(label, ok, scope);" +
 	"b.onclick = function() { window.__verdana_prompt_answer(p.id, ok, index, scope) };" +
 	"return b;" +
+	"};" +
+	// tip is what an answer button says it does, on hover.
+	"function tip(label, ok, scope) {" +
+	"if (label === 'Cancel') return \"Don't send this anywhere\";" +
+	"if (scope === 'session') return (ok ? 'Allow' : 'Refuse') + ' it without asking again until the launcher quits';" +
+	"if (scope === 'always') return (ok ? 'Allow' : 'Refuse') + ' it from now on, without ever asking again';" +
+	"return (ok ? 'Allow' : 'Refuse') + ' it this time only';" +
 	"};" +
 	// row puts buttons side by side, for the scopes of an approval prompt.
 	"function row() {" +
@@ -466,6 +474,7 @@ const promptLibScript = "(function(){" +
 	"p.options.forEach(function(opt, i) {" +
 	"var tone = opt.suggested ? 'suggest' : (opt.dev ? 'dev' : (opt.instance ? 'accent' : 'chip'));" +
 	"var b = btn(opt.label, tone, true, i, 'once');" +
+	"b.title = opt.instance ? 'Send this to the ' + opt.label + ' window that is already open' : 'Open ' + opt.label + ' to handle this';" +
 	"if (opt.detail) { var sub = document.createElement('div'); sub.textContent = opt.detail;" +
 	"sub.style.cssText = 'margin-top:3px;color:' + (tone === 'suggest' ? suggestText : (tone === 'dev' ? devText : (tone === 'accent' ? accentText : muted)))" +
 	"+ ';font-size:11px;opacity:.75;'; b.appendChild(sub); }" +
