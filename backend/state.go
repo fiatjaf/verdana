@@ -23,7 +23,7 @@ type AppState struct {
 	// LaunchCounts records how many times the user started a napp from
 	// the launcher's Open buttons, so the installed list can be shown
 	// most-opened first. Launches that happen because another napp
-	// dispatched an action, or because a bundle shortcut opened it, don't
+	// dispatched an action, or because a bundle opened it, don't
 	// count: the user didn't choose that window from the launcher.
 	LaunchCounts map[string]int `json:"launch_counts"`
 
@@ -33,7 +33,13 @@ type AppState struct {
 
 	// Pinned are the napp ids the user put on the launcher's home tab, in
 	// the order they were pinned (the order the home grid shows them in).
+	// Pinned bundles are in here too, as BundlePinKey(name).
 	Pinned []string `json:"pinned"`
+
+	// Bundles are the bundles the user made on the Windows screen (see
+	// bundles.go). Whether one has an OS shortcut is read from the
+	// shortcut files, not kept here.
+	Bundles []Bundle `json:"bundles"`
 
 	// Rules are the answers the user gave to permission prompts that were
 	// meant to stick ("always allow", "always deny"), keyed by RuleKey
@@ -60,7 +66,7 @@ var (
 )
 
 func loadState() {
-	// the shortcut list is read from the files, not from here
+	// whether a bundle has a shortcut is read from the files, not from here
 	reloadShortcuts()
 	statePath = filepath.Join(dataDir, "state.json")
 	data, err := os.ReadFile(statePath)
@@ -93,9 +99,13 @@ func loadState() {
 		}
 	}
 	state.LastLaunched = nil
-	// pins only ever name installed napps, so a position on the home tab
-	// is a position in this list (see MovePin)
+	importShortcutFiles()
+	// pins only ever name installed napps and existing bundles, so a
+	// position on the home tab is a position in this list (see MovePin)
 	state.Pinned = slices.DeleteFunc(state.Pinned, func(id string) bool {
+		if name, ok := strings.CutPrefix(id, bundlePinPrefix); ok {
+			return bundleIndexLocked(name) < 0
+		}
 		_, ok := state.InstalledNapps[id]
 		return !ok
 	})
@@ -193,7 +203,7 @@ func installedNapps() []Napp {
 
 // markLaunched records one user-initiated open of a napp. Only the
 // launcher's own Open buttons get here: action-driven window opens (a napp
-// dispatching into another napp) and bundle shortcut runs never do,
+// dispatching into another napp) and bundle runs never do,
 // because the user didn't pick that napp from the launcher.
 func markLaunched(id string) {
 	stateMu.Lock()
@@ -222,7 +232,7 @@ func Pin(id string) {
 	notifyState()
 }
 
-// Unpin takes a napp off the home tab.
+// Unpin takes a napp (or a bundle, by its BundlePinKey) off the home tab.
 func Unpin(id string) {
 	stateMu.Lock()
 	if !slices.Contains(state.Pinned, id) {
@@ -235,8 +245,9 @@ func Unpin(id string) {
 	notifyState()
 }
 
-// MovePin puts a pinned napp at position to of the home tab, shifting the
-// ones in between (a drag-and-drop reorder). to is clamped to the list.
+// MovePin puts a pinned napp (or bundle, by its BundlePinKey) at position to
+// of the home tab, shifting the ones in between (a drag-and-drop reorder). to
+// is clamped to the list.
 func MovePin(id string, to int) {
 	stateMu.Lock()
 	from := slices.Index(state.Pinned, id)

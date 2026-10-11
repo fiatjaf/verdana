@@ -369,12 +369,10 @@ func layoutMain(
 	devUnloadBtns,
 	devPublishBtns []widget.Clickable,
 
-	bundleNameEd *widget.Editor,
-	createShortcutBtn *widget.Clickable,
-	saveShortcutBtn *widget.Clickable,
-	cancelShortcutBtn *widget.Clickable,
-	shortcutDelBtns,
-	shortcutEditBtns []widget.Clickable,
+	createBundleBtn *widget.Clickable,
+	saveBundleBtn *widget.Clickable,
+	cancelBundleBtn *widget.Clickable,
+	bundleBtns []bundleRowBtns,
 
 	vis,
 	instVis []int,
@@ -411,16 +409,15 @@ func layoutMain(
 		}),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			if editing := currentShortcutEdit(); editing != nil {
-				return layoutShortcutEditor(gtx, th, saveShortcutBtn, cancelShortcutBtn, bundleNameEd, editing)
+			if editing := currentBundleEdit(); editing != nil {
+				return layoutBundleEditor(gtx, th, saveBundleBtn, cancelBundleBtn, editing)
 			}
 			if tab == tabHome {
 				return home.Layout(gtx, th, st)
 			}
 			if tab == 0 {
 				return layoutWindowsTab(gtx, th, windowsList,
-					closeBtns, reopenBtns, bundleNameEd, createShortcutBtn,
-					shortcutDelBtns, shortcutEditBtns, st)
+					closeBtns, reopenBtns, createBundleBtn, bundleBtns, st)
 			}
 			if tab == 1 {
 				return layoutNappsTab(gtx, th, installedList, installedFilterEd, cardBtns, uninstBtns, installedUpdateBtns, installedOpenBtns, installedAuthorBtns, pinBtns, checkUpdBtn, updateAllBtn, instVis, st)
@@ -520,37 +517,35 @@ func layoutWindowsTab(
 	list *widget.List,
 	closeBtns,
 	reopenBtns []widget.Clickable,
-	bundleNameEd *widget.Editor,
-	createShortcutBtn *widget.Clickable,
-	shortcutDelBtns,
-	shortcutEditBtns []widget.Clickable,
+	createBundleBtn *widget.Clickable,
+	bundleBtns []bundleRowBtns,
 	st backend.State,
 ) layout.Dimensions {
 	// nothing but a message only when the tab really has nothing in it: a
-	// bundle shortcut outlives the windows it was made from, so a launcher
-	// that has opened no window this run still has shortcuts to show.
-	if len(st.ManagedWindows) == 0 && len(st.Shortcuts) == 0 {
+	// bundle outlives the windows it was made from, so a launcher that has
+	// opened no window this run still has bundles to show.
+	if len(st.ManagedWindows) == 0 && len(st.Bundles) == 0 {
 		l := material.Body2(th, "No windows opened yet.")
 		l.Color = currentTheme().muted
 		return l.Layout(gtx)
 	}
 	ui.mu.Lock()
-	shortcutErr := ui.shortcutErr
+	bundleErr := ui.bundleErr
 	ui.mu.Unlock()
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-		// whatever went wrong the last time a shortcut was saved
+		// whatever went wrong the last time a bundle was saved or changed
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			if shortcutErr == "" {
+			if bundleErr == "" {
 				return layout.Dimensions{}
 			}
 			return layout.Inset{Bottom: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				l := material.Body2(th, shortcutErr)
+				l := material.Body2(th, bundleErr)
 				l.Color = currentTheme().danger
 				return l.Layout(gtx)
 			})
 		}),
-		// the bundle shortcut builder: only while something is checked, an
-		// input for the bundle name next to the create button.
+		// the bundle builder: only while something is checked. The name
+		// and the actions are given in the editor it opens.
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			anyChecked := false
 			for _, cb := range bundleChecks {
@@ -562,16 +557,8 @@ func layoutWindowsTab(
 				return layout.Dimensions{}
 			}
 			return layout.Inset{Bottom: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-						return editorBox(gtx, th, bundleNameEd, "name of the bundle shortcut")
-					}),
-					layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						pointer.CursorPointer.Add(gtx.Ops)
-						return material.Button(th, createShortcutBtn, "Create shortcut\u2026").Layout(gtx)
-					}),
-				)
+				pointer.CursorPointer.Add(gtx.Ops)
+				return withTooltip(gtx, th, createBundleBtn, "Make a bundle of the checked windows: one click opens them all again", material.Button(th, createBundleBtn, "Create bundle\u2026").Layout)
 			})
 		}),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
@@ -636,21 +623,21 @@ func layoutWindowsTab(
 				})
 			})
 		}),
-		// the created shortcuts, each with edit and delete
+		// the bundles, each with its pin and shortcut toggles, edit and delete
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			if len(st.Shortcuts) == 0 {
+			if len(st.Bundles) == 0 {
 				return layout.Dimensions{}
 			}
 			return layout.Inset{Top: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						l := emph(material.Body2(th, "Bundle shortcuts"))
+						l := emph(material.Body2(th, "Bundles"))
 						l.Color = currentTheme().subtle
 						return l.Layout(gtx)
 					}),
 					layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return layout.Flex{Axis: layout.Vertical}.Layout(gtx, shortcutsRows(th, st, shortcutDelBtns, shortcutEditBtns)...)
+						return layout.Flex{Axis: layout.Vertical}.Layout(gtx, bundleRows(th, st, bundleBtns)...)
 					}),
 				)
 			})
@@ -658,11 +645,24 @@ func layoutWindowsTab(
 	)
 }
 
-// shortcutsRows is one row per stored shortcut: the name (and its napps)
-// with edit and delete buttons at the end.
-func shortcutsRows(th *material.Theme, st backend.State, delBtns, editBtns []widget.Clickable) (out []layout.FlexChild) {
-	for i, sc := range st.Shortcuts {
-		i := i
+// bundleRows is one row per stored bundle: the name, its napps and where it
+// can be opened from (the home tab, an OS shortcut), with the buttons that
+// toggle those, edit and delete at the end.
+func bundleRows(th *material.Theme, st backend.State, btns []bundleRowBtns) (out []layout.FlexChild) {
+	small := func(b material.ButtonStyle) material.ButtonStyle {
+		b.TextSize = unit.Sp(13)
+		b.Inset = layout.UniformInset(unit.Dp(8))
+		return b
+	}
+	toggle := func(gtx layout.Context, btn *widget.Clickable, label, tip string) layout.Dimensions {
+		pointer.CursorPointer.Add(gtx.Ops)
+		b := small(material.Button(th, btn, label))
+		b.Background = currentTheme().chipBg
+		b.Color = currentTheme().chipFg
+		return withTooltip(gtx, th, btn, tip, b.Layout)
+	}
+	for i, sc := range st.Bundles {
+		bb := &btns[i]
 		names := make([]string, 0, len(sc.Entries))
 		for _, e := range sc.Entries {
 			if napp, ok := backend.InstalledNapp(e.NappID); ok {
@@ -671,6 +671,27 @@ func shortcutsRows(th *material.Theme, st backend.State, delBtns, editBtns []wid
 			}
 			names = append(names, e.NappID)
 		}
+
+		var where []string
+		if sc.Pinned {
+			where = append(where, "pinned to home")
+		}
+		if sc.Shortcut {
+			where = append(where, "OS shortcut")
+		}
+		if len(where) == 0 {
+			where = append(where, "not pinned, no OS shortcut")
+		}
+
+		pinLabel, pinTip := "Pin", "Put this bundle on the Home tab, where a click opens all of its windows"
+		if sc.Pinned {
+			pinLabel, pinTip = "Unpin", "Take this bundle off the Home tab"
+		}
+		scLabel, scTip := "Create shortcut", "Add this bundle to your system's application menu, so it opens without going through the launcher first"
+		if sc.Shortcut {
+			scLabel, scTip = "Remove shortcut", "Delete this bundle's shortcut from your system's application menu (the bundle stays)"
+		}
+
 		out = append(out, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.Inset{Bottom: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
@@ -686,24 +707,32 @@ func shortcutsRows(th *material.Theme, st backend.State, delBtns, editBtns []wid
 								l.Color = currentTheme().muted
 								return l.Layout(gtx)
 							}),
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								l := material.Caption(th, strings.Join(where, " · "))
+								l.Color = currentTheme().subtle
+								return l.Layout(gtx)
+							}),
 						)
 					}),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						pointer.CursorPointer.Add(gtx.Ops)
-						b := material.Button(th, &editBtns[i], "Edit")
-						b.TextSize = unit.Sp(13)
-						b.Inset = layout.UniformInset(unit.Dp(8))
-						return b.Layout(gtx)
+						return toggle(gtx, &bb.pin, pinLabel, pinTip)
+					}),
+					layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return toggle(gtx, &bb.shortcut, scLabel, scTip)
 					}),
 					layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						pointer.CursorPointer.Add(gtx.Ops)
-						b := material.Button(th, &delBtns[i], "Delete")
+						return withTooltip(gtx, th, &bb.edit, "Change the name, or the actions each napp gets", small(material.Button(th, &bb.edit, "Edit")).Layout)
+					}),
+					layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						pointer.CursorPointer.Add(gtx.Ops)
+						b := small(material.Button(th, &bb.del, "Delete"))
 						b.Background = currentTheme().chipBg
 						b.Color = currentTheme().danger
-						b.TextSize = unit.Sp(13)
-						b.Inset = layout.UniformInset(unit.Dp(8))
-						return b.Layout(gtx)
+						return withTooltip(gtx, th, &bb.del, "Forget this bundle, taking it off the Home tab and removing its shortcut", b.Layout)
 					}),
 				)
 			})
@@ -712,24 +741,23 @@ func shortcutsRows(th *material.Theme, st backend.State, delBtns, editBtns []wid
 	return out
 }
 
-// layoutShortcutEditor is the overlay a "Create shortcut…" (or an "Edit")
+// layoutBundleEditor is the overlay a "Create bundle…" (or an "Edit")
 // click opens over the Windows tab: the bundle name, one actions textarea
 // per napp of the bundle (one action per line), save and cancel.
-func layoutShortcutEditor(
+func layoutBundleEditor(
 	gtx layout.Context,
 	th *material.Theme,
 	saveBtn,
 	cancelBtn *widget.Clickable,
-	nameEd *widget.Editor,
-	edit *shortcutEditState,
+	edit *bundleEditState,
 ) layout.Dimensions {
-	title := "New bundle shortcut"
+	title := "New bundle"
 	if edit.name != "" {
-		title = "Edit shortcut"
+		title = "Edit bundle"
 	}
 	p := currentTheme()
 	ui.mu.Lock()
-	shortcutErr := ui.shortcutErr
+	bundleErr := ui.bundleErr
 	ui.mu.Unlock()
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -739,14 +767,14 @@ func layoutShortcutEditor(
 		}),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return editorBox(gtx, th, nameEd, "name of the bundle")
+			return editorBox(gtx, th, &edit.nameEd, "name of the bundle")
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			if shortcutErr == "" {
+			if bundleErr == "" {
 				return layout.Dimensions{}
 			}
 			return layout.Inset{Top: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				l := material.Body2(th, shortcutErr)
+				l := material.Body2(th, bundleErr)
 				l.Color = p.danger
 				return l.Layout(gtx)
 			})
@@ -781,7 +809,7 @@ func layoutShortcutEditor(
 			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					pointer.CursorPointer.Add(gtx.Ops)
-					return material.Button(th, saveBtn, "Save shortcut").Layout(gtx)
+					return material.Button(th, saveBtn, "Save bundle").Layout(gtx)
 				}),
 				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {

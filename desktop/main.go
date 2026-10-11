@@ -38,28 +38,34 @@ type gioState struct {
 	// next frame drains them.
 	clipboard []string
 
-	// shortcutEditing is the bundle shortcut being created (nil checked
+	// bundleEditing is the bundle being created (from the checked
 	// windows) or edited (a stored one), parked over the Windows tab the
 	// same dialogs are; nil the rest of the time.
-	shortcutEditing *shortcutEditState
+	bundleEditing *bundleEditState
 
-	// shortcutErr is why the last shortcut create/edit attempt didn't work,
+	// bundleErr is why the last bundle save (or pin, or shortcut) didn't work,
 	// shown on the Windows tab (the editor keeps itself open on error).
-	shortcutErr string
+	bundleErr string
 }
 
-// shortcutEditState is the editor overlay for one bundle: the fields it is
-// built from (one napp, its action textarea) and the name of the shortcut
+// bundleEditState is the editor overlay for one bundle: the fields it is
+// built from (one napp, its action textarea) and the name of the bundle
 // when it is a stored one being edited ("": creating a new one).
-type shortcutEditState struct {
-	name    string // the stored shortcut being edited, "" for a new one
-	entries []shortcutEditEntry
+type bundleEditState struct {
+	name    string // the stored bundle being edited, "" for a new one
+	nameEd  widget.Editor
+	entries []bundleEditEntry
 }
 
-type shortcutEditEntry struct {
+type bundleEditEntry struct {
 	nappID string
 	label  string
 	ed     widget.Editor
+}
+
+// bundleRowBtns are the buttons of one bundle row on the Windows tab.
+type bundleRowBtns struct {
+	pin, shortcut, edit, del widget.Clickable
 }
 
 // checked is the bundle-creation checkboxes of the Windows tab, keyed by
@@ -178,27 +184,27 @@ func setConfirmLogout(v bool) {
 	}
 }
 
-func setShortcutErr(msg string) {
+func setBundleErr(msg string) {
 	ui.mu.Lock()
-	ui.shortcutErr = msg
+	ui.bundleErr = msg
 	ui.mu.Unlock()
 	if gioWin != nil {
 		gioWin.Invalidate()
 	}
 }
 
-// currentShortcutEdit is the bundle editor parked over the Windows tab, or
+// currentBundleEdit is the bundle editor parked over the Windows tab, or
 // nil. Background saves put their editor back through it, so the field is
 // never touched off the Gio loop without the mutex.
-func currentShortcutEdit() *shortcutEditState {
+func currentBundleEdit() *bundleEditState {
 	ui.mu.Lock()
 	defer ui.mu.Unlock()
-	return ui.shortcutEditing
+	return ui.bundleEditing
 }
 
-func setShortcutEdit(edit *shortcutEditState) {
+func setBundleEdit(edit *bundleEditState) {
 	ui.mu.Lock()
-	ui.shortcutEditing = edit
+	ui.bundleEditing = edit
 	ui.mu.Unlock()
 	if gioWin != nil {
 		gioWin.Invalidate()
@@ -295,12 +301,10 @@ func gioMain() {
 		promptBtns          promptButtons
 		optBtns             []widget.Clickable
 
-		bundleNameEd      widget.Editor
-		createShortcutBtn widget.Clickable
-		saveShortcutBtn   widget.Clickable
-		cancelShortcutBtn widget.Clickable
-		shortcutDelBtns   []widget.Clickable
-		shortcutEditBtns  []widget.Clickable
+		createBundleBtn widget.Clickable
+		saveBundleBtn   widget.Clickable
+		cancelBundleBtn widget.Clickable
+		bundleBtns      []bundleRowBtns
 	)
 	loginEd.SingleLine = true
 	relaysEd.SingleLine = false
@@ -485,9 +489,8 @@ func gioMain() {
 						closeBtns = append(closeBtns, widget.Clickable{})
 						reopenBtns = append(reopenBtns, widget.Clickable{})
 					}
-					for len(shortcutDelBtns) < len(st.Shortcuts) {
-						shortcutDelBtns = append(shortcutDelBtns, widget.Clickable{})
-						shortcutEditBtns = append(shortcutEditBtns, widget.Clickable{})
+					for len(bundleBtns) < len(st.Bundles) {
+						bundleBtns = append(bundleBtns, bundleRowBtns{})
 					}
 					// a checkbox per window row, living across frames
 					for _, w := range st.ManagedWindows {
@@ -509,45 +512,60 @@ func gioMain() {
 								backend.ReopenWindow(w.Instance)
 							}
 						}
-						if ui.shortcutEditing != nil {
-							if saveShortcutBtn.Clicked(gtx) {
-								name := strings.TrimSpace(bundleNameEd.Text())
-								oldName := ui.shortcutEditing.name
-								spec, err := shortcutSpecJSON(ui.shortcutEditing)
+						if ui.bundleEditing != nil {
+							if saveBundleBtn.Clicked(gtx) {
+								name := strings.TrimSpace(ui.bundleEditing.nameEd.Text())
+								oldName := ui.bundleEditing.name
+								spec, err := bundleSpecJSON(ui.bundleEditing)
 								switch {
 								case err != nil:
-									setShortcutErr(err.Error())
+									setBundleErr(err.Error())
 								case name == "":
-									setShortcutErr("give the bundle a name")
+									setBundleErr("give the bundle a name")
 								default:
 									// validation passed: the selection is consumed
-									// here, on the Gio loop; the shortcut itself is
-									// written in the background
-									editing := ui.shortcutEditing
-									ui.shortcutEditing = nil
+									// here, on the Gio loop; the bundle itself is
+									// saved in the background
+									editing := ui.bundleEditing
+									ui.bundleEditing = nil
 									clearBundleChecks()
-									go saveShortcut(name, oldName, spec, editing)
+									go saveBundle(name, oldName, spec, editing)
 								}
 							}
-							if cancelShortcutBtn.Clicked(gtx) {
-								ui.shortcutEditing = nil
+							if cancelBundleBtn.Clicked(gtx) {
+								ui.bundleEditing = nil
 							}
 						} else {
-							if createShortcutBtn.Clicked(gtx) {
+							if createBundleBtn.Clicked(gtx) {
 								entries := pickedBundleWindows(st)
 								if len(entries) > 0 {
-									setShortcutEdit(newShortcutEditState(entries))
-									setShortcutErr("")
+									setBundleEdit(newBundleEditState(entries))
+									setBundleErr("")
 								}
 							}
-							for i, sc := range st.Shortcuts {
-								if shortcutDelBtns[i].Clicked(gtx) {
-									go backend.DeleteShortcut(sc.Name)
+							for i, b := range st.Bundles {
+								name := b.Name
+								btns := &bundleBtns[i]
+								if btns.pin.Clicked(gtx) {
+									if b.Pinned {
+										go backend.UnpinBundle(name)
+									} else {
+										go backend.PinBundle(name)
+									}
 								}
-								if shortcutEditBtns[i].Clicked(gtx) {
-									setShortcutEdit(editShortcutEditState(sc))
-									bundleNameEd.SetText(sc.Name)
-									setShortcutErr("")
+								if btns.shortcut.Clicked(gtx) {
+									if b.Shortcut {
+										runInBackground(func() error { return backend.RemoveBundleShortcut(name) })
+									} else {
+										runInBackground(func() error { return backend.CreateBundleShortcut(name) })
+									}
+								}
+								if btns.del.Clicked(gtx) {
+									runInBackground(func() error { return backend.DeleteBundle(name) })
+								}
+								if btns.edit.Clicked(gtx) {
+									setBundleEdit(editBundleEditState(b))
+									setBundleErr("")
 								}
 							}
 						}
@@ -829,12 +847,10 @@ func gioMain() {
 						devUnloadBtns,
 						devPublishBtns,
 
-						&bundleNameEd,
-						&createShortcutBtn,
-						&saveShortcutBtn,
-						&cancelShortcutBtn,
-						shortcutDelBtns,
-						shortcutEditBtns,
+						&createBundleBtn,
+						&saveBundleBtn,
+						&cancelBundleBtn,
+						bundleBtns,
 
 						vis,
 						instVis,

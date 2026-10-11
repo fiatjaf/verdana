@@ -3,6 +3,7 @@ package backend
 import (
 	"context"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -62,6 +63,10 @@ type State struct {
 	// order they were pinned.
 	Pinned []Napp `json:"pinned"`
 
+	// Home is everything on the home tab, pinned napps and pinned bundles
+	// together, in the order the user put them in.
+	Home []HomeItem `json:"home"`
+
 	// Dev napps are the ephemeral in-memory ones loaded from a folder or a
 	// dev-server url (see dev.go): shown on the launcher's dev tab, never
 	// persisted.
@@ -87,10 +92,17 @@ type State struct {
 	// without losing their state; nothing here outlives the launcher.
 	ManagedWindows []WindowInfo `json:"managedWindows"`
 
-	// Shortcuts are the bundle shortcuts that exist, read back from their OS
-	// shortcut files (see shortcuts.go), listed on the Windows screen with
-	// edit and delete.
-	Shortcuts []ShortcutInfo `json:"shortcuts"`
+	// Bundles are the bundles the user made (see bundles.go), listed on the
+	// Windows screen with whether each is pinned and has an OS shortcut.
+	Bundles []BundleInfo `json:"bundles"`
+}
+
+// HomeItem is one cell of the home tab: a napp or a bundle, never both. Key
+// is what MovePin calls it.
+type HomeItem struct {
+	Key    string      `json:"key"`
+	Napp   *Napp       `json:"napp,omitempty"`
+	Bundle *BundleInfo `json:"bundle,omitempty"`
 }
 
 // WindowInfo is one open napp instance, for a window list or tab switcher.
@@ -191,7 +203,7 @@ func Snapshot() State {
 	s.Relays = Relays()
 	s.Windows = OpenWindows()
 	s.ManagedWindows = ManagedWindows()
-	s.Shortcuts = shortcuts()
+	s.Bundles = bundles()
 	s.UpdateCheckRunning = updateChecking.Load()
 	for i := range s.Installed {
 		if newVersion, ok := updateSet.Load().Load(s.Installed[i].ID); ok {
@@ -218,10 +230,22 @@ func Snapshot() State {
 	for _, n := range s.Installed {
 		byID[n.ID] = n
 	}
+	bundleByName := make(map[string]BundleInfo, len(s.Bundles))
+	for _, b := range s.Bundles {
+		bundleByName[b.Name] = b
+	}
 	s.Pinned = make([]Napp, 0)
+	s.Home = make([]HomeItem, 0)
 	for _, id := range pinnedIDs() {
+		if name, ok := strings.CutPrefix(id, bundlePinPrefix); ok {
+			if b, ok := bundleByName[name]; ok {
+				s.Home = append(s.Home, HomeItem{Key: id, Bundle: &b})
+			}
+			continue
+		}
 		if n, ok := byID[id]; ok {
 			s.Pinned = append(s.Pinned, n)
+			s.Home = append(s.Home, HomeItem{Key: id, Napp: &n})
 		}
 	}
 

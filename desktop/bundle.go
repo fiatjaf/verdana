@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -9,9 +10,9 @@ import (
 	"verdana/backend"
 )
 
-// The bundle shortcut editor: everything the Gio window needs to turn the
-// checkboxes of the Windows tab into a stored shortcut (with one call to
-// backend.CreateShortcut behind it).
+// The bundle editor: everything the Gio window needs to turn the checkboxes
+// of the Windows tab into a stored bundle (with one call to
+// backend.SaveBundle behind it).
 
 // pickedBundleWindows is the selected windows, in listed order, merged into
 // one entry per napp (the same napp may have two windows checked), each entry
@@ -37,10 +38,11 @@ func pickedBundleWindows(st backend.State) []backend.ShortcutEntry {
 	return entries
 }
 
-// newShortcutEditState builds the editor overlay for a fresh bundle, from
+// newBundleEditState builds the editor overlay for a fresh bundle, from
 // the checked windows' napps.
-func newShortcutEditState(entries []backend.ShortcutEntry) *shortcutEditState {
-	out := &shortcutEditState{name: ""}
+func newBundleEditState(entries []backend.ShortcutEntry) *bundleEditState {
+	out := &bundleEditState{name: ""}
+	out.nameEd.SingleLine = true
 	for _, e := range entries {
 		napp, ok := backend.InstalledNapp(e.NappID)
 		if !ok {
@@ -50,15 +52,17 @@ func newShortcutEditState(entries []backend.ShortcutEntry) *shortcutEditState {
 		// default content: the actions those windows were sent, payloads
 		// included, then whatever else the napp declares handling
 		ed.SetText(suggestionLines(e.Actions, napp.Actions))
-		out.entries = append(out.entries, shortcutEditEntry{nappID: e.NappID, label: napp.Label(), ed: ed})
+		out.entries = append(out.entries, bundleEditEntry{nappID: e.NappID, label: napp.Label(), ed: ed})
 	}
 	return out
 }
 
-// editShortcutEditState builds the overlay pre-filled with a stored
-// shortcut, so the name and every action textarea come out editable.
-func editShortcutEditState(sc backend.ShortcutInfo) *shortcutEditState {
-	out := &shortcutEditState{name: sc.Name}
+// editBundleEditState builds the overlay pre-filled with a stored bundle, so
+// the name and every action textarea come out editable.
+func editBundleEditState(sc backend.BundleInfo) *bundleEditState {
+	out := &bundleEditState{name: sc.Name}
+	out.nameEd.SingleLine = true
+	out.nameEd.SetText(sc.Name)
 	for _, e := range sc.Entries {
 		label := e.NappID
 		if napp, ok := backend.InstalledNapp(e.NappID); ok {
@@ -66,7 +70,7 @@ func editShortcutEditState(sc backend.ShortcutInfo) *shortcutEditState {
 		}
 		ed := widget.Editor{}
 		ed.SetText(actionsToLines(e.Actions))
-		out.entries = append(out.entries, shortcutEditEntry{nappID: e.NappID, label: label, ed: ed})
+		out.entries = append(out.entries, bundleEditEntry{nappID: e.NappID, label: label, ed: ed})
 	}
 	return out
 }
@@ -165,10 +169,10 @@ func actionsToLines(actions []backend.ShortcutAction) string {
 	return strings.Join(lines, "\n")
 }
 
-// shortcutSpecJSON serializes what the editor holds into a
+// bundleSpecJSON serializes what the editor holds into a
 // []backend.ShortcutEntry JSON. Each line of a textarea is one action:
 // {"type": "profile", "payload": …} — the payload optional, anything JSON.
-func shortcutSpecJSON(edit *shortcutEditState) (string, error) {
+func bundleSpecJSON(edit *bundleEditState) (string, error) {
 	var out []backend.ShortcutEntry
 	for _, e := range edit.entries {
 		entry := backend.ShortcutEntry{NappID: e.nappID}
@@ -199,22 +203,32 @@ func shortcutSpecJSON(edit *shortcutEditState) (string, error) {
 	return string(data), nil
 }
 
-// saveShortcut runs the actual creation off the Gio loop: the OS file write
-// and state.json are not frame work. An error goes back to the Windows tab
-// instead of vanishing into a goroutine.
-func saveShortcut(name, oldName, spec string, editing *shortcutEditState) {
-	if err := backend.CreateShortcut(name, spec); err != nil {
-		// put the editor back with everything the user typed, so they can
-		// fix the problem and try again
-		setShortcutEdit(editing)
-		setShortcutErr(err.Error())
+// saveBundle runs the actual save off the Gio loop: state.json and a
+// shortcut file to rewrite are not frame work. An error goes back to the
+// Windows tab instead of vanishing into a goroutine.
+func saveBundle(name, oldName, spec string, editing *bundleEditState) {
+	if err := backend.SaveBundle(oldName, name, spec); err != nil {
+		if !errors.Is(err, backend.ErrShortcutNotUpdated) {
+			// put the editor back with everything the user typed, so they
+			// can fix the problem and try again
+			setBundleEdit(editing)
+		}
+		setBundleErr(err.Error())
 		return
 	}
-	// a rename replaces the old shortcut: its OS file and stored entry go
-	if oldName != "" && oldName != name {
-		backend.DeleteShortcut(oldName)
-	}
-	setShortcutErr("")
+	setBundleErr("")
+}
+
+// runInBackground does a bundle operation off the Gio loop, showing its error
+// on the Windows tab.
+func runInBackground(f func() error) {
+	go func() {
+		if err := f(); err != nil {
+			setBundleErr(err.Error())
+		} else {
+			setBundleErr("")
+		}
+	}()
 }
 
 // previewToken shortens a bundle token for log lines.

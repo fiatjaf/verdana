@@ -19,9 +19,10 @@ import (
 	"gioui.org/widget/material"
 )
 
-// The home tab: the pinned napps as a grid of icons with their names below,
-// like a phone's home screen. A click opens a napp; holding the press on it
-// opens its tab instead; dragging one puts it somewhere else in the grid.
+// The home tab: the pinned napps and bundles as a grid of icons with their
+// names below, like a phone's home screen. A click opens a napp (or all the
+// windows of a bundle); holding the press on it opens its tab (a bundle's
+// editor) instead; dragging one puts it somewhere else in the grid.
 //
 // Gio has no drag and drop between widgets, so the grid takes the pointer
 // itself: one event area over the whole thing, cells found by position.
@@ -62,7 +63,7 @@ type homeGrid struct {
 	pid      pointer.ID
 
 	// dragging is true once the press moved past the slop: dragID is the
-	// napp being carried, grabOff where in its cell it was picked up, pos
+	// key of the item being carried, grabOff where in its cell it was picked up, pos
 	// the pointer, target the slot it would land in
 	dragging bool
 	dragID   string
@@ -96,9 +97,9 @@ func (g *homeGrid) cellAt(p f32.Point, clamp bool) int {
 	return idx
 }
 
-// update handles the pointer: hovering, clicks that open a napp, and drags
+// update handles the pointer: hovering, clicks that open an item, and drags
 // that move one.
-func (g *homeGrid) update(gtx layout.Context, pinned []backend.Napp) {
+func (g *homeGrid) update(gtx layout.Context, pinned []backend.HomeItem) {
 	for {
 		ev, ok := gtx.Event(pointer.Filter{
 			Target: g,
@@ -146,7 +147,7 @@ func (g *homeGrid) update(gtx layout.Context, pinned []backend.Napp) {
 				// scroll from here on
 				gtx.Execute(pointer.GrabCmd{Tag: g, ID: e.PointerID})
 				g.dragging = true
-				g.dragID = pinned[g.pressIdx].ID
+				g.dragID = pinned[g.pressIdx].Key
 				g.grabOff = g.pressPos.Sub(g.cellOrigin(g.pressIdx))
 			}
 			g.target = g.cellAt(e.Position, true)
@@ -157,7 +158,7 @@ func (g *homeGrid) update(gtx layout.Context, pinned []backend.Napp) {
 			if g.dragging {
 				backend.MovePin(g.dragID, g.target)
 			} else if idx := g.cellAt(e.Position, false); idx == g.pressIdx && idx < len(pinned) {
-				backend.Launch(pinned[idx])
+				openHomeItem(pinned[idx])
 			}
 			g.reset()
 		case pointer.Cancel:
@@ -165,22 +166,28 @@ func (g *homeGrid) update(gtx layout.Context, pinned []backend.Napp) {
 		}
 	}
 
-	// a press held in place long enough opens the napp's tab; until then
+	// a press held in place long enough opens the item's tab; until then
 	// come back when it would be due
 	if g.pressed && !g.dragging {
 		if g.pressIdx >= len(pinned) {
 			g.reset()
 		} else if gtx.Now.Sub(g.pressAt) >= homeHold {
-			n := pinned[g.pressIdx]
+			item := pinned[g.pressIdx]
 			g.reset()
-			openNappTab(n)
+			if item.Bundle != nil {
+				setTab(0)
+				setBundleEdit(editBundleEditState(*item.Bundle))
+				setBundleErr("")
+			} else {
+				openNappTab(*item.Napp)
+			}
 		} else {
 			gtx.Execute(op.InvalidateCmd{At: g.pressAt.Add(homeHold)})
 		}
 	}
 
-	// the napp being carried can vanish under the drag (unpinned or
-	// uninstalled meanwhile): drop the drag along with it
+	// the item being carried can vanish under the drag (unpinned,
+	// uninstalled or deleted meanwhile): drop the drag along with it
 	if g.dragging && g.dragFrom(pinned) < 0 {
 		g.reset()
 	}
@@ -190,10 +197,10 @@ func (g *homeGrid) reset() {
 	g.pressed, g.dragging, g.dragID = false, false, ""
 }
 
-// dragFrom is the current index of the napp being dragged, or -1.
-func (g *homeGrid) dragFrom(pinned []backend.Napp) int {
+// dragFrom is the current index of the item being dragged, or -1.
+func (g *homeGrid) dragFrom(pinned []backend.HomeItem) int {
 	for i, n := range pinned {
-		if n.ID == g.dragID {
+		if n.Key == g.dragID {
 			return i
 		}
 	}
@@ -209,9 +216,9 @@ func (g *homeGrid) cellOrigin(idx int) f32.Point {
 }
 
 func (g *homeGrid) Layout(gtx layout.Context, th *material.Theme, st backend.State) layout.Dimensions {
-	if len(st.Pinned) == 0 {
+	if len(st.Home) == 0 {
 		g.reset()
-		l := material.Body2(th, "Nothing pinned yet. Pin napps from the Installed tab to have them here.")
+		l := material.Body2(th, "Nothing pinned yet. Pin napps from the Installed tab, or bundles from the Windows tab, to have them here.")
 		l.Color = currentTheme().muted
 		return l.Layout(gtx)
 	}
@@ -223,7 +230,7 @@ func (g *homeGrid) Layout(gtx layout.Context, th *material.Theme, st backend.Sta
 	g.cellH = gtx.Dp(6+56+6+6) + 2*lineH
 	g.rowH = g.cellH + gtx.Dp(homeGapDp)
 	g.cols = max(1, gtx.Constraints.Max.X/g.cellW)
-	g.n = len(st.Pinned)
+	g.n = len(st.Home)
 
 	size := gtx.Constraints.Max
 	defer clip.Rect{Max: size}.Push(gtx.Ops).Pop()
@@ -234,17 +241,17 @@ func (g *homeGrid) Layout(gtx layout.Context, th *material.Theme, st backend.Sta
 		pointer.CursorPointer.Add(gtx.Ops)
 	}
 
-	g.update(gtx, st.Pinned)
+	g.update(gtx, st.Home)
 
 	// while dragging, the grid shows the order the drop would make, with an
-	// empty slot where the carried napp would land
-	order := st.Pinned
+	// empty slot where the carried item would land
+	order := st.Home
 	if g.dragging {
-		from := g.dragFrom(st.Pinned)
-		order = make([]backend.Napp, 0, len(st.Pinned))
-		order = append(order, st.Pinned[:from]...)
-		order = append(order, st.Pinned[from+1:]...)
-		order = append(order[:g.target], append([]backend.Napp{st.Pinned[from]}, order[g.target:]...)...)
+		from := g.dragFrom(st.Home)
+		order = make([]backend.HomeItem, 0, len(st.Home))
+		order = append(order, st.Home[:from]...)
+		order = append(order, st.Home[from+1:]...)
+		order = append(order[:g.target], append([]backend.HomeItem{st.Home[from]}, order[g.target:]...)...)
 
 		// near the top or bottom edge the list scrolls along
 		edge := float32(gtx.Dp(homeEdgeDp))
@@ -268,7 +275,7 @@ func (g *homeGrid) Layout(gtx layout.Context, th *material.Theme, st backend.Sta
 			n := order[i]
 			children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				switch {
-				case g.dragging && n.ID == g.dragID:
+				case g.dragging && n.Key == g.dragID:
 					return g.placeholder(gtx)
 				case !g.dragging && (i == g.hover || (g.pressed && i == g.pressIdx)):
 					return g.cell(gtx, th, n, currentTheme().card)
@@ -282,21 +289,21 @@ func (g *homeGrid) Layout(gtx layout.Context, th *material.Theme, st backend.Sta
 		})
 	})
 
-	// the carried napp floats over everything, under the pointer
+	// the carried item floats over everything, under the pointer
 	if g.dragging {
-		if from := g.dragFrom(st.Pinned); from >= 0 {
+		if from := g.dragFrom(st.Home); from >= 0 {
 			p := g.pos.Sub(g.grabOff)
 			defer op.Offset(image.Pt(int(p.X), int(p.Y))).Push(gtx.Ops).Pop()
-			g.cell(gtx, th, st.Pinned[from], currentTheme().chipBg)
+			g.cell(gtx, th, st.Home[from], currentTheme().chipBg)
 		}
 	}
 
 	return dims
 }
 
-// cell draws one napp: its icon with its name under it, on bg (transparent
+// cell draws one item: its icon with its name under it, on bg (transparent
 // for none).
-func (g *homeGrid) cell(gtx layout.Context, th *material.Theme, n backend.Napp, bg color.NRGBA) layout.Dimensions {
+func (g *homeGrid) cell(gtx layout.Context, th *material.Theme, item backend.HomeItem, bg color.NRGBA) layout.Dimensions {
 	sz := image.Pt(g.cellW, g.cellH)
 	gtx.Constraints = layout.Exact(sz)
 	if bg.A > 0 {
@@ -309,13 +316,18 @@ func (g *homeGrid) cell(gtx layout.Context, th *material.Theme, n backend.Napp, 
 		gtx.Constraints.Min = image.Point{}
 		return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return nappIcon(gtx, n, 56)
+				if item.Bundle != nil {
+					return bundleIcon(gtx, *item.Bundle, 56)
+				}
+				return nappIcon(gtx, *item.Napp, 56)
 			}),
 			layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				name := n.Name
-				if name == "" {
-					name = n.ID
+				name := item.Key
+				if item.Bundle != nil {
+					name = item.Bundle.Name
+				} else if item.Napp.Name != "" {
+					name = item.Napp.Name
 				}
 				l := material.Caption(th, name)
 				l.Alignment = text.Middle
@@ -327,7 +339,7 @@ func (g *homeGrid) cell(gtx layout.Context, th *material.Theme, n backend.Napp, 
 	return layout.Dimensions{Size: sz}
 }
 
-// placeholder is the empty slot the carried napp would land in.
+// placeholder is the empty slot the carried item would land in.
 func (g *homeGrid) placeholder(gtx layout.Context) layout.Dimensions {
 	sz := image.Pt(g.cellW, g.cellH)
 	r := gtx.Dp(8)
@@ -336,4 +348,51 @@ func (g *homeGrid) placeholder(gtx layout.Context) layout.Dimensions {
 	defer clip.RRect{Rect: rect, NW: r, NE: r, SW: r, SE: r}.Push(gtx.Ops).Pop()
 	paint.Fill(gtx.Ops, currentTheme().imageBg)
 	return layout.Dimensions{Size: sz}
+}
+
+// openHomeItem is a click on the home tab: a napp opens, a bundle opens all
+// of its windows.
+func openHomeItem(item backend.HomeItem) {
+	if item.Bundle == nil {
+		backend.Launch(*item.Napp)
+		return
+	}
+	name := item.Bundle.Name
+	go func() {
+		if err := backend.RunBundle(name); err != nil {
+			backend.SetFetchErr("bundle failed: " + err.Error())
+		}
+	}()
+}
+
+// bundleIcon is a bundle on the home tab: its napps' icons, up to four, two
+// by two on a tile, so it reads as a folder of the napps it opens.
+func bundleIcon(gtx layout.Context, b backend.BundleInfo, size int) layout.Dimensions {
+	sz := gtx.Dp(unit.Dp(size))
+	r := gtx.Dp(10)
+	tile := clip.RRect{Rect: image.Rect(0, 0, sz, sz), NW: r, NE: r, SW: r, SE: r}.Push(gtx.Ops)
+	paint.Fill(gtx.Ops, currentTheme().chipBg)
+	tile.Pop()
+
+	var napps []backend.Napp
+	for _, e := range b.Entries {
+		if len(napps) == 4 {
+			break
+		}
+		if n, ok := backend.InstalledNapp(e.NappID); ok {
+			napps = append(napps, n)
+		}
+	}
+	pad, gap := size/10, size/14
+	cellDp := (size - 2*pad - gap) / 2
+	for i, n := range napps {
+		x := pad + (i%2)*(cellDp+gap)
+		y := pad + (i/2)*(cellDp+gap)
+		t := op.Offset(image.Pt(gtx.Dp(unit.Dp(x)), gtx.Dp(unit.Dp(y)))).Push(gtx.Ops)
+		cgtx := gtx
+		cgtx.Constraints = layout.Exact(image.Pt(gtx.Dp(unit.Dp(cellDp)), gtx.Dp(unit.Dp(cellDp))))
+		nappIcon(cgtx, n, cellDp)
+		t.Pop()
+	}
+	return layout.Dimensions{Size: image.Pt(sz, sz)}
 }
