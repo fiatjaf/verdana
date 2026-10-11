@@ -937,7 +937,7 @@ private fun WindowsTab(
             }
         }
         items(st.managedWindows, key = { "w:" + it.instance }) { w ->
-            WindowRow(w, theme,
+            WindowRow(activity, w, theme,
                 checked = w.instance in checked,
                 onCheck = { on -> checked = if (on) checked + w.instance else checked - w.instance },
                 onOpen = { if (w.open) activity.bringWindow(w.instance) else activity.reopenWindow(w.instance) },
@@ -965,7 +965,9 @@ private fun WindowsTab(
 // WindowRow is one window: tap to bring it up (or reopen it, if closed), the
 // checkbox puts it into the next bundle, and the pills are where it has been.
 @Composable
+@OptIn(ExperimentalLayoutApi::class)
 private fun WindowRow(
+    activity: MainActivity,
     w: WindowInfo,
     theme: Theme,
     checked: Boolean,
@@ -999,11 +1001,14 @@ private fun WindowRow(
                 maxLines = 1,
             )
             if (w.history.isNotEmpty()) {
-                Row(
-                    Modifier.padding(top = 4.dp).horizontalScroll(rememberScrollState()),
+                FlowRow(
+                    Modifier.padding(top = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    w.history.forEach { ActionPill(it, theme) }
+                    // the same action twice in a row says nothing a single one doesn't
+                    w.history.filterIndexed { i, a -> i == 0 || w.history[i - 1] != a }
+                        .forEach { ActionPill(activity, it, theme) }
                 }
             }
         }
@@ -1015,38 +1020,131 @@ private fun WindowRow(
     }
 }
 
-// ActionPill is one action a window was sent: its name, then a short take on
-// the payload.
+// ActionPill is one action as a pill: its name, then whatever of the payload
+// is worth showing (see describeAction), and a × at the end when onRemove is
+// given.
 @Composable
-private fun ActionPill(a: BundleAction, theme: Theme) {
-    Surface(color = theme.chipBg, shape = RoundedCornerShape(5.dp)) {
-        Row(Modifier.padding(horizontal = 6.dp, vertical = 3.dp)) {
-            Text(a.type, color = theme.chipFg, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-            val text = payloadSummary(a.payload)
-            if (text.isNotBlank()) {
-                Text(" $text", color = theme.chipFg, fontSize = 11.sp, maxLines = 1)
+private fun ActionPill(activity: MainActivity, a: BundleAction, theme: Theme, onRemove: (() -> Unit)? = null) {
+    val d = remember(a) { describeAction(a) }
+    Surface(color = theme.chipBg, shape = RoundedCornerShape(8.dp)) {
+        Row(
+            Modifier.padding(start = 6.dp, end = if (onRemove == null) 6.dp else 2.dp, top = 3.dp, bottom = 3.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            val withDetail = d.text.isNotBlank() || d.pubkey.isNotBlank()
+            Text(if (withDetail) d.type + ":" else d.type, color = theme.chipFg, fontSize = 11.sp,
+                fontWeight = FontWeight.Bold, maxLines = 1)
+            if (d.text.isNotBlank()) {
+                Text(d.text, color = theme.chipFg, fontSize = 11.sp, maxLines = 1)
+            }
+            if (d.pubkey.isNotBlank()) {
+                val p = rememberPillProfile(activity, d.pubkey)
+                if (d.avatar) Avatar(p?.picture ?: "", theme, 14)
+                val name = p?.shortName?.ifBlank { null }?.let { cut(it, 20) } ?: (d.pubkey.take(8) + "…")
+                Text(name, color = theme.chipFg, fontSize = 11.sp, maxLines = 1)
+            }
+            if (onRemove != null) {
+                Text(
+                    "×",
+                    color = theme.muted,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .clickable(onClick = onRemove)
+                        .padding(horizontal = 4.dp),
+                )
             }
         }
     }
 }
 
-// payloadSummary is an action payload cut down to a pill: a string as
-// itself, an event by its kind, anything else as its JSON.
-private fun payloadSummary(raw: String): String {
-    if (raw.isBlank()) return ""
-    val text = try {
-        when (val v = org.json.JSONTokener(raw).nextValue()) {
-            is String -> v.removePrefix("nostr:")
-            is org.json.JSONObject -> when {
-                v.has("kind") && v.has("pubkey") -> "kind " + v.optInt("kind")
-                v.has("term") -> v.optString("term")
-                v.has("value") -> v.optString("value")
-                else -> raw
-            }
-            else -> raw
+// PillDesc is what an action pill says: the action name, then a readable
+// summary of the payload for the common actions (see NAPP.md) or its JSON,
+// cut short, for anything else. With pubkey the pill ends with that user's
+// name (and picture, with avatar).
+private data class PillDesc(
+    val type: String,
+    val text: String = "",
+    val pubkey: String = "",
+    val avatar: Boolean = false,
+)
+
+private fun describeAction(a: BundleAction): PillDesc {
+    if (a.payload.isBlank()) return PillDesc(a.type)
+    val v = try { org.json.JSONTokener(a.payload).nextValue() } catch (_: Exception) { null }
+    val hex = Regex("^[0-9a-f]{64}$")
+    when {
+        a.type == "profile" -> if (v is String && hex.matches(v)) {
+            return PillDesc(a.type, pubkey = v, avatar = true)
         }
-    } catch (_: Exception) { raw }
-    return if (text.length > 24) text.take(23) + "…" else text
+        a.type == "view" || a.type.startsWith("view:") -> {
+            // a resolved event (maybe as JSON in a string), or, only for a
+            // plain view, a nevent/naddr
+            val ev = when {
+                v is org.json.JSONObject -> v
+                v is String && v.trimStart().startsWith("{") ->
+                    try { org.json.JSONObject(v) } catch (_: Exception) { null }
+                else -> null
+            }
+            if (ev != null && ev.has("kind")) {
+                val pk = ev.optString("pubkey")
+                // the kind is said in the text already
+                return if (hex.matches(pk)) PillDesc("view", "kind ${ev.optInt("kind")} from", pubkey = pk)
+                else PillDesc("view", "kind ${ev.optInt("kind")}")
+            }
+            if (v is String) return PillDesc(a.type, cut(v.removePrefix("nostr:"), 24))
+        }
+        a.type == "wiki-term" || a.type == "hashtag" -> {
+            val field = if (a.type == "wiki-term") "term" else "value"
+            val t = when (v) {
+                is String -> v
+                is org.json.JSONObject -> v.optString(field, "").ifBlank { null }
+                else -> null
+            }
+            if (t != null) return PillDesc(a.type, cut(t, 32))
+        }
+        a.type == "user-search" -> if (v is String) return PillDesc(a.type, cut(v, 32))
+        a.type == "relay" -> {
+            val urls = when (v) {
+                is String -> listOf(v)
+                is org.json.JSONArray -> (0 until v.length()).map { v.optString(it) }
+                else -> listOf()
+            }
+            if (urls.isNotEmpty()) {
+                return PillDesc(a.type, cut(urls.joinToString(", ") {
+                    it.removePrefix("wss://").removePrefix("ws://")
+                }, 40))
+            }
+        }
+    }
+    return PillDesc(a.type, cut(a.payload, 40))
+}
+
+private fun cut(s: String, max: Int): String {
+    val t = s.trim().split(Regex("\\s+")).joinToString(" ")
+    return if (t.length > max) t.take(max) + "…" else t
+}
+
+// pillProfiles keeps the profiles pills have loaded, so a list redrawn (or
+// scrolled back to) doesn't load them all over again.
+private val pillProfiles = ConcurrentHashMap<String, ProfileDetail>()
+
+@Composable
+private fun rememberPillProfile(activity: MainActivity, pubkey: String): ProfileDetail? {
+    var p by remember(pubkey) { mutableStateOf(pillProfiles[pubkey]) }
+    LaunchedEffect(pubkey) {
+        if (p == null) {
+            activity.loadProfile(pubkey) { loaded ->
+                if (loaded != null) {
+                    pillProfiles[pubkey] = loaded
+                    p = loaded
+                }
+            }
+        }
+    }
+    return p
 }
 
 // BundleRow is one stored bundle: tap to open all of its windows; its napps,
@@ -1112,9 +1210,10 @@ private fun BundleRow(
     }
 }
 
-// BundleEditor is the bundle's name and one actions textarea per napp, one
-// {"type": …, "payload": …} object per line, as on the desktop.
+// BundleEditor is the bundle's name and, per napp, the actions it gets as
+// pills that can be removed, as on the desktop.
 @Composable
+@OptIn(ExperimentalLayoutApi::class)
 private fun BundleEditor(
     activity: MainActivity,
     theme: Theme,
@@ -1123,7 +1222,7 @@ private fun BundleEditor(
     onSaved: () -> Unit,
 ) {
     var name by remember(edit) { mutableStateOf(edit.oldName) }
-    val lines = remember(edit) { edit.draft.map { it.lines }.toMutableStateList() }
+    val actions = remember(edit) { edit.draft.map { draftActions(it.lines) }.toMutableStateList() }
     var err by remember(edit) { mutableStateOf("") }
     var saving by remember(edit) { mutableStateOf(false) }
 
@@ -1148,17 +1247,23 @@ private fun BundleEditor(
         LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             items(edit.draft.size) { i ->
                 Column {
-                    Text("Actions of ${edit.draft[i].label} (one JSON object per line)",
+                    Text("Actions of ${edit.draft[i].label}",
                         color = theme.subtle, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(4.dp))
-                    OutlinedTextField(
-                        value = lines[i],
-                        onValueChange = { lines[i] = it },
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp),
-                        placeholder = { Text("{\"type\": \"profile\", \"payload\": \"npub1…\"}", color = theme.inputHint) },
-                        colors = outlinedColors(theme),
-                        textStyle = LocalTextStyle.current.copy(fontSize = 12.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace),
-                    )
+                    if (actions[i].isEmpty()) {
+                        Text("No actions: the napp just opens.", color = theme.muted, fontSize = 12.sp)
+                    } else {
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            actions[i].forEachIndexed { j, a ->
+                                ActionPill(activity, a, theme, onRemove = {
+                                    actions[i] = actions[i].filterIndexed { k, _ -> k != j }
+                                })
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1172,7 +1277,7 @@ private fun BundleEditor(
                         return@Button
                     }
                     saving = true
-                    val draft = edit.draft.mapIndexed { i, e -> e.copy(lines = lines[i]) }
+                    val draft = edit.draft.mapIndexed { i, e -> e.copy(lines = draftLines(actions[i])) }
                     activity.saveBundle(edit.oldName, name.trim(), draft) { e ->
                         saving = false
                         if (e == null) onSaved() else err = e
@@ -1185,6 +1290,21 @@ private fun BundleEditor(
             ) { Text("Cancel") }
         }
     }
+}
+
+// draftActions reads a draft entry's lines (one {"type", "payload"} object
+// each, see backend/bundle_draft.go) into actions, skipping what doesn't read.
+private fun draftActions(lines: String): List<BundleAction> =
+    lines.lines().map { it.trim() }.filter { it.isNotEmpty() }.mapNotNull { line ->
+        try {
+            parseActions(org.json.JSONArray().put(org.json.JSONObject(line))).firstOrNull()
+        } catch (_: Exception) { null }
+    }
+
+// draftLines is the actions back as the lines the backend reads.
+private fun draftLines(actions: List<BundleAction>): String = actions.joinToString("\n") { a ->
+    "{\"type\":" + org.json.JSONObject.quote(a.type) +
+        (if (a.payload.isBlank()) "" else ",\"payload\":" + a.payload) + "}"
 }
 
 // iconHash mirrors backend.Napp.IconHash: the icon's blob sha256.

@@ -10,6 +10,7 @@ import (
 	"verdana/backend"
 
 	"gioui.org/font"
+	"gioui.org/io/pointer"
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/clip"
@@ -174,13 +175,15 @@ func historyPills(th *material.Theme, actions []backend.ShortcutAction) []layout
 		}
 		d := describeAction(a)
 		out = append(out, func(gtx layout.Context) layout.Dimensions {
-			return actionPill(gtx, th, d)
+			return actionPill(gtx, th, d, nil)
 		})
 	}
 	return out
 }
 
-func actionPill(gtx layout.Context, th *material.Theme, d pillDesc) layout.Dimensions {
+// actionPill draws one action as a pill, with trailing (a remove button,
+// say) at its end when given.
+func actionPill(gtx layout.Context, th *material.Theme, d pillDesc, trailing layout.Widget) layout.Dimensions {
 	p := currentTheme()
 	caption := func(s string, bold bool) layout.Widget {
 		return func(gtx layout.Context) layout.Dimensions {
@@ -221,6 +224,9 @@ func actionPill(gtx layout.Context, th *material.Theme, d pillDesc) layout.Dimen
 			}
 			children = append(children, gap(caption(name, false)))
 		}
+		if trailing != nil {
+			children = append(children, gap(trailing))
+		}
 		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx, children...)
 	})
 	call := macro.Stop()
@@ -257,4 +263,28 @@ func flow(gtx layout.Context, gap unit.Dp, children []layout.Widget) layout.Dime
 		x += dims.Size.X + g
 	}
 	return layout.Dimensions{Size: image.Pt(width, y+lineH)}
+}
+
+// removablePills is a bundle entry's actions in the editor: one pill each,
+// in order, every one with a × that takes it out of the bundle.
+func removablePills(th *material.Theme, e *bundleEditEntry) []layout.Widget {
+	out := make([]layout.Widget, 0, len(e.actions))
+	for i, a := range e.actions {
+		d := describeAction(a)
+		btn := &e.removeBtns[i]
+		out = append(out, func(gtx layout.Context) layout.Dimensions {
+			return actionPill(gtx, th, d, func(gtx layout.Context) layout.Dimensions {
+				pointer.CursorPointer.Add(gtx.Ops)
+				return withTooltip(gtx, btn, "Take this action out of the bundle", func(gtx layout.Context) layout.Dimensions {
+					return btn.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						l := material.Caption(th, "×")
+						l.Color = currentTheme().muted
+						l.Font.Weight = font.Bold
+						return l.Layout(gtx)
+					})
+				})
+			})
+		})
+	}
+	return out
 }

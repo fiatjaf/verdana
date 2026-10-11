@@ -280,7 +280,7 @@ fun parseNapp(n: JSONObject): Napp {
     )
 }
 
-private fun parseActions(arr: JSONArray?): List<BundleAction> {
+fun parseActions(arr: JSONArray?): List<BundleAction> {
     if (arr == null) return listOf()
     return (0 until arr.length()).map { j ->
         val a = arr.getJSONObject(j)

@@ -748,8 +748,8 @@ func bundleRows(th *material.Theme, st backend.State, btns []bundleRowBtns) (out
 }
 
 // layoutBundleEditor is the overlay a "Create bundle…" (or an "Edit")
-// click opens over the Windows tab: the bundle name, one actions textarea
-// per napp of the bundle (one action per line), save and cancel.
+// click opens over the Windows tab: the bundle name, the actions of each napp
+// of the bundle as pills that can be removed, save and cancel.
 func layoutBundleEditor(
 	gtx layout.Context,
 	th *material.Theme,
@@ -757,6 +757,7 @@ func layoutBundleEditor(
 	cancelBtn *widget.Clickable,
 	edit *bundleEditState,
 ) layout.Dimensions {
+	removeClickedActions(gtx, edit)
 	title := "New bundle"
 	if edit.name != "" {
 		title = "Edit bundle"
@@ -793,18 +794,22 @@ func layoutBundleEditor(
 			fl := &widget.List{}
 			fl.Axis = layout.Vertical
 			return material.List(th, fl).Layout(gtx, len(edit.entries), func(gtx layout.Context, i int) layout.Dimensions {
-				ed := &edit.entries[i].ed
-				label := edit.entries[i].label
+				e := &edit.entries[i]
 				return layout.Inset{Bottom: unit.Dp(10)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 					return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							l := emph(material.Body2(th, "Actions of "+label+" (one JSON object per line)"))
+							l := emph(material.Body2(th, "Actions of "+e.label))
 							l.Color = p.subtle
 							return l.Layout(gtx)
 						}),
 						layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return editorBoxHeight(gtx, th, ed, 120, `{"type": "profile", "payload": "npub1…"}`)
+							if len(e.actions) == 0 {
+								l := material.Caption(th, "No actions: the napp just opens.")
+								l.Color = p.muted
+								return l.Layout(gtx)
+							}
+							return flow(gtx, unit.Dp(4), removablePills(th, e))
 						}),
 					)
 				})
@@ -828,13 +833,6 @@ func layoutBundleEditor(
 			)
 		}),
 	)
-}
-
-// editorBoxHeight is an editorBox with a minimum height, for the multi-line
-// actions textareas.
-func editorBoxHeight(gtx layout.Context, th *material.Theme, ed *widget.Editor, minHeight int, hint string) layout.Dimensions {
-	gtx.Constraints.Min.Y = gtx.Dp(unit.Dp(minHeight))
-	return editorBox(gtx, th, ed, hint)
 }
 
 func layoutNappsTab(

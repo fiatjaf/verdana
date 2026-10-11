@@ -49,18 +49,21 @@ type gioState struct {
 }
 
 // bundleEditState is the editor overlay for one bundle: the fields it is
-// built from (one napp, its action textarea) and the name of the bundle
-// when it is a stored one being edited ("": creating a new one).
+// built from (one napp, its actions) and the name of the bundle when it is a
+// stored one being edited ("": creating a new one).
 type bundleEditState struct {
 	name    string // the stored bundle being edited, "" for a new one
 	nameEd  widget.Editor
 	entries []bundleEditEntry
 }
 
+// bundleEditEntry is one napp of the bundle being edited, with the actions
+// it gets when the bundle opens, each drawn as a pill with a remove button.
 type bundleEditEntry struct {
-	nappID string
-	label  string
-	ed     widget.Editor
+	nappID     string
+	label      string
+	actions    []backend.ShortcutAction
+	removeBtns []widget.Clickable
 }
 
 // bundleRowBtns are the buttons of one bundle row on the Windows tab.
