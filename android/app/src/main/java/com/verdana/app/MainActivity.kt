@@ -9,7 +9,13 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -164,8 +170,19 @@ class MainActivity : ComponentActivity() {
                 BackHandler(enabled = showProfile && state.phase == "main" && prompt == null) {
                     showProfile = false
                 }
-                Column(Modifier.fillMaxSize()) {
-                    if (state.phase != "login" && state.phase != "loading") {
+                // edge-to-edge: the surface paints behind the system bars, but
+                // the content keeps clear of the navigation bar, cutouts and the
+                // keyboard; the top is left to the header, which paints its own
+                // background under the status bar
+                val hasHeader = state.phase != "login" && state.phase != "loading"
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .windowInsetsPadding(
+                            WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom)
+                        )
+                ) {
+                    if (hasHeader) {
                         AppHeader(
                             st = state,
                             theme = theme,
@@ -174,7 +191,7 @@ class MainActivity : ComponentActivity() {
                             onProfile = { showProfile = true },
                         )
                     }
-                    Box(Modifier.weight(1f)) {
+                    Box(Modifier.weight(1f).then(if (hasHeader) Modifier else Modifier.statusBarsPadding())) {
                         when {
                             state.phase == "login" -> LoginScreen(this@MainActivity, state)
                             showProfile && state.phase == "main" -> ProfileScreen(
