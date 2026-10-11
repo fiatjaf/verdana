@@ -319,7 +319,10 @@ func (g *homeGrid) cell(gtx layout.Context, th *material.Theme, item backend.Hom
 		bgArea.Pop()
 	}
 	layout.UniformInset(unit.Dp(6)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		gtx.Constraints.Min = image.Point{}
+		// keep the full width as the minimum: the column then spans the
+		// cell and centers in it, instead of hugging its widest child at
+		// the cell's left edge
+		gtx.Constraints.Min.Y = 0
 		return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				if item.Bundle != nil {
