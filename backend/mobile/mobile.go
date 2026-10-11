@@ -298,6 +298,55 @@ func RunBundle(name string) {
 	}()
 }
 
+// BundleDraftFromWindows starts a new bundle from the windows picked on the
+// Windows tab: instancesJSON is their instance ids as a JSON array. Returns
+// the editor's draft as JSON, [{nappId, label, lines}], one entry per napp,
+// lines being its actions as one JSON object per line.
+func BundleDraftFromWindows(instancesJSON string) string {
+	var instances []string
+	if err := json.Unmarshal([]byte(instancesJSON), &instances); err != nil {
+		return "[]"
+	}
+	return draftJSON(backend.DraftFromWindows(instances))
+}
+
+// BundleDraft is a stored bundle as an editor draft (see
+// BundleDraftFromWindows), "[]" when there is no bundle by that name.
+func BundleDraft(name string) string {
+	draft := backend.DraftOfStoredBundle(name)
+	if draft == nil {
+		return "[]"
+	}
+	return draftJSON(draft)
+}
+
+func draftJSON(draft []backend.BundleDraftEntry) string {
+	data, err := json.Marshal(draft)
+	if err != nil {
+		return "[]"
+	}
+	return string(data)
+}
+
+// SaveBundle stores what the bundle editor holds: a new bundle when oldName
+// is "", otherwise the one called oldName, renamed to name. draftJSON is
+// the draft as BundleDraftFromWindows gave it, lines edited. The error
+// says what to fix (a line that isn't JSON, a missing name).
+func SaveBundle(oldName, name, draftJSON string) error {
+	var draft []backend.BundleDraftEntry
+	if err := json.Unmarshal([]byte(draftJSON), &draft); err != nil {
+		return err
+	}
+	return backend.SaveBundleDraft(oldName, name, draft)
+}
+
+// DeleteBundle forgets a bundle and takes it off the home tab.
+func DeleteBundle(name string) error { return backend.DeleteBundle(name) }
+
+// ReopenWindow opens a window closed earlier this run again, back on what
+// it was showing.
+func ReopenWindow(instance string) { backend.ReopenWindow(instance) }
+
 // Launch opens an installed napp, or surfaces the window it already has.
 func Launch(id string) { backend.LaunchByID(id) }
 

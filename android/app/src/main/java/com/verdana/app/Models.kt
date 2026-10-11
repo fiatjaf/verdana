@@ -36,7 +36,17 @@ data class ProfileDetail(
     val website: String,
 )
 
-data class WindowInfo(val instance: String, val nappId: String, val name: String, val action: String)
+// a napp window. open is false for one closed earlier this run, which the
+// Windows tab can reopen; history is every action it was sent this run (only
+// managedWindows carries it).
+data class WindowInfo(
+    val instance: String,
+    val nappId: String,
+    val name: String,
+    val action: String,
+    val open: Boolean = true,
+    val history: List<BundleAction> = listOf(),
+)
 
 data class PromptOption(
     val label: String,
@@ -74,6 +84,24 @@ data class BundleInfo(
     val shortcut: Boolean,
 )
 
+// BundleDraftEntry is one napp of a bundle in the editor: lines are its
+// actions, one {"type": …, "payload": …} JSON object per line.
+data class BundleDraftEntry(val nappId: String, val label: String, val lines: String)
+
+fun parseBundleDraft(json: String): List<BundleDraftEntry> = try {
+    val arr = JSONArray(json)
+    (0 until arr.length()).map {
+        val e = arr.getJSONObject(it)
+        BundleDraftEntry(e.optString("nappId"), e.optString("label"), e.optString("lines"))
+    }
+} catch (_: Exception) { listOf() }
+
+fun bundleDraftJSON(draft: List<BundleDraftEntry>): String = JSONArray().apply {
+    draft.forEach {
+        put(JSONObject().put("nappId", it.nappId).put("label", it.label).put("lines", it.lines))
+    }
+}.toString()
+
 // HomeItem is one cell of the home tab: a napp or a bundle, never both. key
 // is what movePin calls it.
 data class HomeItem(val key: String, val napp: Napp?, val bundle: BundleInfo?)
@@ -96,6 +124,7 @@ data class LauncherState(
     val bundles: List<BundleInfo> = listOf(),
     val busy: List<String>,
     val windows: List<WindowInfo>,
+    val managedWindows: List<WindowInfo> = listOf(),
     val updateCheckRunning: Boolean = false,
 )
 
@@ -106,7 +135,6 @@ fun parseState(json: String): LauncherState {
         return (0 until arr.length()).map { parseNapp(arr.getJSONObject(it)) }
     }
 
-    val windowsArr = o.optJSONArray("windows") ?: JSONArray()
     val busyArr = o.optJSONArray("busy") ?: JSONArray()
     val relaysArr = o.optJSONArray("relays") ?: JSONArray()
     return LauncherState(
@@ -136,15 +164,8 @@ fun parseState(json: String): LauncherState {
         },
         busy = (0 until busyArr.length()).map { busyArr.getString(it) },
         updateCheckRunning = o.optBoolean("updateCheckRunning"),
-        windows = (0 until windowsArr.length()).map { i ->
-            val w = windowsArr.getJSONObject(i)
-            WindowInfo(
-                instance = w.optString("instance"),
-                nappId = w.optString("nappId"),
-                name = w.optString("name"),
-                action = w.optString("action"),
-            )
-        },
+        windows = parseWindows(o.optJSONArray("windows")),
+        managedWindows = parseWindows(o.optJSONArray("managedWindows")),
     )
 }
 
@@ -259,25 +280,44 @@ fun parseNapp(n: JSONObject): Napp {
     )
 }
 
+private fun parseActions(arr: JSONArray?): List<BundleAction> {
+    if (arr == null) return listOf()
+    return (0 until arr.length()).map { j ->
+        val a = arr.getJSONObject(j)
+        // back to raw JSON: a string payload keeps its quotes
+        val payload = when (val p = a.opt("payload")) {
+            null, JSONObject.NULL -> ""
+            is String -> JSONObject.quote(p)
+            else -> p.toString()
+        }
+        BundleAction(a.optString("type"), payload)
+    }
+}
+
+private fun parseWindows(arr: JSONArray?): List<WindowInfo> {
+    if (arr == null) return listOf()
+    return (0 until arr.length()).map { i ->
+        val w = arr.getJSONObject(i)
+        WindowInfo(
+            instance = w.optString("instance"),
+            nappId = w.optString("nappId"),
+            name = w.optString("name"),
+            action = w.optString("action"),
+            open = w.optBoolean("open", true),
+            history = parseActions(w.optJSONArray("history")),
+        )
+    }
+}
+
 fun parseBundle(b: JSONObject): BundleInfo {
     val entriesArr = b.optJSONArray("entries") ?: JSONArray()
     return BundleInfo(
         name = b.optString("name"),
         entries = (0 until entriesArr.length()).map { i ->
             val e = entriesArr.getJSONObject(i)
-            val actionsArr = e.optJSONArray("actions") ?: JSONArray()
             BundleEntry(
                 nappId = e.optString("nappId"),
-                actions = (0 until actionsArr.length()).map { j ->
-                    val a = actionsArr.getJSONObject(j)
-                    // back to raw JSON: a string payload keeps its quotes
-                    val payload = when (val p = a.opt("payload")) {
-                        null, JSONObject.NULL -> ""
-                        is String -> JSONObject.quote(p)
-                        else -> p.toString()
-                    }
-                    BundleAction(a.optString("type"), payload)
-                },
+                actions = parseActions(e.optJSONArray("actions")),
             )
         },
         pinned = b.optBoolean("pinned"),

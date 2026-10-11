@@ -517,7 +517,8 @@ func gioMain() {
 								if saveBundleBtn.Clicked(gtx) {
 									name := strings.TrimSpace(ui.bundleEditing.nameEd.Text())
 									oldName := ui.bundleEditing.name
-									spec, err := bundleSpecJSON(ui.bundleEditing)
+									draft := bundleDraft(ui.bundleEditing)
+									_, err := backend.ParseBundleDraft(draft)
 									switch {
 									case err != nil:
 										setBundleErr(err.Error())
@@ -530,7 +531,7 @@ func gioMain() {
 										editing := ui.bundleEditing
 										ui.bundleEditing = nil
 										clearBundleChecks()
-										go saveBundle(name, oldName, spec, editing)
+										go saveBundle(name, oldName, draft, editing)
 									}
 								}
 								if cancelBundleBtn.Clicked(gtx) {
@@ -538,9 +539,9 @@ func gioMain() {
 								}
 							} else {
 								if createBundleBtn.Clicked(gtx) {
-									entries := pickedBundleWindows(st)
-									if len(entries) > 0 {
-										setBundleEdit(newBundleEditState(entries))
+									draft := backend.DraftFromWindows(pickedBundleWindows(st))
+									if len(draft) > 0 {
+										setBundleEdit(newBundleEditState("", draft))
 										setBundleErr("")
 									}
 								}

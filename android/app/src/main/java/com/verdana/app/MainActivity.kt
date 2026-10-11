@@ -79,6 +79,33 @@ class MainActivity : ComponentActivity() {
     fun pinBundle(name: String) = Mobile.pinBundle(name)
     fun unpinBundle(name: String) = Mobile.unpinBundle(name)
     fun runBundle(name: String) = Mobile.runBundle(name)
+    fun reopenWindow(instance: String) = Mobile.reopenWindow(instance)
+
+    // the bundle editor's drafts: a new one from the windows picked on the
+    // Windows tab, or a stored bundle's (see backend/bundle_draft.go)
+    fun bundleDraftFromWindows(instances: List<String>): List<BundleDraftEntry> =
+        parseBundleDraft(Mobile.bundleDraftFromWindows(org.json.JSONArray(instances).toString()))
+    fun bundleDraft(name: String): List<BundleDraftEntry> = parseBundleDraft(Mobile.bundleDraft(name))
+
+    // saveBundle stores the editor's draft off the main thread; onDone gets
+    // null when it worked, or what to fix
+    fun saveBundle(oldName: String, name: String, draft: List<BundleDraftEntry>, onDone: (String?) -> Unit) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            val err = try {
+                Mobile.saveBundle(oldName, name, bundleDraftJSON(draft))
+                null
+            } catch (e: Exception) {
+                e.message ?: "could not save the bundle"
+            }
+            withContext(Dispatchers.Main) { onDone(err) }
+        }
+    }
+
+    fun deleteBundle(name: String) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            try { Mobile.deleteBundle(name) } catch (_: Exception) {}
+        }
+    }
     fun checkForUpdates() = Mobile.checkForUpdates()
     fun toggleTheme() = VerdanaHost.toggleTheme()
 

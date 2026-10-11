@@ -220,17 +220,20 @@ fun LoginScreen(activity: MainActivity, st: LauncherState) {
 @Composable
 fun LauncherScreen(activity: MainActivity, st: LauncherState) {
     val theme = themeByName(st.theme)
-    // tabs: 0 home, 1 installed, 2 discovery. Home is where the launcher
-    // opens as long as anything is pinned there.
+    // tabs: 0 home, 1 windows, 2 installed, 3 discovery. Home is where the
+    // launcher opens as long as anything is pinned there.
     var tab by remember {
         mutableStateOf(
             when {
                 st.home.isNotEmpty() -> 0
-                st.installed.isNotEmpty() -> 1
-                else -> 2
+                st.installed.isNotEmpty() -> 2
+                else -> 3
             }
         )
     }
+    // the bundle editor, over the Windows tab while it is open: from
+    // "Create bundle…" there, an Edit there, or holding a bundle on Home
+    var bundleEdit by remember { mutableStateOf<BundleEdit?>(null) }
     var relaysEd by remember(st.relays.hashCode()) { mutableStateOf(st.relays.joinToString("\n")) }
     var discoveryFilter by remember { mutableStateOf("") }
     var installedFilter by remember { mutableStateOf("") }
@@ -264,12 +267,14 @@ fun LauncherScreen(activity: MainActivity, st: LauncherState) {
 
     Column(Modifier.fillMaxSize().padding(16.dp)) {
         // tabs, with the ephemeral one at the end
-        Row {
+        Row(Modifier.horizontalScroll(rememberScrollState())) {
             TabChip("Home", tab == 0 && detailNapp == null && detailProfile == null, theme) { pickTab(0) }
             Spacer(Modifier.width(8.dp))
-            TabChip("Installed", tab == 1 && detailNapp == null && detailProfile == null, theme) { pickTab(1) }
+            TabChip("Windows", tab == 1 && detailNapp == null && detailProfile == null, theme) { pickTab(1) }
             Spacer(Modifier.width(8.dp))
-            TabChip("Discovery", tab == 2 && detailNapp == null && detailProfile == null, theme) { pickTab(2) }
+            TabChip("Installed", tab == 2 && detailNapp == null && detailProfile == null, theme) { pickTab(2) }
+            Spacer(Modifier.width(8.dp))
+            TabChip("Discovery", tab == 3 && detailNapp == null && detailProfile == null, theme) { pickTab(3) }
             if (freshDetail != null) {
                 Spacer(Modifier.width(8.dp))
                 TabChip(freshDetail.name.ifBlank { freshDetail.id }.take(18), true, theme) { }
@@ -289,8 +294,12 @@ fun LauncherScreen(activity: MainActivity, st: LauncherState) {
             detailProfile != null -> AuthorProfileDetailScreen(activity, st, theme, detailProfile!!,
                 onBack = { detailProfile = null },
                 onOpenNapp = { openNapp(it) })
-            tab == 0 -> HomeTab(activity, st, theme, onDetail = { openNapp(it) })
-            tab == 1 -> InstalledTab(activity, st, theme, installedFilter, { installedFilter = it },
+            tab == 0 -> HomeTab(activity, st, theme, onDetail = { openNapp(it) }, onEditBundle = {
+                bundleEdit = BundleEdit(it.name, activity.bundleDraft(it.name))
+                pickTab(1)
+            })
+            tab == 1 -> WindowsTab(activity, st, theme, bundleEdit, { bundleEdit = it })
+            tab == 2 -> InstalledTab(activity, st, theme, installedFilter, { installedFilter = it },
                 onDetail = { openNapp(it) }, onAuthor = { openProfile(it) })
             else -> DiscoveryTab(activity, st, theme, relaysEd, { relaysEd = it }, discoveryFilter, { discoveryFilter = it },
                 onDetail = { openNapp(it) }, onAuthor = { openProfile(it) })
@@ -735,10 +744,16 @@ private fun rememberNappIcon(activity: MainActivity, napp: Napp): ImageBitmap? {
 
 // HomeTab is the pinned napps and bundles as a home-screen grid: the icon
 // with its name below, a tap opens it (a bundle opens all of its windows), a
-// long press picks it up to drag it somewhere else (let go of a napp without
-// moving it and it opens the napp's page instead).
+// long press picks it up to drag it somewhere else (let go without moving it
+// and it opens the napp's page, or the bundle's editor, instead).
 @Composable
-private fun HomeTab(activity: MainActivity, st: LauncherState, theme: Theme, onDetail: (Napp) -> Unit) {
+private fun HomeTab(
+    activity: MainActivity,
+    st: LauncherState,
+    theme: Theme,
+    onDetail: (Napp) -> Unit,
+    onEditBundle: (BundleInfo) -> Unit,
+) {
     if (st.home.isEmpty()) {
         Text("Nothing pinned yet. Pin napps from the Installed tab to have them here.", color = theme.muted)
         return
@@ -774,7 +789,10 @@ private fun HomeTab(activity: MainActivity, st: LauncherState, theme: Theme, onD
                             onDragStarted = { from = order.indexOfFirst { it.key == item.key } },
                             onDragStopped = {
                                 val to = order.indexOfFirst { it.key == item.key }
-                                if (to >= 0 && to == from) item.napp?.let(onDetail)
+                                if (to >= 0 && to == from) {
+                                    if (item.bundle != null) onEditBundle(item.bundle)
+                                    else item.napp?.let(onDetail)
+                                }
                                 else if (to >= 0) activity.movePin(item.key, to)
                             },
                         )
@@ -819,6 +837,311 @@ private fun BundleIcon(activity: MainActivity, st: LauncherState, bundle: Bundle
             Box(Modifier.offset(x = ((i % 2) * (cell + gap)).dp, y = ((i / 2) * (cell + gap)).dp)) {
                 NappIcon(rememberNappIcon(activity, napp), theme, cell)
             }
+        }
+    }
+}
+
+// ─── the Windows tab ─────────────────────────────────────────────
+
+// BundleEdit is the bundle editor's content: oldName is the stored bundle
+// being edited, "" for a new one.
+data class BundleEdit(val oldName: String, val draft: List<BundleDraftEntry>)
+
+// WindowsTab is every napp window of this run, open or closed (a closed one
+// can be reopened, back on what it was showing), with checkboxes to make a
+// bundle of some of them, and the bundles made so far below.
+@Composable
+private fun WindowsTab(
+    activity: MainActivity,
+    st: LauncherState,
+    theme: Theme,
+    edit: BundleEdit?,
+    setEdit: (BundleEdit?) -> Unit,
+) {
+    var checked by remember { mutableStateOf(setOf<String>()) }
+    var bundleErr by remember { mutableStateOf("") }
+
+    if (edit != null) {
+        BundleEditor(activity, theme, edit,
+            onCancel = { setEdit(null); bundleErr = "" },
+            onSaved = { setEdit(null); checked = setOf() })
+        return
+    }
+
+    // a bundle outlives the windows it was made from, so this is empty only
+    // when there are neither
+    if (st.managedWindows.isEmpty() && st.bundles.isEmpty()) {
+        Text("No windows opened yet.", color = theme.muted)
+        return
+    }
+
+    // checks of windows that are gone (their napp uninstalled) don't count
+    val picked = st.managedWindows.map { it.instance }.filter { it in checked }
+
+    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxSize()) {
+        if (bundleErr.isNotBlank()) {
+            item { Text(bundleErr, color = theme.danger, fontSize = 13.sp) }
+        }
+        if (picked.isNotEmpty()) {
+            item {
+                Button(onClick = {
+                    val draft = activity.bundleDraftFromWindows(picked)
+                    if (draft.isNotEmpty()) {
+                        bundleErr = ""
+                        setEdit(BundleEdit("", draft))
+                    }
+                }) {
+                    Text("Create bundle of ${picked.size}…", fontSize = 13.sp)
+                }
+            }
+        }
+        items(st.managedWindows, key = { "w:" + it.instance }) { w ->
+            WindowRow(w, theme,
+                checked = w.instance in checked,
+                onCheck = { on -> checked = if (on) checked + w.instance else checked - w.instance },
+                onOpen = { if (w.open) activity.bringWindow(w.instance) else activity.reopenWindow(w.instance) },
+                onClose = { activity.closeWindow(w.instance) })
+        }
+        if (st.bundles.isNotEmpty()) {
+            item {
+                Text("Bundles", color = theme.subtle, fontWeight = FontWeight.Bold, fontSize = 14.sp,
+                    modifier = Modifier.padding(top = 8.dp))
+            }
+            items(st.bundles, key = { "b:" + it.name }) { b ->
+                BundleRow(st, b, theme,
+                    onRun = { activity.runBundle(b.name) },
+                    onPin = { if (b.pinned) activity.unpinBundle(b.name) else activity.pinBundle(b.name) },
+                    onEdit = {
+                        bundleErr = ""
+                        setEdit(BundleEdit(b.name, activity.bundleDraft(b.name)))
+                    },
+                    onDelete = { activity.deleteBundle(b.name) })
+            }
+        }
+    }
+}
+
+// WindowRow is one window: tap to bring it up (or reopen it, if closed), the
+// checkbox puts it into the next bundle, and the pills are where it has been.
+@Composable
+private fun WindowRow(
+    w: WindowInfo,
+    theme: Theme,
+    checked: Boolean,
+    onCheck: (Boolean) -> Unit,
+    onOpen: () -> Unit,
+    onClose: () -> Unit,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(theme.card)
+            .clickable(onClick = onOpen)
+            .padding(start = 4.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Checkbox(checked = checked, onCheckedChange = onCheck)
+        Column(Modifier.weight(1f)) {
+            Text(
+                w.name.ifBlank { w.nappId },
+                color = if (w.open) theme.fg else theme.muted,
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                w.instance + (if (w.open) "" else " · closed"),
+                color = theme.muted,
+                fontSize = 11.sp,
+                maxLines = 1,
+            )
+            if (w.history.isNotEmpty()) {
+                Row(
+                    Modifier.padding(top = 4.dp).horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    w.history.forEach { ActionPill(it, theme) }
+                }
+            }
+        }
+        if (w.open) {
+            TextButton(onClick = onClose) { Text("Close", color = theme.muted, fontSize = 13.sp) }
+        } else {
+            TextButton(onClick = onOpen) { Text("Reopen", color = theme.accent, fontSize = 13.sp) }
+        }
+    }
+}
+
+// ActionPill is one action a window was sent: its name, then a short take on
+// the payload.
+@Composable
+private fun ActionPill(a: BundleAction, theme: Theme) {
+    Surface(color = theme.chipBg, shape = RoundedCornerShape(5.dp)) {
+        Row(Modifier.padding(horizontal = 6.dp, vertical = 3.dp)) {
+            Text(a.type, color = theme.chipFg, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            val text = payloadSummary(a.payload)
+            if (text.isNotBlank()) {
+                Text(" $text", color = theme.chipFg, fontSize = 11.sp, maxLines = 1)
+            }
+        }
+    }
+}
+
+// payloadSummary is an action payload cut down to a pill: a string as
+// itself, an event by its kind, anything else as its JSON.
+private fun payloadSummary(raw: String): String {
+    if (raw.isBlank()) return ""
+    val text = try {
+        when (val v = org.json.JSONTokener(raw).nextValue()) {
+            is String -> v.removePrefix("nostr:")
+            is org.json.JSONObject -> when {
+                v.has("kind") && v.has("pubkey") -> "kind " + v.optInt("kind")
+                v.has("term") -> v.optString("term")
+                v.has("value") -> v.optString("value")
+                else -> raw
+            }
+            else -> raw
+        }
+    } catch (_: Exception) { raw }
+    return if (text.length > 24) text.take(23) + "…" else text
+}
+
+// BundleRow is one stored bundle: tap to open all of its windows; its napps,
+// whether it is on Home, and the buttons that change that, edit and delete.
+@Composable
+@OptIn(ExperimentalLayoutApi::class)
+private fun BundleRow(
+    st: LauncherState,
+    b: BundleInfo,
+    theme: Theme,
+    onRun: () -> Unit,
+    onPin: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    var confirmDelete by remember { mutableStateOf(false) }
+    val names = b.entries.map { e ->
+        st.installed.firstOrNull { it.id == e.nappId }?.name?.ifBlank { null } ?: e.nappId
+    }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(theme.card)
+            .clickable(onClick = onRun)
+            .padding(12.dp),
+    ) {
+        Text(b.name, color = theme.fg, fontWeight = FontWeight.Bold)
+        Text(names.joinToString(" + "), color = theme.muted, fontSize = 12.sp, maxLines = 2,
+            overflow = TextOverflow.Ellipsis)
+        Text(if (b.pinned) "pinned to Home" else "not pinned", color = theme.subtle, fontSize = 11.sp)
+        FlowRow(
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            val small = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+            val chip = ButtonDefaults.buttonColors(containerColor = theme.chipBg, contentColor = theme.chipFg)
+            Button(onClick = onPin, contentPadding = small, colors = chip) {
+                Text(if (b.pinned) "Unpin" else "Pin", fontSize = 13.sp)
+            }
+            Button(onClick = onEdit, contentPadding = small, colors = chip) {
+                Text("Edit", fontSize = 13.sp)
+            }
+            Button(onClick = { confirmDelete = true }, contentPadding = small,
+                colors = ButtonDefaults.buttonColors(containerColor = theme.chipBg, contentColor = theme.danger)) {
+                Text("Delete", fontSize = 13.sp)
+            }
+        }
+    }
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("Delete ${b.name}?") },
+            text = { Text("The bundle is forgotten and taken off Home. Its napps stay installed.") },
+            confirmButton = {
+                TextButton(onClick = { confirmDelete = false; onDelete() }) {
+                    Text("Delete", color = theme.danger)
+                }
+            },
+            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } },
+        )
+    }
+}
+
+// BundleEditor is the bundle's name and one actions textarea per napp, one
+// {"type": …, "payload": …} object per line, as on the desktop.
+@Composable
+private fun BundleEditor(
+    activity: MainActivity,
+    theme: Theme,
+    edit: BundleEdit,
+    onCancel: () -> Unit,
+    onSaved: () -> Unit,
+) {
+    var name by remember(edit) { mutableStateOf(edit.oldName) }
+    val lines = remember(edit) { edit.draft.map { it.lines }.toMutableStateList() }
+    var err by remember(edit) { mutableStateOf("") }
+    var saving by remember(edit) { mutableStateOf(false) }
+
+    androidx.activity.compose.BackHandler(onBack = onCancel)
+
+    Column(Modifier.fillMaxSize()) {
+        Text(if (edit.oldName.isBlank()) "New bundle" else "Edit bundle",
+            color = theme.fg, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+        Spacer(Modifier.height(8.dp))
+        OutlinedTextField(
+            value = name,
+            onValueChange = { name = it },
+            modifier = Modifier.fillMaxWidth(),
+            placeholder = { Text("name of the bundle", color = theme.inputHint) },
+            colors = outlinedColors(theme),
+            singleLine = true,
+        )
+        if (err.isNotBlank()) {
+            Text(err, color = theme.danger, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
+        }
+        Spacer(Modifier.height(12.dp))
+        LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            items(edit.draft.size) { i ->
+                Column {
+                    Text("Actions of ${edit.draft[i].label} (one JSON object per line)",
+                        color = theme.subtle, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(4.dp))
+                    OutlinedTextField(
+                        value = lines[i],
+                        onValueChange = { lines[i] = it },
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp),
+                        placeholder = { Text("{\"type\": \"profile\", \"payload\": \"npub1…\"}", color = theme.inputHint) },
+                        colors = outlinedColors(theme),
+                        textStyle = LocalTextStyle.current.copy(fontSize = 12.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace),
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                enabled = !saving,
+                onClick = {
+                    if (name.isBlank()) {
+                        err = "give the bundle a name"
+                        return@Button
+                    }
+                    saving = true
+                    val draft = edit.draft.mapIndexed { i, e -> e.copy(lines = lines[i]) }
+                    activity.saveBundle(edit.oldName, name.trim(), draft) { e ->
+                        saving = false
+                        if (e == null) onSaved() else err = e
+                    }
+                },
+            ) { Text(if (saving) "Saving…" else "Save bundle") }
+            Button(
+                onClick = onCancel,
+                colors = ButtonDefaults.buttonColors(containerColor = theme.chipBg, contentColor = theme.chipFg),
+            ) { Text("Cancel") }
         }
     }
 }
