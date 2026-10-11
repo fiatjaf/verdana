@@ -447,8 +447,8 @@ func layoutMain(
 // truncate keeps a label short enough for a dialog line.
 func truncate(s string, max int) string {
 	s = strings.Join(strings.Fields(s), " ")
-	if len(s) > max {
-		return s[:max] + "…"
+	if r := []rune(s); len(r) > max {
+		return string(r[:max]) + "…"
 	}
 	return s
 }
@@ -607,13 +607,13 @@ func layoutWindowsTab(
 										// every action this window was sent, so a
 										// row says where it has been and not
 										// only where it is
-										hist := historyLabel(w.History)
-										if hist == "" {
+										pills := historyPills(th, w.History)
+										if len(pills) == 0 {
 											return layout.Dimensions{}
 										}
-										l := material.Caption(th, truncate(hist, 90))
-										l.Color = currentTheme().muted
-										return l.Layout(gtx)
+										return layout.Inset{Top: unit.Dp(4)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+											return flow(gtx, unit.Dp(4), pills)
+										})
 									}),
 								)
 							})

@@ -141,21 +141,6 @@ func suggestionLines(seen []backend.ShortcutAction, declared []string) string {
 	return strings.Join(lines, "\n")
 }
 
-// historyLabel is a window's action log on one line for the Windows tab: the
-// actions it was sent, oldest first, so a row says where the window has been
-// and not only where it is.
-func historyLabel(actions []backend.ShortcutAction) string {
-	var names []string
-	for _, a := range actions {
-		// the same name twice in a row says nothing a single one doesn't
-		if len(names) > 0 && names[len(names)-1] == a.Type {
-			continue
-		}
-		names = append(names, a.Type)
-	}
-	return strings.Join(names, " → ")
-}
-
 // actionsToLines is the stored actions back as editable lines.
 func actionsToLines(actions []backend.ShortcutAction) string {
 	lines := make([]string, 0, len(actions))
