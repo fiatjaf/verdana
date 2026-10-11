@@ -24,7 +24,15 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -744,8 +752,8 @@ private fun rememberNappIcon(activity: MainActivity, napp: Napp): ImageBitmap? {
 
 // HomeTab is the pinned napps and bundles as a home-screen grid: the icon
 // with its name below, a tap opens it (a bundle opens all of its windows), a
-// long press picks it up to drag it somewhere else (let go without moving it
-// and it opens the napp's page, or the bundle's editor, instead).
+// long press picks it up to drag it somewhere else, and holding it still for
+// a while opens the napp's page (or the bundle's editor) right there.
 @Composable
 private fun HomeTab(
     activity: MainActivity,
@@ -773,8 +781,8 @@ private fun HomeTab(
         modifier = Modifier.fillMaxSize(),
     ) {
         gridItems(order, key = { it.key }) { item ->
-            // where a long press picked it up, to tell a drop back in place
-            // (open its page) from a move
+            // where a long press picked it up, to tell a move from a drop
+            // back in place
             var from by remember { mutableStateOf(-1) }
             ReorderableItem(reorderState, key = item.key) { dragging ->
                 Column(
@@ -785,15 +793,15 @@ private fun HomeTab(
                             if (item.bundle != null) activity.runBundle(item.bundle.name)
                             else if (item.napp != null) activity.launch(item.napp.id)
                         }
+                        .onHold {
+                            if (item.bundle != null) onEditBundle(item.bundle)
+                            else item.napp?.let(onDetail)
+                        }
                         .longPressDraggableHandle(
                             onDragStarted = { from = order.indexOfFirst { it.key == item.key } },
                             onDragStopped = {
                                 val to = order.indexOfFirst { it.key == item.key }
-                                if (to >= 0 && to == from) {
-                                    if (item.bundle != null) onEditBundle(item.bundle)
-                                    else item.napp?.let(onDetail)
-                                }
-                                else if (to >= 0) activity.movePin(item.key, to)
+                                if (to >= 0 && to != from) activity.movePin(item.key, to)
                             },
                         )
                         .padding(6.dp),
@@ -814,6 +822,39 @@ private fun HomeTab(
             }
         }
     }
+}
+
+// holdMillis is how long a home tile has to be held still to open its page,
+// well past the long press that picks it up for dragging.
+private const val holdMillis = 2000L
+
+// onHold fires once the pointer has stayed down on this element for
+// holdMillis without wandering off. It only watches, never consumes, so the
+// tap and the long-press drag on the same element work as before. Movement
+// is measured on screen, not in the element: a tile being dragged follows
+// the finger, so the finger hardly moves relative to it.
+private fun Modifier.onHold(onHold: () -> Unit): Modifier = composed {
+    val coords = remember { mutableStateOf<LayoutCoordinates?>(null) }
+    val current by rememberUpdatedState(onHold)
+    this
+        .onGloballyPositioned { coords.value = it }
+        .pointerInput(Unit) {
+            val tolerance = 12.dp.toPx()
+            fun onScreen(p: Offset) = coords.value?.takeIf { it.isAttached }?.localToRoot(p) ?: p
+            awaitEachGesture {
+                val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                val start = onScreen(down.position)
+                val interrupted = withTimeoutOrNull(holdMillis) {
+                    while (true) {
+                        val change = awaitPointerEvent(PointerEventPass.Initial).changes
+                            .firstOrNull { it.id == down.id } ?: break
+                        if (!change.pressed) break
+                        if ((onScreen(change.position) - start).getDistance() > tolerance) break
+                    }
+                }
+                if (interrupted == null) current()
+            }
+        }
 }
 
 // BundleIcon is a bundle on the home tab: its napps' icons, up to four, two
