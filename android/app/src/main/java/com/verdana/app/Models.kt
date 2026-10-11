@@ -63,6 +63,21 @@ data class Prompt(
     val instance: String = "",
 )
 
+// a bundle (see backend/bundles.go): napps opened together, each with the
+// actions it gets. payload is the action's payload as raw JSON, "" for none.
+data class BundleAction(val type: String, val payload: String)
+data class BundleEntry(val nappId: String, val actions: List<BundleAction>)
+data class BundleInfo(
+    val name: String,
+    val entries: List<BundleEntry>,
+    val pinned: Boolean,
+    val shortcut: Boolean,
+)
+
+// HomeItem is one cell of the home tab: a napp or a bundle, never both. key
+// is what movePin calls it.
+data class HomeItem(val key: String, val napp: Napp?, val bundle: BundleInfo?)
+
 data class LauncherState(
     val phase: String,
     val loginErr: String,
@@ -77,6 +92,8 @@ data class LauncherState(
     val installed: List<Napp>,
     val discovery: List<Napp>,
     val pinned: List<Napp> = listOf(),
+    val home: List<HomeItem> = listOf(),
+    val bundles: List<BundleInfo> = listOf(),
     val busy: List<String>,
     val windows: List<WindowInfo>,
     val updateCheckRunning: Boolean = false,
@@ -86,35 +103,7 @@ fun parseState(json: String): LauncherState {
     val o = JSONObject(json)
     fun napps(key: String): List<Napp> {
         val arr = o.optJSONArray(key) ?: JSONArray()
-        return (0 until arr.length()).map { i ->
-            val n = arr.getJSONObject(i)
-            val pathsArr = n.optJSONArray("paths") ?: JSONArray()
-            Napp(
-                id = n.optString("id"),
-                d = n.optString("d"),
-                name = n.optString("name"),
-                description = n.optString("description"),
-                icon = n.optString("icon"),
-                author = n.optString("author").trim('"'),
-                authorName = n.optString("authorName"),
-                actions = (0 until (n.optJSONArray("actions")?.length() ?: 0)).map {
-                    n.optJSONArray("actions")!!.getString(it)
-                },
-                requires = (0 until (n.optJSONArray("requires")?.length() ?: 0)).map {
-                    n.optJSONArray("requires")!!.getString(it)
-                },
-                servers = (0 until (n.optJSONArray("servers")?.length() ?: 0)).map {
-                    n.optJSONArray("servers")!!.getString(it)
-                },
-                createdAt = n.optLong("created_at"),
-                // backend carries newer event object here; presence is flag.
-                updateAvailable = n.has("updateAvailable") && !n.isNull("updateAvailable"),
-                paths = (0 until pathsArr.length()).map {
-                    val p = pathsArr.getJSONObject(it)
-                    NappPath(p.optString("path"), p.optString("sha256"))
-                },
-            )
-        }
+        return (0 until arr.length()).map { parseNapp(arr.getJSONObject(it)) }
     }
 
     val windowsArr = o.optJSONArray("windows") ?: JSONArray()
@@ -134,6 +123,17 @@ fun parseState(json: String): LauncherState {
         installed = napps("installed"),
         discovery = napps("discovery"),
         pinned = napps("pinned"),
+        home = (0 until (o.optJSONArray("home")?.length() ?: 0)).map { i ->
+            val h = o.optJSONArray("home")!!.getJSONObject(i)
+            HomeItem(
+                key = h.optString("key"),
+                napp = h.optJSONObject("napp")?.let { parseNapp(it) },
+                bundle = h.optJSONObject("bundle")?.let { parseBundle(it) },
+            )
+        },
+        bundles = (0 until (o.optJSONArray("bundles")?.length() ?: 0)).map {
+            parseBundle(o.optJSONArray("bundles")!!.getJSONObject(it))
+        },
         busy = (0 until busyArr.length()).map { busyArr.getString(it) },
         updateCheckRunning = o.optBoolean("updateCheckRunning"),
         windows = (0 until windowsArr.length()).map { i ->
@@ -227,33 +227,60 @@ fun parseNapps(json: String): List<Napp> {
     if (json.isBlank()) return listOf()
     return try {
         val arr = JSONArray(json)
-        (0 until arr.length()).map { i ->
-            val n = arr.getJSONObject(i)
-            val pathsArr = n.optJSONArray("paths") ?: JSONArray()
-            Napp(
-                id = n.optString("id"),
-                d = n.optString("d"),
-                name = n.optString("name"),
-                description = n.optString("description"),
-                icon = n.optString("icon"),
-                author = n.optString("author").trim('"'),
-                authorName = n.optString("authorName"),
-                actions = (0 until (n.optJSONArray("actions")?.length() ?: 0)).map {
-                    n.optJSONArray("actions")!!.getString(it)
-                },
-                requires = (0 until (n.optJSONArray("requires")?.length() ?: 0)).map {
-                    n.optJSONArray("requires")!!.getString(it)
-                },
-                servers = (0 until (n.optJSONArray("servers")?.length() ?: 0)).map {
-                    n.optJSONArray("servers")!!.getString(it)
-                },
-                createdAt = n.optLong("created_at"),
-                updateAvailable = n.has("updateAvailable") && !n.isNull("updateAvailable"),
-                paths = (0 until pathsArr.length()).map {
-                    val q = pathsArr.getJSONObject(it)
-                    NappPath(q.optString("path"), q.optString("sha256"))
+        (0 until arr.length()).map { parseNapp(arr.getJSONObject(it)) }
+    } catch (_: Exception) { listOf() }
+}
+
+private fun JSONObject.strings(key: String): List<String> {
+    val arr = optJSONArray(key) ?: return listOf()
+    return (0 until arr.length()).map { arr.getString(it) }
+}
+
+fun parseNapp(n: JSONObject): Napp {
+    val pathsArr = n.optJSONArray("paths") ?: JSONArray()
+    return Napp(
+        id = n.optString("id"),
+        d = n.optString("d"),
+        name = n.optString("name"),
+        description = n.optString("description"),
+        icon = n.optString("icon"),
+        author = n.optString("author").trim('"'),
+        authorName = n.optString("authorName"),
+        actions = n.strings("actions"),
+        requires = n.strings("requires"),
+        servers = n.strings("servers"),
+        createdAt = n.optLong("created_at"),
+        // backend carries newer event object here; presence is flag.
+        updateAvailable = n.has("updateAvailable") && !n.isNull("updateAvailable"),
+        paths = (0 until pathsArr.length()).map {
+            val p = pathsArr.getJSONObject(it)
+            NappPath(p.optString("path"), p.optString("sha256"))
+        },
+    )
+}
+
+fun parseBundle(b: JSONObject): BundleInfo {
+    val entriesArr = b.optJSONArray("entries") ?: JSONArray()
+    return BundleInfo(
+        name = b.optString("name"),
+        entries = (0 until entriesArr.length()).map { i ->
+            val e = entriesArr.getJSONObject(i)
+            val actionsArr = e.optJSONArray("actions") ?: JSONArray()
+            BundleEntry(
+                nappId = e.optString("nappId"),
+                actions = (0 until actionsArr.length()).map { j ->
+                    val a = actionsArr.getJSONObject(j)
+                    // back to raw JSON: a string payload keeps its quotes
+                    val payload = when (val p = a.opt("payload")) {
+                        null, JSONObject.NULL -> ""
+                        is String -> JSONObject.quote(p)
+                        else -> p.toString()
+                    }
+                    BundleAction(a.optString("type"), payload)
                 },
             )
-        }
-    } catch (_: Exception) { listOf() }
+        },
+        pinned = b.optBoolean("pinned"),
+        shortcut = b.optBoolean("shortcut"),
+    )
 }

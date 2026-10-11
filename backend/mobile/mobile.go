@@ -282,6 +282,22 @@ func Unpin(id string) { backend.Unpin(id) }
 // MovePin moves a pinned napp to position to of the home tab.
 func MovePin(id string, to int) { backend.MovePin(id, to) }
 
+// PinBundle puts a bundle on the home tab; UnpinBundle takes it off. A
+// pinned bundle moves around with MovePin like a napp, by its home item key.
+func PinBundle(name string)   { backend.PinBundle(name) }
+func UnpinBundle(name string) { backend.UnpinBundle(name) }
+
+// RunBundle opens every napp of a bundle and dispatches their actions, as a
+// click on its home tab tile. Returns immediately; failures show up as the
+// state's fetchErr.
+func RunBundle(name string) {
+	go func() {
+		if err := backend.RunBundle(name); err != nil {
+			backend.SetFetchErr("bundle failed: " + err.Error())
+		}
+	}()
+}
+
 // Launch opens an installed napp, or surfaces the window it already has.
 func Launch(id string) { backend.LaunchByID(id) }
 

@@ -76,6 +76,9 @@ class MainActivity : ComponentActivity() {
     fun pin(id: String) = Mobile.pin(id)
     fun unpin(id: String) = Mobile.unpin(id)
     fun movePin(id: String, to: Int) = Mobile.movePin(id, to.toLong())
+    fun pinBundle(name: String) = Mobile.pinBundle(name)
+    fun unpinBundle(name: String) = Mobile.unpinBundle(name)
+    fun runBundle(name: String) = Mobile.runBundle(name)
     fun checkForUpdates() = Mobile.checkForUpdates()
     fun toggleTheme() = VerdanaHost.toggleTheme()
 

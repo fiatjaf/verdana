@@ -225,7 +225,7 @@ fun LauncherScreen(activity: MainActivity, st: LauncherState) {
     var tab by remember {
         mutableStateOf(
             when {
-                st.pinned.isNotEmpty() -> 0
+                st.home.isNotEmpty() -> 0
                 st.installed.isNotEmpty() -> 1
                 else -> 2
             }
@@ -733,19 +733,20 @@ private fun rememberNappIcon(activity: MainActivity, napp: Napp): ImageBitmap? {
     return bitmap
 }
 
-// HomeTab is the pinned napps as a home-screen grid: the icon with its name
-// below, a tap opens it, a long press picks it up to drag it somewhere else
-// (let go without moving it and it opens the napp's page instead).
+// HomeTab is the pinned napps and bundles as a home-screen grid: the icon
+// with its name below, a tap opens it (a bundle opens all of its windows), a
+// long press picks it up to drag it somewhere else (let go of a napp without
+// moving it and it opens the napp's page instead).
 @Composable
 private fun HomeTab(activity: MainActivity, st: LauncherState, theme: Theme, onDetail: (Napp) -> Unit) {
-    if (st.pinned.isEmpty()) {
+    if (st.home.isEmpty()) {
         Text("Nothing pinned yet. Pin napps from the Installed tab to have them here.", color = theme.muted)
         return
     }
     // the grid is drawn from a local copy that the drag reorders as it
     // goes; the backend only hears about the final position, on drop. A
     // fresh snapshot with a different set or order replaces the copy.
-    var order by remember(st.pinned.map { it.id }) { mutableStateOf(st.pinned) }
+    var order by remember(st.home.map { it.key }) { mutableStateOf(st.home) }
     val gridState = rememberLazyGridState()
     val reorderState = rememberReorderableLazyGridState(gridState) { from, to ->
         order = order.toMutableList().apply { add(to.index, removeAt(from.index)) }
@@ -756,32 +757,35 @@ private fun HomeTab(activity: MainActivity, st: LauncherState, theme: Theme, onD
         verticalArrangement = Arrangement.spacedBy(16.dp),
         modifier = Modifier.fillMaxSize(),
     ) {
-        gridItems(order, key = { it.id }) { napp ->
-            val bitmap = rememberNappIcon(activity, napp)
+        gridItems(order, key = { it.key }) { item ->
             // where a long press picked it up, to tell a drop back in place
             // (open its page) from a move
             var from by remember { mutableStateOf(-1) }
-            ReorderableItem(reorderState, key = napp.id) { dragging ->
+            ReorderableItem(reorderState, key = item.key) { dragging ->
                 Column(
                     Modifier
                         .clip(RoundedCornerShape(8.dp))
                         .background(if (dragging) theme.card else Color.Transparent)
-                        .clickable { activity.launch(napp.id) }
+                        .clickable {
+                            if (item.bundle != null) activity.runBundle(item.bundle.name)
+                            else if (item.napp != null) activity.launch(item.napp.id)
+                        }
                         .longPressDraggableHandle(
-                            onDragStarted = { from = order.indexOfFirst { it.id == napp.id } },
+                            onDragStarted = { from = order.indexOfFirst { it.key == item.key } },
                             onDragStopped = {
-                                val to = order.indexOfFirst { it.id == napp.id }
-                                if (to >= 0 && to == from) onDetail(napp)
-                                else if (to >= 0) activity.movePin(napp.id, to)
+                                val to = order.indexOfFirst { it.key == item.key }
+                                if (to >= 0 && to == from) item.napp?.let(onDetail)
+                                else if (to >= 0) activity.movePin(item.key, to)
                             },
                         )
                         .padding(6.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    NappIcon(bitmap, theme, 56)
+                    if (item.bundle != null) BundleIcon(activity, st, item.bundle, theme, 56)
+                    else if (item.napp != null) NappIcon(rememberNappIcon(activity, item.napp), theme, 56)
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        napp.name.ifBlank { napp.id },
+                        item.bundle?.name ?: item.napp?.name?.ifBlank { item.napp.id } ?: item.key,
                         color = theme.fg,
                         fontSize = 12.sp,
                         maxLines = 2,
@@ -789,6 +793,31 @@ private fun HomeTab(activity: MainActivity, st: LauncherState, theme: Theme, onD
                         textAlign = TextAlign.Center,
                     )
                 }
+            }
+        }
+    }
+}
+
+// BundleIcon is a bundle on the home tab: its napps' icons, up to four, two
+// by two on a tile, so it reads as a folder of the napps it opens.
+@Composable
+private fun BundleIcon(activity: MainActivity, st: LauncherState, bundle: BundleInfo, theme: Theme, size: Int) {
+    val napps = bundle.entries
+        .mapNotNull { e -> st.installed.firstOrNull { it.id == e.nappId } }
+        .take(4)
+    val pad = size / 10
+    val gap = size / 14
+    val cell = (size - 2 * pad - gap) / 2
+    Box(
+        Modifier
+            .size(size.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(theme.chipBg)
+            .padding(pad.dp),
+    ) {
+        napps.forEachIndexed { i, napp ->
+            Box(Modifier.offset(x = ((i % 2) * (cell + gap)).dp, y = ((i / 2) * (cell + gap)).dp)) {
+                NappIcon(rememberNappIcon(activity, napp), theme, cell)
             }
         }
     }
