@@ -4,8 +4,11 @@ package backend
 
 import (
 	"fmt"
+	"iter"
 	"path/filepath"
+	"slices"
 
+	"fiatjaf.com/nostr"
 	"fiatjaf.com/nostr/eventstore"
 	boltdb "fiatjaf.com/nostr/eventstore/boltdb"
 )
@@ -25,5 +28,24 @@ func openEventStore(dataDir string) (eventstore.Store, func(), error) {
 	if err := db.Init(); err != nil {
 		return nil, nil, fmt.Errorf("eventstore: %w", err)
 	}
-	return db, db.Close, nil
+	return boltStore{db}, db.Close, nil
+}
+
+// boltStore closes a query's read transaction before yielding its events.
+// bbolt deadlocks when a write has to grow the file while a read transaction
+// is open, and callers do write from inside query loops (the sdk's list
+// fetchers save refreshed lists mid-query). Queries are always limited, so
+// collecting the events first is cheap.
+type boltStore struct {
+	*boltdb.BoltBackend
+}
+
+func (s boltStore) QueryEvents(filter nostr.Filter, maxLimit int) iter.Seq[nostr.Event] {
+	return func(yield func(nostr.Event) bool) {
+		for _, evt := range slices.Collect(s.BoltBackend.QueryEvents(filter, maxLimit)) {
+			if !yield(evt) {
+				return
+			}
+		}
+	}
 }
