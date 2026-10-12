@@ -59,7 +59,6 @@ func spawnShell(exe string, spec backend.WindowSpec, extraEnv [][2]string) (back
 		"VERDANA_NAPP_DESC="+spec.Description,
 		"VERDANA_NAPP_STORAGE_FILE="+backend.StorageFile(spec.NappID),
 		"VERDANA_INSTANCE_ID="+spec.Instance,
-		"VERDANA_WINDOW_NUMBER="+strconv.Itoa(spec.Number),
 		"VERDANA_WINDOW_WIDTH="+strconv.Itoa(spec.Width),
 		"VERDANA_WINDOW_HEIGHT="+strconv.Itoa(spec.Height),
 		"VERDANA_NAPP_REQUIRES="+strings.Join(spec.Requires, ","),

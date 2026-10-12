@@ -2,7 +2,6 @@ package backend
 
 import (
 	"encoding/json"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -59,7 +58,6 @@ type PromptOption struct {
 	// instance) this option routes to.
 	NappID   string `json:"nappId"`
 	Instance string `json:"instance"`
-	Number   int    `json:"number,omitempty"`
 
 	// Suggested says the user has been choosing this napp for this action
 	// before, and Uses is how many times, so a UI can put its habitual
@@ -273,10 +271,9 @@ func askActionHandler(caller *Instance, action string, payload json.RawMessage, 
 				continue
 			}
 			options = append(options, PromptOption{
-				Label:    ci.napp.Label() + " - window #" + strconv.Itoa(ci.number),
+				Label:    ci.napp.Label() + " - window " + ci.instance,
 				NappID:   ci.napp.ID,
 				Instance: ci.instance,
-				Number:   ci.number,
 				Dev:      dev,
 			})
 		}

@@ -146,7 +146,9 @@ var closeStores func()
 // Start brings the backend up. dataDir should be the app's private files
 // directory: the eventstore, the installed napps and state.json go there.
 func Start(dataDir string, ui UI) error {
-	stop, err := backend.Start(backend.Options{DataDir: dataDir, Host: mobileHost{ui: ui}})
+	// a napp window is a task of its own, which Android keeps after
+	// killing the process: its record has to outlive the process too
+	stop, err := backend.Start(backend.Options{DataDir: dataDir, Host: mobileHost{ui: ui}, PersistWindows: true})
 	if err != nil {
 		return err
 	}
@@ -343,9 +345,30 @@ func SaveBundle(oldName, name, draftJSON string) error {
 // DeleteBundle forgets a bundle and takes it off the home tab.
 func DeleteBundle(name string) error { return backend.DeleteBundle(name) }
 
-// ReopenWindow opens a window closed earlier this run again, back on what
-// it was showing.
+// ReopenWindow opens a window closed earlier again, back on what it was
+// showing.
 func ReopenWindow(instance string) { backend.ReopenWindow(instance) }
+
+// KeepWindows is the windows Android still has a task for, as a JSON array
+// of instance ids: the records of every other window are forgotten. Call it
+// right after Start.
+func KeepWindows(instancesJSON string) {
+	var instances []string
+	if err := json.Unmarshal([]byte(instancesJSON), &instances); err != nil {
+		return
+	}
+	backend.KeepWindows(instances)
+}
+
+// KnowsWindow says whether a window is open in this process. One Android
+// restored after killing the process isn't: it calls RecoverWindow.
+func KnowsWindow(instance string) bool { return backend.KnowsWindow(instance) }
+
+// RecoverWindow rebuilds a window Android restored after killing the
+// process. The backend opens it again (OpenWindow, with the same instance
+// and a fresh spec) and replays its actions; an error means there is no
+// record to rebuild it from and the window should just go.
+func RecoverWindow(instance string) error { return backend.RecoverWindow(instance) }
 
 // Launch opens an installed napp, or surfaces the window it already has.
 func Launch(id string) { backend.LaunchByID(id) }

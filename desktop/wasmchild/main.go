@@ -55,7 +55,6 @@ type nappMeta struct {
 	Name     string
 	Wasm     string
 	Instance string
-	Number   string
 	Width    int
 	Height   int
 }
@@ -72,7 +71,6 @@ func main() {
 		Name:     os.Getenv("VERDANA_NAPP_NAME"),
 		Wasm:     os.Getenv("VERDANA_NAPP_WASM"),
 		Instance: os.Getenv("VERDANA_INSTANCE_ID"),
-		Number:   os.Getenv("VERDANA_WINDOW_NUMBER"),
 		Width:    envSize("VERDANA_WINDOW_WIDTH", wasm.DefaultWidth),
 		Height:   envSize("VERDANA_WINDOW_HEIGHT", wasm.DefaultHeight),
 	}
@@ -168,7 +166,7 @@ var background = color.NRGBA{R: 0x14, G: 0x15, B: 0x18, A: 0xff}
 // chrome of its own — the napp painted every pixel there is.
 func runWindow() {
 	w := new(app.Window)
-	w.Option(app.Title(windowTitle(meta.Name, meta.Number)),
+	w.Option(app.Title(windowTitle(meta.Name, os.Getenv("VERDANA_INSTANCE_ID"))),
 		app.Size(unit.Dp(meta.Width), unit.Dp(meta.Height)))
 
 	loaded := make(chan *wasmhost.Napp, 1)
@@ -502,12 +500,12 @@ func nappButtons(b pointer.Buttons) uint8 {
 	return out
 }
 
-func windowTitle(name, number string) string {
+func windowTitle(name, instance string) string {
 	if name == "" {
 		name = "Napp"
 	}
-	if number == "" {
+	if instance == "" {
 		return name
 	}
-	return name + " - window #" + number
+	return name + " - window " + instance
 }

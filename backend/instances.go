@@ -3,6 +3,8 @@ package backend
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,7 +12,6 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -26,10 +27,10 @@ import (
 // this platform: the backend only ever talks to it through its Transport.
 
 type Instance struct {
-	// instance is what the napp sees as window.napp.instance: a serial,
-	// unique per window.
+	// instance is what the napp sees as window.napp.instance and what the
+	// user sees a window called: 4 random bytes in hex, unique per window
+	// and kept across restarts of the process (see newInstanceID).
 	instance string
-	number   int
 	napp     Napp
 
 	sendMu    sync.Mutex
@@ -80,12 +81,14 @@ type actionRequest struct {
 // this run: its instance, the napp it runs, and every action that window was
 // asked to show. The log is what a window closed and reopened lands back on,
 // what the Windows tab lists and what the bundle editor suggests as the
-// actions of that napp. Session state, not persisted: nothing here survives
-// the launcher quitting.
+// actions of that napp. Where windows outlive the process (Android) the
+// records are kept on disk, so a window the OS killed is rebuilt from its
+// log when it comes back (see window_records.go); elsewhere nothing here
+// survives the launcher quitting.
 type windowRecord struct {
-	Instance string
-	NappID   string
-	Actions  []ShortcutAction
+	Instance string           `json:"instance"`
+	NappID   string           `json:"nappId"`
+	Actions  []ShortcutAction `json:"actions,omitempty"`
 }
 
 // maxWindowActions bounds a window's log: the tail is what puts a reopened
@@ -100,11 +103,23 @@ func (ci *Instance) ID() string { return ci.instance }
 func (ci *Instance) Napp() Napp { return ci.napp }
 
 var (
-	instancesMu    sync.Mutex
-	instances      []*Instance
-	instanceSerial atomic.Int64
-	windowSerial   atomic.Int64
+	instancesMu sync.Mutex
+	instances   []*Instance
 )
+
+// newInstanceID is a fresh window id: random, so a window can keep its id
+// across a restart of the process (see window_records.go) without a new
+// one ever landing on it.
+func newInstanceID() string {
+	for {
+		var b [4]byte
+		rand.Read(b[:])
+		id := hex.EncodeToString(b[:])
+		if _, taken := windows.Load(id); !taken && lookupInstance(id) == nil {
+			return id
+		}
+	}
+}
 
 // windows is every window opened this run, keyed by instance: the open ones
 // plus the closed ones still listed for reopening. A window is closed when its
@@ -347,6 +362,7 @@ func WindowClosed(instance string) {
 		// auxiliary windows are temporary helpers, not session windows:
 		// don't keep them listed for reopening.
 		windows.Delete(ci.instance)
+		saveWindowRecords()
 	}
 	log.Info().Str("instance", ci.instance).Str("napp", ci.napp.ID).Msg("napp window closed")
 	notifyState()
@@ -503,11 +519,10 @@ func launchWithInstance(ctx context.Context, napp Napp, requestedInstance string
 	winW, winH := napp.WindowSize()
 	instance := requestedInstance
 	if instance == "" {
-		instance = strconv.FormatInt(instanceSerial.Add(1), 10)
+		instance = newInstanceID()
 	}
 	ci := &Instance{
 		instance:   instance,
-		number:     int(windowSerial.Add(1)),
 		napp:       napp,
 		subs:       make(map[int]context.CancelFunc),
 		actions:    make(map[string]int),
@@ -525,7 +540,6 @@ func launchWithInstance(ctx context.Context, napp Napp, requestedInstance string
 
 	transport, err := host.OpenWindow(WindowSpec{
 		Instance:    ci.instance,
-		Number:      ci.number,
 		NappID:      napp.ID,
 		Name:        napp.Label(),
 		Description: napp.Description,
@@ -579,6 +593,7 @@ func windowHistory(instance string) []ShortcutAction {
 
 func putWindow(w windowRecord) {
 	windows.Store(w.Instance, w)
+	saveWindowRecords()
 }
 
 // rememberWindow starts the record of a window that just came up, keeping the
@@ -592,25 +607,27 @@ func rememberWindow(ci *Instance) {
 	putWindow(w)
 }
 
-func ReopenWindow(instance string) {
-	for _, rec := range windowRecords() {
-		if rec.Instance != instance {
-			continue
-		}
-		napp, ok := InstalledNapp(rec.NappID)
-		if !ok {
+// ReopenWindow opens a closed window again under its own instance id and
+// puts it back where it was by replaying its log. The window comes up in the
+// background; the error is only about there being nothing to reopen.
+func ReopenWindow(instance string) error {
+	rec := lookupWindow(instance)
+	if rec == nil {
+		return fmt.Errorf("no window %s to reopen", instance)
+	}
+	napp, ok := InstalledNapp(rec.NappID)
+	if !ok {
+		return fmt.Errorf("napp %s of window %s is not installed", rec.NappID, instance)
+	}
+	go func(rec windowRecord, napp Napp) {
+		ci, err := launchWithInstance(context.Background(), napp, rec.Instance)
+		if err != nil {
+			log.Warn().Err(err).Str("instance", rec.Instance).Msg("could not reopen napp window")
 			return
 		}
-		go func(rec windowRecord, napp Napp) {
-			ci, err := launchWithInstance(context.Background(), napp, rec.Instance)
-			if err != nil {
-				log.Warn().Err(err).Str("instance", rec.Instance).Msg("could not reopen napp window")
-				return
-			}
-			replayActions(ci, rec)
-		}(rec, napp)
-		return
-	}
+		replayActions(ci, rec)
+	}(*rec, napp)
+	return nil
 }
 
 // replayActions puts a reopened window back where the one that closed had
@@ -666,6 +683,7 @@ func recordAction(ci *Instance, req *actionRequest, replace bool) {
 		w.Actions = actions
 		return w, false
 	})
+	saveWindowRecords()
 }
 
 // asShortcutAction is an action as the log and the bundle editor keep it: a
@@ -842,10 +860,9 @@ func handlerOption(target string, candidates []Napp, open []*Instance) (PromptOp
 			continue
 		}
 		return PromptOption{
-			Label:    ci.napp.Label() + " - window #" + strconv.Itoa(ci.number),
+			Label:    ci.napp.Label() + " - window " + ci.instance,
 			NappID:   ci.napp.ID,
 			Instance: ci.instance,
-			Number:   ci.number,
 			Dev:      strings.HasPrefix(ci.napp.ID, "dev~"),
 		}, true
 	}

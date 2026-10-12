@@ -40,6 +40,12 @@ object VerdanaHost : UI {
     // messages that got here before their window's activity finished starting
     private val outbox = ConcurrentHashMap<String, ArrayDeque<String>>()
 
+    // windows Android restored after killing the process, waiting for the
+    // backend to open them again (see NappActivity.recover), and the ones
+    // the user left before it did
+    private val recovering = ConcurrentHashMap<String, NappActivity>()
+    private val abandoned = ConcurrentHashMap.newKeySet<String>()
+
     private var started = false
     private var appContext: Context? = null
 
@@ -74,6 +80,26 @@ object VerdanaHost : UI {
         }
         setCurrentThemeName(initial)
         Mobile.setTheme(initial, themeVarsJSON(themeByName(initial)))
+
+        // the backend kept the records of the windows from before the
+        // process died; only the ones still in Recents can come back
+        Mobile.keepWindows(org.json.JSONArray(survivingWindows(context)).toString())
+    }
+
+    // survivingWindows is the instance of every napp window Android still
+    // has a task for
+    private fun survivingWindows(context: Context): List<String> {
+        val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager ?: return listOf()
+        return try {
+            am.appTasks.mapNotNull { task ->
+                task.taskInfo.baseIntent?.data
+                    ?.takeIf { it.scheme == WINDOW_SCHEME && it.host == "napp" }
+                    ?.lastPathSegment
+            }
+        } catch (e: Exception) {
+            Log.w("Verdana", "could not list the surviving windows", e)
+            listOf()
+        }
     }
 
     // ─── windows ─────────────────────────────────────────────────────
@@ -111,6 +137,19 @@ object VerdanaHost : UI {
         val queued = outbox.remove(window.instance)
         if (queued != null) queued.forEach { window.deliver(it) }
         return true
+    }
+
+    // awaitRecovery parks a restored window until the backend opens its
+    // instance again: that open builds it instead of starting an activity
+    internal fun awaitRecovery(window: NappActivity) {
+        recovering[window.instance] = window
+    }
+
+    // stopRecovery is a restored window going away before it was rebuilt;
+    // gaveUp when the user left it, so the backend's open, if it still comes,
+    // closes the instance instead of popping up a new window
+    internal fun stopRecovery(window: NappActivity, gaveUp: Boolean) {
+        if (recovering.remove(window.instance, window) && gaveUp) abandoned.add(window.instance)
     }
 
     internal fun unregister(instance: String, window: NappActivity) {
@@ -166,7 +205,12 @@ object VerdanaHost : UI {
     override fun openWindow(instance: String, specJSON: String) {
         val ctx = appContext ?: return
         ctx.startActivityOnMain {
-            launchWindow(instance, specJSON)
+            val restored = recovering.remove(instance)
+            when {
+                restored != null -> restored.rebuild(specJSON)
+                abandoned.remove(instance) -> Mobile.windowClosed(instance)
+                else -> launchWindow(instance, specJSON)
+            }
         }
     }
 
@@ -293,9 +337,9 @@ object VerdanaHost : UI {
 }
 
 // WINDOW_SCHEME is the intent scheme that makes every napp its own document:
-// Android keys the task off the intent's data, so verdana://napp/7 and
-// verdana://napp/8 are two windows and verdana://napp/7 twice is one window
-// brought back to the front.
+// Android keys the task off the intent's data, so verdana://napp/1a2b3c4d and
+// verdana://napp/5e6f7a8b are two windows and the same one twice is one
+// window brought back to the front.
 const val WINDOW_SCHEME = "verdana"
 
 // startActivityOnMain runs a block on the main looper, right away when the

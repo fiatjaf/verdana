@@ -37,6 +37,12 @@ import mobile.Mobile
 // A window carries no launcher chrome: it is a napp, not a tab inside a
 // browser. Back walks the napp's own history and then leaves the window; the
 // only thing that ever covers a napp is a prompt it has to answer.
+//
+// Android may kill the process with windows still in Recents, and bring one
+// back later as a fresh activity in a fresh process, where the backend has
+// no such window open. That window recovers: the backend opens its instance
+// again from the record it kept on disk, and replays the actions it was sent
+// to put it back where it was (see backend/window_records.go).
 class NappActivity : ComponentActivity() {
 
     lateinit var instance: String
@@ -75,6 +81,10 @@ class NappActivity : ComponentActivity() {
     // same as "has been resumed at some point"
     private var visible = false
 
+    // recovering is a window Android restored after killing the process,
+    // waiting for the backend to open it again (see recover)
+    private var recovering = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -94,6 +104,63 @@ class NappActivity : ComponentActivity() {
         }
         nappId = spec.nappId
 
+        if (!Mobile.knowsWindow(instance)) {
+            recover(spec)
+            return
+        }
+        build(spec)
+    }
+
+    // recover is a window the backend doesn't have open: Android restored it
+    // after killing the process (or after destroying the activity on its
+    // own). It shows nothing but the theme until the backend opens the
+    // instance again, which lands in rebuild with a fresh spec; with nothing
+    // to rebuild it from, the window just goes.
+    private fun recover(spec: WindowSpec) {
+        recovering = true
+        describeTask(spec)
+        setContent {
+            Surface(color = themeByName(VerdanaHost.state.theme).bg, modifier = Modifier.fillMaxSize()) {}
+        }
+        VerdanaHost.awaitRecovery(this)
+        lifecycleScope.launch(Dispatchers.IO) {
+            val failed = try {
+                Mobile.recoverWindow(instance)
+                false
+            } catch (e: Exception) {
+                Log.w("Verdana", "window $instance can't be recovered", e)
+                true
+            }
+            if (failed) withContext(Dispatchers.Main) {
+                VerdanaHost.stopRecovery(this@NappActivity, gaveUp = false)
+                finish()
+            }
+        }
+    }
+
+    // rebuild is the backend opening a recovering window's instance again:
+    // the window is built from this spec, not the stale one it was restored
+    // with, which also becomes what the intent carries from now on.
+    fun rebuild(specJSON: String) {
+        if (!recovering || isFinishing || isDestroyed) return
+        VerdanaHost.stopRecovery(this, gaveUp = false)
+        val spec = try {
+            WindowSpec(specJSON)
+        } catch (e: Exception) {
+            Log.e("Verdana", "unreadable window spec for $instance", e)
+            null
+        }
+        recovering = false
+        if (spec == null) {
+            Mobile.windowClosed(instance)
+            finish()
+            return
+        }
+        intent = Intent(intent).putExtra(EXTRA_SPEC, specJSON)
+        build(spec)
+    }
+
+    private fun build(spec: WindowSpec) {
         // The view goes up before the claim is made: claiming hands over
         // whatever the backend sent while this window was starting, and that
         // has to land on a webview that already exists.
@@ -151,10 +218,17 @@ class NappActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        // a launch of this instance while it waits to be recovered carries
+        // the spec it has to be built from
+        if (recovering) intent.getStringExtra(EXTRA_SPEC)?.let { rebuild(it) }
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        if (recovering) {
+            recovering = false
+            VerdanaHost.stopRecovery(this, gaveUp = !isChangingConfigurations)
+        }
         shell?.destroy()
         shell = null
         canvas?.destroy()

@@ -40,7 +40,6 @@ type nappMeta struct {
 	Dir         string
 	URL         string
 	Instance    string
-	Number      string
 	Requires    []string
 	Theme       string
 	ThemeVars   string
@@ -68,7 +67,6 @@ func main() {
 		Name:        os.Getenv("VERDANA_NAPP_NAME"),
 		Description: os.Getenv("VERDANA_NAPP_DESC"),
 		Instance:    os.Getenv("VERDANA_INSTANCE_ID"),
-		Number:      os.Getenv("VERDANA_WINDOW_NUMBER"),
 		Theme:       os.Getenv("VERDANA_THEME"),
 		ThemeVars:   os.Getenv("VERDANA_THEME_VARS"),
 	}
@@ -88,7 +86,7 @@ func main() {
 	runtime.LockOSThread()
 
 	w := webview.New(os.Getenv("WEBVIEW_DEBUG") == "true")
-	w.SetTitle(windowTitle(meta.Name, meta.Number))
+	w.SetTitle(windowTitle(meta.Name, os.Getenv("VERDANA_INSTANCE_ID")))
 	w.SetSize(windowWidth(), windowHeight(), webview.HintNone)
 	_ = w.Bind("__bridge_rpc", rpcBound)
 	_ = w.Bind("__verdana_prompt_answer", promptAnswer)
@@ -163,15 +161,15 @@ func clampWindowSize(v, min, max int) int {
 }
 
 // windowTitle names the OS window after the napp and its instance, so the
-// user can match it to the "window #N" entries in action prompts.
-func windowTitle(name, number string) string {
+// user can match it to the "window <instance>" entries in action prompts.
+func windowTitle(name, instance string) string {
 	if name == "" {
 		name = "Napp"
 	}
-	if number == "" {
+	if instance == "" {
 		return name
 	}
-	return name + " - window #" + number
+	return name + " - window " + instance
 }
 
 // storageInitScript seeds window.__nappStorage, which the bridge's

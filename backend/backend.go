@@ -40,6 +40,12 @@ type Options struct {
 
 	// Log is optional; without one, logs go to stderr.
 	Log *zerolog.Logger
+
+	// PersistWindows keeps the windows' records (instance, napp, action
+	// log) on disk, for a platform whose windows outlive the process: the
+	// OS can kill it and bring a window back later, which then rebuilds
+	// itself from its log (see window_records.go).
+	PersistWindows bool
 }
 
 // Start brings the backend up: stores open, state loaded, profile index
@@ -68,6 +74,9 @@ func Start(opts Options) (func(), error) {
 	}
 
 	loadState()
+	if opts.PersistWindows {
+		loadWindowRecords()
+	}
 	refreshInstalled()
 	go buildUserIndex()
 
