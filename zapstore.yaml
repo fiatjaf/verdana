@@ -12,9 +12,9 @@ description: >-
 website: https://github.com/fiatjaf/verdana
 icon: android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
 images:
-  - ./screenshots/1000010501.png
-  - ./screenshots/1000010503.png
-  - ./screenshots/1000010505.png
+  - ./screenshots/1.png
+  - ./screenshots/2.png
+  - ./screenshots/3.png
 tags:
   - nostr
   - launcher
