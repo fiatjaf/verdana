@@ -52,6 +52,10 @@ class NappWebView(
     private var proxy: JavaScriptReplyProxy? = null
     private val outbox = ArrayDeque<String>()
 
+    // onPullVerdict hears, on every touchstart, whether what is under the
+    // finger is scrolled to its top (see PullToReload)
+    var onPullVerdict: ((Boolean) -> Unit)? = null
+
     init {
         @SuppressLint("SetJavaScriptEnabled")
         val settings = view.settings
@@ -101,6 +105,25 @@ class NappWebView(
             },
         )
 
+        // the pull-to-reload verdicts, on a channel of their own so the wire
+        // protocol never sees them
+        WebViewCompat.addWebMessageListener(
+            view,
+            "__verdanaPull",
+            setOf(NappOrigins.originFor(instance)),
+            object : WebMessageListener {
+                override fun onPostMessage(
+                    view: WebView,
+                    message: androidx.webkit.WebMessageCompat,
+                    sourceOrigin: android.net.Uri,
+                    isMainFrame: Boolean,
+                    replyProxy: JavaScriptReplyProxy,
+                ) {
+                    if (isMainFrame) onPullVerdict?.invoke(message.data == "1")
+                }
+            },
+        )
+
         view.webViewClient = object : WebViewClient() {
             override fun shouldInterceptRequest(
                 v: WebView,
@@ -133,7 +156,7 @@ class NappWebView(
             themeInitScript(spec.theme, spec.themeVars)
         WebViewCompat.addDocumentStartJavaScript(
             view,
-            "$init\n${Mobile.uiKit(jsStringList(spec.requires))}\n${Mobile.bridgeJS()}",
+            "$init\n$PULL_SCRIPT\n${Mobile.uiKit(jsStringList(spec.requires))}\n${Mobile.bridgeJS()}",
             setOf(origin),
         )
 
@@ -272,5 +295,27 @@ class NappWebView(
         } catch (_: Exception) {
             "window.__nappStorage = {};"
         }
+    }
+
+    companion object {
+        // PULL_SCRIPT answers, for every single-finger touch, whether a pull
+        // down from there would be a reload: not when anything under the
+        // finger is scrolled down, nor when it takes the drags for itself
+        // (touch-action: none, a map, a drawing area).
+        private const val PULL_SCRIPT = """(() => {
+  const host = window.__verdanaPull
+  if (!host) return
+  const blocked = el => {
+    for (; el && el.nodeType === 1; el = el.parentElement) {
+      if (el.scrollTop > 0) return true
+      if (getComputedStyle(el).touchAction === "none") return true
+    }
+    const root = document.scrollingElement || document.documentElement
+    return !!root && root.scrollTop > 0
+  }
+  addEventListener("touchstart", e => {
+    if (e.touches.length === 1) host.postMessage(blocked(e.target) ? "0" : "1")
+  }, { capture: true, passive: true })
+})()"""
     }
 }

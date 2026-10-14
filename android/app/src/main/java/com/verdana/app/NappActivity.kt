@@ -117,8 +117,35 @@ class NappActivity : ComponentActivity() {
     // instance again, which lands in rebuild with a fresh spec; with nothing
     // to rebuild it from, the window just goes.
     private fun recover(spec: WindowSpec) {
-        recovering = true
         describeTask(spec)
+        reopen()
+    }
+
+    // reload is the user pulling the window down: the napp starts over, as
+    // if Android had killed it and the window were being recovered — a fresh
+    // page (or a fresh wasm module) under the same instance, put back where
+    // it was by replaying the actions it was sent, like the desktop's reload.
+    private fun reload() {
+        if (recovering || !ownsWindow || isFinishing || isDestroyed) return
+        Log.i("Verdana", "reloading window $instance")
+        shell?.destroy()
+        shell = null
+        canvas?.destroy()
+        canvas = null
+        ownsWindow = false
+        VerdanaHost.unregister(instance, this)
+        try {
+            Mobile.windowClosed(instance)
+        } catch (e: Exception) {
+            Log.e("Verdana", "could not close window $instance for a reload", e)
+        }
+        reopen()
+    }
+
+    // reopen has the backend open this window's instance again, from the
+    // record it keeps, and waits for that to land in rebuild.
+    private fun reopen() {
+        recovering = true
         setContent {
             Surface(color = themeByName(VerdanaHost.state.theme).bg, modifier = Modifier.fillMaxSize()) {}
         }
@@ -209,7 +236,9 @@ class NappActivity : ComponentActivity() {
         val back = {
             if (web != null && web.view.canGoBack()) web.view.goBack() else finish()
         }
-        setContent { NappWindow(view, back) }
+        val pull = PullToReload(this, view, edgeOnly = web == null) { reload() }
+        web?.onPullVerdict = { pull.verdict(it) }
+        setContent { NappWindow(pull, back) }
     }
 
     // onNewIntent is what intoExisting delivers when the same instance is

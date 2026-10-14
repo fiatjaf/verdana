@@ -89,6 +89,8 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("androidx.webkit:webkit:1.12.1")
     implementation("androidx.core:core-ktx:1.15.0")
+    // pull-to-reload on napp windows
+    implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
     // native "log in with google" (Credential Manager → ID token)
     implementation("androidx.credentials:credentials:1.3.0")
     implementation("androidx.credentials:credentials-play-services-auth:1.3.0")
