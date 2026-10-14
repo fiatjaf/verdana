@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
+import android.view.ViewGroup
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
@@ -62,6 +63,16 @@ class NappWebView(
         settings.mediaPlaybackRequiresUserGesture = true
 
         view.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+
+        // Compose's AndroidView leaves a view with wrap_content layout
+        // params, and a WebView whose height is wrap_content sizes its
+        // viewport to its content: 100vh/100dvh then collapse to whatever
+        // little sits at the top. Matching the parent gives it the window's
+        // real height.
+        view.layoutParams = ViewGroup.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.MATCH_PARENT,
+        )
 
         WebViewCompat.addWebMessageListener(
             view,
