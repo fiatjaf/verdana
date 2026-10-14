@@ -1,0 +1,26 @@
+repository: https://github.com/fiatjaf/verdana
+release_source: https://github.com/fiatjaf/verdana
+
+name: Verdana
+summary: A modular OS for Nostr microapps that plug into each other.
+description: >-
+  Napps are small apps that do one thing and (hopefully) do it well. They can be written in HTML or they can be raw WASM with custom UI rendering.
+
+  Because they don't do all the things, they can invoke other napps to do these other things. You install each app individually plug one into the other during your usage session.
+
+  Verdana is a launcher for napps. Besides running the napps and passing messages between each other, it also allow you to create shortcuts for specific napps or groups of napps and save them on your phone's home screen, a quick launch menu or an in-app home screen.
+website: https://github.com/fiatjaf/verdana
+icon: android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
+images:
+  - ./screenshots/1000010501.png
+  - ./screenshots/1000010503.png
+  - ./screenshots/1000010505.png
+tags:
+  - nostr
+  - launcher
+  - napps
+
+pubkey: npub180cvv07tjdrrgpa0j7j7tmnyl2yr6yr7l8j4s3evf6u64th6gkwsyjh6w6
+
+metadata_sources:
+  - github

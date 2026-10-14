@@ -1,5 +1,30 @@
 import org.gradle.kotlin.dsl.android
 
+// release signing: a single password protects both the keystore and the key
+val releaseStoreFile = System.getenv("ANDROID_KEYSTORE_PATH")
+val releasePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+val releaseKeyAlias = "verdana"
+val releaseSigningConfigured = !releaseStoreFile.isNullOrBlank() && !releasePassword.isNullOrBlank()
+
+if (gradle.startParameter.taskNames.any { it.contains("Release", ignoreCase = true) } && !releaseSigningConfigured) {
+    throw GradleException("Release APK requires ANDROID_KEYSTORE_PATH and ANDROID_KEYSTORE_PASSWORD")
+}
+
+// version comes from the latest vMAJOR.MINOR.PATCH git tag: on the tagged commit itself
+// versionName is "MAJOR.MINOR.PATCH", on later commits it is like "0.0.2-5-gabc1234"
+val gitDescribe = runCatching {
+    providers.exec {
+        commandLine("git", "describe", "--tags", "--match", "v*")
+        isIgnoreExitValue = true
+    }.standardOutput.asText.get().trim()
+}.getOrDefault("")
+val tagVersion = Regex("""^v(\d+)\.(\d+)\.(\d+)""").find(gitDescribe)
+val releaseVersionName = if (tagVersion != null) gitDescribe.removePrefix("v") else "0.0.0"
+val releaseVersionCode = tagVersion?.destructured?.let { (major, minor, patch) ->
+    require(minor.toInt() < 1000 && patch.toInt() < 1000) { "minor and patch must be < 1000" }
+    major.toInt() * 1_000_000 + minor.toInt() * 1_000 + patch.toInt()
+}?.coerceAtLeast(1) ?: 1
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -14,14 +39,25 @@ android {
         applicationId = "com.verdana.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        this.versionCode = releaseVersionCode
+        this.versionName = releaseVersionName
+    }
+
+    signingConfigs {
+        create("release") {
+            if (releaseSigningConfigured) {
+                storeFile = file(releaseStoreFile!!)
+                storePassword = releasePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releasePassword
+            }
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
         }
     }
     compileOptions {
