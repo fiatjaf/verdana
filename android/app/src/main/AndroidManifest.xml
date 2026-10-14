@@ -38,12 +38,17 @@
         <!-- one napp window = one task = one card in Recents. intoExisting
              is what makes the task key off the intent's data: launching
              verdana://napp/7 again brings window 7 back instead of opening a
-             second one, and any other instance gets a window of its own. -->
+             second one, and any other instance gets a window of its own.
+             A document task outlives its activity in Recents by default;
+             autoRemoveFromRecents makes a finished window (back past the
+             napp's history, the napp or the backend closing it) take its
+             card with it instead of leaving one that would recover it. -->
         <activity
             android:name=".NappActivity"
             android:exported="false"
             android:launchMode="standard"
             android:documentLaunchMode="intoExisting"
+            android:autoRemoveFromRecents="true"
             android:taskAffinity=""
             android:theme="@android:style/Theme.Material.Light.NoActionBar"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"
