@@ -15,7 +15,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
@@ -347,15 +347,18 @@ class NappActivity : ComponentActivity() {
                 BackHandler(enabled = prompt == null) { back() }
 
                 Box(Modifier.fillMaxSize()) {
+                    // edge-to-edge means adjustResize does nothing on its own:
+                    // the napp has to keep clear of the keyboard itself, or
+                    // it ends up drawn underneath it
                     AndroidView(
                         factory = { view },
-                        modifier = Modifier.fillMaxSize().systemBarsPadding(),
+                        modifier = Modifier.fillMaxSize().safeDrawingPadding(),
                     )
                     if (prompt != null) {
                         // the prompt covers the whole window, bars included:
                         // it is a blocking question, not a dialog over the
                         // napp's own chrome
-                        Box(Modifier.fillMaxSize().systemBarsPadding()) {
+                        Box(Modifier.fillMaxSize().safeDrawingPadding()) {
                             PromptWindow(prompt) { ok, index, scope ->
                                 VerdanaHost.answer(prompt, ok, index, scope)
                             }
