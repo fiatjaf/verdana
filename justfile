@@ -26,3 +26,9 @@ apk: aar
 
 install: aar
     cd android && ./gradlew installDebug
+
+# linux packaging lives in packaging/linux: this builds the flatpak from the
+# working tree and installs it for the current user (deb/rpm/arch come from
+# nfpm in CI).
+flatpak:
+    flatpak-builder --user --install --force-clean build-flatpak packaging/linux/com.verdana.app.yml

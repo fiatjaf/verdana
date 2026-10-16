@@ -1,0 +1,56 @@
+# flatpak-builder manifest. The org.gnome runtime is there for gtk3 and
+# webkit2gtk-4.1, which the napp webview shell loads at run time.
+#
+# Built from this checkout by .github/workflows/desktop.yml; locally:
+#   just flatpak  (or: flatpak-builder --user --install --force-clean build-flatpak packaging/linux/com.verdana.app.yml)
+id: com.verdana.app
+runtime: org.gnome.Platform
+runtime-version: "49"
+sdk: org.gnome.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.golang
+command: verdana
+
+finish-args:
+  - --share=network
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  # bundle shortcuts are .desktop files the launcher writes for the host's
+  # application menu (see desktop/shortcutfile_linux.go)
+  - --filesystem=xdg-data/applications:create
+
+modules:
+  - name: verdana
+    buildsystem: simple
+    build-options:
+      append-path: /usr/lib/sdk/golang/bin
+      env:
+        CGO_ENABLED: "1"
+        GOFLAGS: -trimpath -modcacherw
+        GOTOOLCHAIN: auto
+        GOPATH: /run/build/verdana/go
+      # go modules are fetched at build time
+      build-args:
+        - --share=network
+    build-commands:
+      - cd desktop && go build -o child/child ./child
+      - cd desktop && go build -o wasmchild/wasmchild ./wasmchild
+      - cd desktop && go build -ldflags "-s -w" -o verdana .
+      - install -Dm755 desktop/verdana /app/bin/verdana
+      - install -Dm644 packaging/linux/com.verdana.app.desktop /app/share/applications/com.verdana.app.desktop
+      - install -Dm644 packaging/linux/com.verdana.app.metainfo.xml /app/share/metainfo/com.verdana.app.metainfo.xml
+      - install -Dm644 desktop/assets/icon.png /app/share/icons/hicolor/512x512/apps/com.verdana.app.png
+    sources:
+      - type: dir
+        path: ../..
+        skip:
+          - .git
+          - android
+          - desktop/verdana
+          - desktop/desktop
+          - desktop/child/child
+          - desktop/wasmchild/wasmchild
+          - build-flatpak
+          - .flatpak-builder

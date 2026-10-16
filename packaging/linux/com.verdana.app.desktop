@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Verdana
+GenericName=Napp Launcher
+Comment=A launcher for Nostr napps that plug into each other
+Exec=verdana
+Icon=com.verdana.app
+Terminal=false
+Categories=Network;
+Keywords=nostr;napps;launcher;
+StartupWMClass=com.verdana.app

@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.verdana.app</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>Verdana</name>
+  <summary>A launcher for Nostr napps that plug into each other</summary>
+  <developer id="com.verdana">
+    <name>fiatjaf</name>
+  </developer>
+  <description>
+    <p>
+      Napps are small apps that do one thing and (hopefully) do it well. They can be
+      written in HTML or they can be raw WASM with custom UI rendering.
+    </p>
+    <p>
+      Because they don't do all the things, they can invoke other napps to do these
+      other things. You install each app individually and plug one into the other
+      during your usage session.
+    </p>
+    <p>
+      Verdana is a launcher for napps. Besides running the napps and passing messages
+      between them, it also allows you to save shortcuts for specific napps or groups
+      of napps as application shortcuts or in an in-app home screen.
+    </p>
+  </description>
+  <launchable type="desktop-id">com.verdana.app.desktop</launchable>
+  <url type="homepage">https://github.com/fiatjaf/verdana</url>
+  <url type="bugtracker">https://github.com/fiatjaf/verdana/issues</url>
+  <screenshots>
+    <screenshot type="default">
+      <image>https://raw.githubusercontent.com/fiatjaf/verdana/master/screenshots/1.png</image>
+    </screenshot>
+  </screenshots>
+  <content_rating type="oars-1.1"/>
+</component>

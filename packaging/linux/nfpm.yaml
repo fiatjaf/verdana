@@ -1,0 +1,78 @@
+# deb, rpm and arch packages, built by nfpm from the release binary (see
+# .github/workflows/desktop.yml). VERSION and ARCH come from the environment.
+name: verdana
+version: ${VERSION}
+arch: ${ARCH}
+platform: linux
+section: net
+priority: optional
+maintainer: fiatjaf <fiatjaf@gmail.com>
+description: |
+  A launcher for Nostr napps that plug into each other.
+  Napps are small apps that do one thing and (hopefully) do it well, written in
+  HTML or as raw WASM with custom UI rendering. Verdana runs them, passes
+  messages between them and saves shortcuts for napps or groups of napps.
+vendor: fiatjaf
+homepage: https://github.com/fiatjaf/verdana
+license: MIT
+
+contents:
+  - src: desktop/dist/verdana
+    dst: /usr/bin/verdana
+    file_info:
+      mode: 0755
+  - src: packaging/linux/com.verdana.app.desktop
+    dst: /usr/share/applications/com.verdana.app.desktop
+  - src: packaging/linux/com.verdana.app.metainfo.xml
+    dst: /usr/share/metainfo/com.verdana.app.metainfo.xml
+  - src: desktop/assets/icon.png
+    dst: /usr/share/icons/hicolor/512x512/apps/com.verdana.app.png
+  - src: LICENSE
+    dst: /usr/share/licenses/verdana/LICENSE
+
+# the shells load gtk and webkit with dlopen and gio loads vulkan the same
+# way, so those are not in the binaries' NEEDED list but are needed all the same
+overrides:
+  deb:
+    depends:
+      - libgtk-3-0t64 | libgtk-3-0
+      - libwebkit2gtk-4.1-0
+      - libwayland-client0
+      - libwayland-egl1
+      - libwayland-cursor0
+      - libxcursor1
+      - libxfixes3
+      - libxkbcommon0
+      - libxkbcommon-x11-0
+      - libx11-xcb1
+      - libegl1
+      - libvulkan1
+  rpm:
+    depends:
+      - gtk3
+      - webkit2gtk4.1
+      - libwayland-client
+      - libwayland-egl
+      - libwayland-cursor
+      - libXcursor
+      - libXfixes
+      - libxkbcommon
+      - libxkbcommon-x11
+      - libX11-xcb
+      - libglvnd-egl
+      - vulkan-loader
+  archlinux:
+    depends:
+      - gtk3
+      - webkit2gtk-4.1
+      - wayland
+      - libxkbcommon
+      - libxkbcommon-x11
+      - libx11
+      - libxcursor
+      - libxfixes
+      - libglvnd
+      - vulkan-icd-loader
+
+archlinux:
+  packager: fiatjaf <fiatjaf@gmail.com>

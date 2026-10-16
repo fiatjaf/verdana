@@ -50,8 +50,10 @@ jobs:
         include:
           - os: ubuntu-24.04
             id: linux-amd64
+            arch: amd64
           - os: ubuntu-24.04-arm
             id: linux-arm64
+            arch: arm64
           - os: windows-2022
             id: windows-amd64
           - os: macos-15-intel
@@ -122,28 +124,88 @@ jobs:
           CGO_ENABLED: "1"
         run: go build -o verdana -ldflags "-s -w" .
 
+      # everything that gets released goes in release/: the bare binary stays in
+      # dist/, where nfpm picks it up, so the release never carries several
+      # files all called "verdana" from different platforms
       - name: package
         shell: bash
         working-directory: desktop
         run: |
-          mkdir -p dist
+          mkdir -p dist release
           if [ "$RUNNER_OS" = "Windows" ]; then
             mv verdana dist/verdana.exe
-            7z a "dist/verdana-${{ matrix.id }}.zip" ./dist/verdana.exe
+            7z a "release/verdana-${{ matrix.id }}.zip" ./dist/verdana.exe
+          elif [ "$RUNNER_OS" = "Linux" ]; then
+            # the binary, its menu entry and icon, and install.sh to put them
+            # in place (~/.local, or /usr/local as root)
+            mv verdana dist/verdana
+            pkg="dist/verdana-${{ matrix.id }}"
+            mkdir -p "$pkg"
+            cp dist/verdana ../packaging/linux/install.sh ../packaging/linux/com.verdana.app.desktop "$pkg/"
+            cp assets/icon.png "$pkg/com.verdana.app.png"
+            tar czf "release/verdana-${{ matrix.id }}.tar.gz" -C dist "verdana-${{ matrix.id }}"
           else
             mv verdana dist/verdana
-            tar czf "dist/verdana-${{ matrix.id }}.tar.gz" -C dist verdana
+            tar czf "release/verdana-${{ matrix.id }}.tar.gz" -C dist verdana
           fi
+
+      # deb, rpm and arch packages of the same binary (packaging/linux/nfpm.yaml)
+      - name: linux packages
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            export VERSION="${GITHUB_REF_NAME#v}"
+          else
+            export VERSION="0.0.0-dev.${GITHUB_SHA::7}"
+          fi
+          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+          for p in deb rpm archlinux; do
+            case $p in
+              deb) ext=deb ;;
+              rpm) ext=rpm ;;
+              archlinux) ext=pkg.tar.zst ;;
+            esac
+            nfpm package -f packaging/linux/nfpm.yaml -p $p -t "desktop/release/verdana-${{ matrix.id }}.$ext"
+          done
 
       - uses: actions/upload-artifact@v4
         with:
           name: verdana-${{ matrix.id }}
-          path: desktop/dist/*
+          path: desktop/release/*
           if-no-files-found: error
+
+  flatpak:
+    name: flatpak-${{ matrix.arch }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            arch: x86_64
+          - os: ubuntu-24.04-arm
+            arch: aarch64
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-49
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v4
+
+      # the action uploads the bundle as an artifact of its own, which the
+      # release job collects along with the others
+      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          manifest-path: packaging/linux/com.verdana.app.yml
+          bundle: verdana-linux-${{ matrix.arch }}.flatpak
+          arch: ${{ matrix.arch }}
+          cache-key: flatpak-builder-${{ matrix.arch }}-${{ github.sha }}
 
   release:
     name: release
-    needs: [build]
+    needs: [build, flatpak]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     permissions:

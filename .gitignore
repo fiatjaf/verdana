@@ -12,3 +12,7 @@ android/build
 android/local.properties
 
 verdana-release.jks
+desktop/dist
+desktop/release
+build-flatpak
+.flatpak-builder
