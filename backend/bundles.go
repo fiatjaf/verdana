@@ -477,7 +477,10 @@ func openAndDispatch(ctx context.Context, napp Napp, actions []ShortcutAction) e
 // mid-way over a single stuck action.
 func dispatchActions(ctx context.Context, ci *Instance, actions []ShortcutAction) error {
 	for _, action := range actions {
-		if _, err := dispatchToInstance(ctx, ci, &actionRequest{name: action.Type, payload: action.Payload}); err != nil {
+		actionCtx, cancel := context.WithTimeout(ctx, replyWait)
+		_, err := dispatchToInstance(actionCtx, ci, &actionRequest{name: action.Type, payload: action.Payload})
+		cancel()
+		if err != nil {
 			log.Warn().Err(err).Str("napp", ci.napp.ID).Str("action", action.Type).
 				Msg("shortcut action dispatch failed")
 		}

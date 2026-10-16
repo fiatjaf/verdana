@@ -645,7 +645,10 @@ func replayActions(ci *Instance, rec windowRecord) {
 				break
 			}
 		}
-		if _, err := dispatchToInstance(context.Background(), ci, &actionRequest{name: action.Type, payload: action.Payload}); err != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), replyWait)
+		_, err := dispatchToInstance(ctx, ci, &actionRequest{name: action.Type, payload: action.Payload})
+		cancel()
+		if err != nil {
 			log.Warn().Err(err).Str("instance", rec.Instance).Msg("could not replay napp action")
 			break
 		}
@@ -903,6 +906,11 @@ func findHandlersForAction(name string) ([]Napp, []*Instance) {
 	return candidates, open
 }
 
+// replyWait is how long a dispatch the launcher itself runs in a sequence
+// (a restore, a shortcut) waits for each answer, so one stuck handler can't
+// hold up the rest. A napp's own napp.action has no such limit.
+const replyWait = 60 * time.Second
+
 // dispatchToInstance sends an action to an open window and waits for the
 // handler's result. view:<kind> payloads are resolved to full events first,
 // as napps registering a specific kind are promised a resolved event.
@@ -974,8 +982,6 @@ func dispatchToInstance(ctx context.Context, ci *Instance, req *actionRequest) (
 		return out, nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case <-time.After(60 * time.Second):
-		return nil, errors.New("action timed out")
 	}
 }
 

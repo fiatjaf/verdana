@@ -300,9 +300,9 @@ func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 			if err := json.Unmarshal([]byte(params), &p); err != nil {
 				return nil, err
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-			defer cancel()
-			return runNappAction(ctx, ci, p.Name, p.Payload, p.Options)
+			// no deadline: the handler may be the user typing a note, and the
+			// dispatch ends anyway when its window answers or closes
+			return runNappAction(context.Background(), ci, p.Name, p.Payload, p.Options)
 
 		case "napp.registerAction":
 			var p struct {
