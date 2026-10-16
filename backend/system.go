@@ -1,9 +1,12 @@
 package backend
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 
+	"fiatjaf.com/nostr"
 	"fiatjaf.com/nostr/sdk"
 	bolt_kv "fiatjaf.com/nostr/sdk/kvstore/bbolt"
 )
@@ -29,6 +32,15 @@ func initSystem(dataDir string) (func(), error) {
 	sys.Pool.QueryMiddleware = sys.TrackQueryAttempts
 	sys.Pool.EventMiddleware = sys.TrackEventHintsAndRelays
 	sys.Pool.DuplicateMiddleware = sys.TrackEventRelaysD
+
+	// relays that answer "auth-required:" to a publish or a subscription get
+	// a NIP-42 AUTH signed by the logged-in user, and the pool retries once
+	sys.Pool.AuthRequiredHandler = func(ctx context.Context, evt *nostr.Event) error {
+		if userKeyer == nil {
+			return errors.New("not logged in")
+		}
+		return userKeyer.SignEvent(ctx, evt)
+	}
 
 	log.Info().Msg("system initialized")
 	return closeEventStore, nil
