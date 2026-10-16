@@ -318,9 +318,10 @@ fun LauncherScreen(activity: MainActivity, st: LauncherState) {
 }
 
 // ProfileScreen holds everything about the current user that used to live
-// on top of the launcher: picture, name, pubkey, theme switch and logout.
+// on top of the launcher: picture, name, pubkey, theme switch, relay auth and
+// logout. Leaving it is the system back gesture.
 @Composable
-fun ProfileScreen(activity: MainActivity, st: LauncherState, onBack: () -> Unit) {
+fun ProfileScreen(activity: MainActivity, st: LauncherState) {
     val theme = themeByName(st.theme)
     var showLogoutConfirm by remember { mutableStateOf(false) }
 
@@ -330,10 +331,6 @@ fun ProfileScreen(activity: MainActivity, st: LauncherState, onBack: () -> Unit)
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
     ) {
-        TextButton(onClick = onBack, contentPadding = PaddingValues(0.dp)) {
-            Text("← Back", color = theme.muted, fontSize = 13.sp)
-        }
-        Spacer(Modifier.height(8.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Avatar(st.profilePicture, theme, 64)
             Spacer(Modifier.width(16.dp))
@@ -362,6 +359,19 @@ fun ProfileScreen(activity: MainActivity, st: LauncherState, onBack: () -> Unit)
             TextButton(onClick = { activity.toggleTheme() }) {
                 Text(if (theme.name == "dark") "Light" else "Dark", color = theme.chipFg, fontSize = 13.sp)
             }
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Authenticate when reading", color = theme.fg, fontWeight = FontWeight.Bold)
+                Text(
+                    "Tell relays that ask for it who you are. Publishing always does.",
+                    color = theme.muted,
+                    fontSize = 12.sp,
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            Switch(checked = st.readAuth, onCheckedChange = { activity.setReadAuth(it) })
         }
         Spacer(Modifier.height(8.dp))
         TextButton(

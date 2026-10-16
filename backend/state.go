@@ -57,6 +57,10 @@ type AppState struct {
 	// Theme is "light" or "dark": what the launcher draws with and what
 	// every napp window is told to track.
 	Theme string `json:"theme"`
+
+	// NoReadAuth stops the launcher from authenticating (NIP-42) to relays
+	// that ask for it when reading. Publishing authenticates regardless.
+	NoReadAuth bool `json:"no_read_auth,omitempty"`
 }
 
 var (

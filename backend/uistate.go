@@ -50,6 +50,10 @@ type State struct {
 	// Theme is "light" or "dark".
 	Theme string `json:"theme"`
 
+	// ReadAuth is whether relays that ask for it get authenticated to when
+	// reading.
+	ReadAuth bool `json:"readAuth"`
+
 	// Relays are the discovery relays.
 	Relays []string `json:"relays"`
 
@@ -188,6 +192,7 @@ func Snapshot() State {
 		FetchErr:       ls.fetchErr,
 		Fetching:       ls.fetching,
 		Theme:          name,
+		ReadAuth:       ReadAuth(),
 		Installed:      append([]Napp(nil), ls.installed...),
 		Discovery:      append([]Napp(nil), ls.discovery...),
 		Dev:            append([]Napp(nil), ls.dev...),

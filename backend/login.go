@@ -78,6 +78,7 @@ func Login(input string) {
 		sessionCancel = nil
 	}
 	userKeyer = nil
+	applyReadAuth()
 
 	// The keyer outlives the handshake: a bunker signer listens for its
 	// responses on a subscription tied to this ctx, so it stays open
@@ -152,6 +153,8 @@ func Login(input string) {
 // setProfileFromUser is the tail every login shares: fetch that key's
 // profile metadata, put it on the launcher state and go discover napps.
 func setProfileFromUser(ctx context.Context, pk nostr.PubKey) {
+	applyReadAuth()
+
 	pm := sys.FetchProfileMetadata(ctx, pk)
 	name := pm.Name
 	if name == "" {
@@ -177,6 +180,7 @@ func Logout() {
 	}
 	userKeyer = nil
 	userPubkey = nostr.PubKey{}
+	applyReadAuth()
 
 	stateMu.Lock()
 	state.Login = ""

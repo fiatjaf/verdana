@@ -177,6 +177,7 @@ class MainActivity : ComponentActivity() {
     private fun toast(msg: String) = android.widget.Toast.makeText(this, msg, android.widget.Toast.LENGTH_LONG).show()
     fun checkForUpdates() = Mobile.checkForUpdates()
     fun toggleTheme() = VerdanaHost.toggleTheme()
+    fun setReadAuth(on: Boolean) = Mobile.setReadAuth(on)
 
     // bringWindow puts an open napp's task in front — the launcher cannot
     // draw it itself any more, it is a window like any other
@@ -257,11 +258,7 @@ class MainActivity : ComponentActivity() {
                     Box(Modifier.weight(1f).then(if (hasHeader) Modifier else Modifier.statusBarsPadding())) {
                         when {
                             state.phase == "login" -> LoginScreen(this@MainActivity, state)
-                            showProfile && state.phase == "main" -> ProfileScreen(
-                                this@MainActivity,
-                                state,
-                                onBack = { showProfile = false },
-                            )
+                            showProfile && state.phase == "main" -> ProfileScreen(this@MainActivity, state)
                             state.phase == "main" -> LauncherScreen(this@MainActivity, state)
                             else -> LoadingScreen()
                         }

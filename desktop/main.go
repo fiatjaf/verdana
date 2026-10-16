@@ -260,6 +260,7 @@ func gioMain() {
 		tabDevBtn           widget.Clickable
 		tabWindowsBtn       widget.Clickable
 		themeBtn            widget.Clickable
+		readAuthBtn         widget.Clickable
 		logoutBtn           widget.Clickable
 		confirmYesBtn       widget.Clickable
 		confirmNoBtn        widget.Clickable
@@ -440,6 +441,9 @@ func gioMain() {
 						}
 						if themeBtn.Clicked(gtx) {
 							toggleTheme()
+						}
+						if readAuthBtn.Clicked(gtx) {
+							backend.SetReadAuth(!backend.ReadAuth())
 						}
 						if logoutBtn.Clicked(gtx) {
 							setConfirmLogout(true)
@@ -822,6 +826,7 @@ func gioMain() {
 							&tabDiscoBtn,
 							devBtn,
 							&themeBtn,
+							&readAuthBtn,
 							&logoutBtn,
 							tab,
 

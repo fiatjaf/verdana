@@ -387,6 +387,10 @@ func Launch(id string) { backend.LaunchByID(id) }
 // leading dashes: {"surface":"#fff","text":"#000",…}.
 func SetTheme(name string, varsJSON string) { backend.SetTheme(name, varsJSON) }
 
+// SetReadAuth turns authenticating to relays that ask for it when reading on
+// or off. Publishing authenticates regardless.
+func SetReadAuth(on bool) { backend.SetReadAuth(on) }
+
 // Profile returns what the launcher knows about a pubkey as JSON:
 // pubkey, npub, name, displayName, shortName, about, picture, nip05,
 // website. Blocks with its own timeout; call it off the main thread.

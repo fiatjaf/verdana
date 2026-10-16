@@ -924,7 +924,7 @@ func publishEvent(ci *Instance, evt nostr.Event, requested []string) (any, error
 
 	relayResults := make(map[string]any, len(targets))
 	published, failed := 0, 0
-	for res := range sys.Pool.PublishMany(ctx, targets, evt) {
+	for res := range publishToRelays(ctx, targets, evt) {
 		if res.Error != nil {
 			failed++
 			relayResults[res.RelayURL] = map[string]any{"ok": false, "error": res.Error.Error()}

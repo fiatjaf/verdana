@@ -436,6 +436,7 @@ func layoutMain(
 	tabDiscoBtn,
 	tabDevBtn,
 	themeBtn,
+	readAuthBtn,
 	logoutBtn *widget.Clickable,
 	tab int,
 	windowsList,
@@ -496,7 +497,7 @@ func layoutMain(
 ) layout.Dimensions {
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layoutProfile(gtx, th, themeBtn, logoutBtn, st.ProfileName, st.ProfilePicture)
+			return layoutProfile(gtx, th, themeBtn, readAuthBtn, logoutBtn, st.ReadAuth, st.ProfileName, st.ProfilePicture)
 		}),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -1324,7 +1325,9 @@ func layoutProfile(
 	gtx layout.Context,
 	th *material.Theme,
 	themeBtn,
+	readAuthBtn,
 	logoutBtn *widget.Clickable,
+	readAuth bool,
 	name,
 	pic string,
 ) layout.Dimensions {
@@ -1344,9 +1347,9 @@ func layoutProfile(
 			}
 			pointer.CursorPointer.Add(gtx.Ops)
 			p := currentTheme()
-			label := "\u263e Dark"
+			label := "Dark"
 			if p.name == "dark" {
-				label = "\u2600 Light"
+				label = "Light"
 			}
 			tip := "Switch the launcher and every napp window to the dark theme"
 			if p.name == "dark" {
@@ -1358,6 +1361,26 @@ func layoutProfile(
 			b.TextSize = unit.Sp(13)
 			b.Inset = layout.UniformInset(unit.Dp(8))
 			return withTooltip(gtx, themeBtn, tip, b.Layout)
+		}),
+		layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if readAuthBtn == nil {
+				return layout.Dimensions{}
+			}
+			pointer.CursorPointer.Add(gtx.Ops)
+			p := currentTheme()
+			label := "Auth on reads: off"
+			tip := "Relays that ask for it are not told who you are when reading; turn on to authenticate to them (publishing always does)"
+			if readAuth {
+				label = "Auth on reads: on"
+				tip = "Relays that ask for it are told who you are (NIP-42) when reading; turn off to stop that (publishing always authenticates)"
+			}
+			b := material.Button(th, readAuthBtn, label)
+			b.Background = p.chipBg
+			b.Color = p.chipFg
+			b.TextSize = unit.Sp(13)
+			b.Inset = layout.UniformInset(unit.Dp(8))
+			return withTooltip(gtx, readAuthBtn, tip, b.Layout)
 		}),
 		layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {

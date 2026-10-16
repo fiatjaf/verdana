@@ -188,7 +188,7 @@ func PublishDev(ctx context.Context, id string, servers, relays []string, protec
 
 	results := 0
 	failed := 0
-	for result := range sys.Pool.PublishMany(ctx, relays, event) {
+	for result := range publishToRelays(ctx, relays, event) {
 		if result.Error != nil {
 			failed++
 			step("  %s: failed: %v", result.RelayURL, result.Error)
