@@ -172,10 +172,11 @@ object VerdanaHost : UI {
     }
 
     // answer files a prompt's answer and, when the answer routes somewhere,
-    // puts that window in front of the user.
-    fun answer(p: Prompt, ok: Boolean, index: Int, scope: String) {
+    // puts that window in front of the user. skip is the indexes of the
+    // items (relays) the user unticked.
+    fun answer(p: Prompt, ok: Boolean, index: Int, scope: String, skip: List<Int> = listOf()) {
         prompt = null
-        Mobile.answerPrompt(p.id, ok, index.toLong(), scope)
+        Mobile.answerPrompt(p.id, ok, index.toLong(), scope, skip.joinToString(","))
         if (!ok || index < 0 || index >= p.options.size) return
         val opt = p.options[index]
         if (opt.instance.isNotBlank()) {

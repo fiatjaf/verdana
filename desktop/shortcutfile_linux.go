@@ -23,7 +23,7 @@ func writeShortcutFile(name, exe, token string) (string, error) {
 			exe = resolved
 		}
 	}
-	data := fmt.Sprintf(desktopTemplate, name, quoteExecField(exe), quoteExecField(token), iconLine())
+	data := fmt.Sprintf(desktopTemplate, name, execPrefix(exe), quoteExecField(token), iconLine())
 	if err := os.MkdirAll(applicationsDir(), 0755); err != nil {
 		return "", err
 	}
@@ -33,6 +33,16 @@ func writeShortcutFile(name, exe, token string) (string, error) {
 	}
 	refreshShortcutParent(applicationsDir())
 	return path, nil
+}
+
+// execPrefix is what comes before the token on the Exec= line: the launcher
+// itself, or, inside a flatpak, the command that gets the host back into the
+// sandbox -- the binary's own path (/app/bin/verdana) means nothing out there.
+func execPrefix(exe string) string {
+	if id := os.Getenv("FLATPAK_ID"); id != "" {
+		return "flatpak run " + quoteExecField(id)
+	}
+	return quoteExecField(exe)
 }
 
 // iconLine is the Icon= line for the desktop template, or nothing at all when

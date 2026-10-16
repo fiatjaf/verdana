@@ -329,8 +329,8 @@ func runWindow() {
 			}
 
 			if pv != nil {
-				prompt.Layout(gtx, pv, br.ThemeName(), func(id int, ok bool, index int, scope string) {
-					br.AnswerPrompt(id, ok, index, scope)
+				prompt.Layout(gtx, pv, br.ThemeName(), func(id int, ok bool, index int, scope string, skip []int) {
+					br.AnswerPrompt(id, ok, index, scope, skip)
 					w.Invalidate()
 				})
 			} else {

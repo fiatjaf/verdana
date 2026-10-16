@@ -46,6 +46,11 @@ type promptOverlay struct {
 	rows [][]*promptButton
 	list widget.List
 	tips *tooltip.Layer
+	// fold opens and closes the payload when it comes with a summary
+	fold     widget.Clickable
+	foldOpen bool
+	// ticks are the boxes of the prompt's items, ticked to start with
+	ticks []widget.Bool
 }
 
 func newPromptOverlay() *promptOverlay {
@@ -64,6 +69,11 @@ func (p *promptOverlay) build(pv *wasmhost.Prompt) {
 	}
 	p.shownID = pv.ID
 	p.buttons, p.rows = nil, nil
+	p.foldOpen = false
+	p.ticks = make([]widget.Bool, len(pv.Items))
+	for i := range p.ticks {
+		p.ticks[i].Value = true
+	}
 	add := func(row ...*promptButton) {
 		p.rows = append(p.rows, row)
 		p.buttons = append(p.buttons, row...)
@@ -124,7 +134,7 @@ func promptTip(label string, ok bool, scope string) string {
 
 // palette is the overlay's colours for the launcher's current theme.
 type palette struct {
-	bg, card, fg, muted, accent, accentText, dev, devText, suggest, suggestText color.NRGBA
+	bg, card, fg, muted, accent, accentText, dev, devText, suggest, suggestText, danger color.NRGBA
 }
 
 func rgb(c uint32) color.NRGBA {
@@ -136,13 +146,13 @@ func paletteFor(theme string) palette {
 		return palette{
 			bg: rgb(0x17181b), card: rgb(0x23252b), fg: rgb(0xe8e8ea), muted: rgb(0x7d818a),
 			accent: rgb(0x5c6bc0), accentText: rgb(0xffffff), dev: rgb(0x5a3b1a), devText: rgb(0xffd79a),
-			suggest: rgb(0x1e3a2a), suggestText: rgb(0xb6e3c1),
+			suggest: rgb(0x1e3a2a), suggestText: rgb(0xb6e3c1), danger: rgb(0xff6b6b),
 		}
 	}
 	return palette{
 		bg: rgb(0xffffff), card: rgb(0xf2f2f2), fg: rgb(0x000000), muted: rgb(0x999999),
 		accent: rgb(0x3f51b5), accentText: rgb(0xffffff), dev: rgb(0xffe5b4), devText: rgb(0x704000),
-		suggest: rgb(0xd8efdc), suggestText: rgb(0x14532d),
+		suggest: rgb(0xd8efdc), suggestText: rgb(0x14532d), danger: rgb(0xcc2222),
 	}
 }
 
@@ -161,11 +171,20 @@ func (pal palette) tone(t string) (bg, fg color.NRGBA) {
 // Layout draws the prompt over the whole window and reports a click on one
 // of its answers through answer.
 func (p *promptOverlay) Layout(gtx layout.Context, pv *wasmhost.Prompt, theme string,
-	answer func(id int, ok bool, index int, scope string)) layout.Dimensions {
+	answer func(id int, ok bool, index int, scope string, skip []int)) layout.Dimensions {
 	p.build(pv)
+	if p.fold.Clicked(gtx) {
+		p.foldOpen = !p.foldOpen
+	}
 	for _, b := range p.buttons {
 		if b.click.Clicked(gtx) {
-			answer(pv.ID, b.ok, b.index, b.scope)
+			var skip []int
+			for i := range p.ticks {
+				if !p.ticks[i].Value {
+					skip = append(skip, i)
+				}
+			}
+			answer(pv.ID, b.ok, b.index, b.scope, skip)
 			return layout.Dimensions{Size: gtx.Constraints.Max}
 		}
 	}
@@ -188,13 +207,62 @@ func (p *promptOverlay) Layout(gtx layout.Context, pv *wasmhost.Prompt, theme st
 			return layout.Inset{Bottom: 14}.Layout(gtx, l.Layout)
 		})
 	}
-	if pv.Code != "" {
+	if len(pv.Items) > 0 {
+		children = append(children, func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Bottom: 14}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return card(gtx, pal.card, func(gtx layout.Context) layout.Dimensions {
+					rows := make([]layout.FlexChild, 0, len(pv.Items))
+					for i, it := range pv.Items {
+						rows = append(rows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							cb := material.CheckBox(th, &p.ticks[i], it)
+							cb.Font.Typeface = "Go Mono"
+							cb.TextSize = th.TextSize * 14 / 16
+							cb.Color = pal.fg
+							cb.IconColor = pal.accent
+							return cb.Layout(gtx)
+						}))
+					}
+					return layout.Flex{Axis: layout.Vertical}.Layout(gtx, rows...)
+				})
+			})
+		})
+	}
+	if pv.Warning != "" {
+		children = append(children, func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Bottom: 14}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				l := material.Body1(th, pv.Warning)
+				l.Color = pal.danger
+				l.Font.Weight = font.Bold
+				return l.Layout(gtx)
+			})
+		})
+	}
+	if pv.Code != "" && pv.Summary != "" {
+		// the payload folded under its summary, opened by clicking that
+		children = append(children, func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Bottom: 6}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return p.fold.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					arrow := "▸ "
+					if p.foldOpen {
+						arrow = "▾ "
+					}
+					l := material.Body2(th, arrow+pv.Summary)
+					l.Font.Typeface = "Go Mono"
+					l.Color = pal.muted
+					return l.Layout(gtx)
+				})
+			})
+		})
+	}
+	if pv.Code != "" && (pv.Summary == "" || p.foldOpen) {
 		children = append(children, func(gtx layout.Context) layout.Dimensions {
 			return layout.Inset{Bottom: 14}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				return card(gtx, pal.card, func(gtx layout.Context) layout.Dimensions {
 					l := material.Body2(th, pv.Code)
 					l.Font.Typeface = "Go Mono"
-					l.MaxLines = 8
+					if pv.Summary == "" {
+						l.MaxLines = 8
+					}
 					return l.Layout(gtx)
 				})
 			})

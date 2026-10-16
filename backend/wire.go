@@ -30,10 +30,12 @@ import "encoding/json"
 // Shell → backend (all through HandleWireMessage):
 //
 //	{t:"rpc", id, method, params}    a window.nostr/nostrdb/napp call
-//	{t:"promptAnswer", id, params:{"ok","index","scope"}}  the user
-//	                                 answered the prompt shown over this
-//	                                 window; scope is how long the answer
-//	                                 holds ("once", "session", "always")
+//	{t:"promptAnswer", id, params:{"ok","index","scope","skip"}}  the
+//	                                 user answered the prompt shown over
+//	                                 this window; scope is how long the
+//	                                 answer holds ("once", "session",
+//	                                 "always"), skip the indexes of the
+//	                                 items the user unticked
 type WireMsg struct {
 	T      string          `json:"t"`
 	ID     int             `json:"id,omitempty"`

@@ -266,8 +266,8 @@ class MainActivity : ComponentActivity() {
                             else -> LoadingScreen()
                         }
                         if (prompt != null) {
-                            PromptWindow(prompt) { ok, index, scope ->
-                                VerdanaHost.answer(prompt, ok, index, scope)
+                            PromptWindow(prompt) { ok, index, scope, skip ->
+                                VerdanaHost.answer(prompt, ok, index, scope, skip)
                             }
                         }
                     }

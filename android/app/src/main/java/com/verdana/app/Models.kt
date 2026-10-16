@@ -65,6 +65,12 @@ data class Prompt(
     val code: String,
     val napp: String,
     val options: List<PromptOption>,
+    // warning is something that could hurt, shown loud; items are rows the
+    // detail ends by pointing at (the relays a publish goes to); summary,
+    // when there is one, is the line code starts folded under.
+    val warning: String = "",
+    val items: List<String> = listOf(),
+    val summary: String = "",
     // remember says the answer can stick: the launcher then offers this
     // prompt only, this session, and always, and files the wider answers away.
     val remember: Boolean = false,
@@ -178,6 +184,9 @@ fun parsePrompt(json: String): Prompt? {
         title = o.optString("title"),
         detail = o.optString("detail"),
         code = o.optString("code"),
+        warning = o.optString("warning"),
+        items = o.optJSONArray("items")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: listOf(),
+        summary = o.optString("summary"),
         napp = o.optString("napp"),
         remember = o.optBoolean("remember"),
         options = (0 until optsArr.length()).map { i ->

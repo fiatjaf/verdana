@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 	"verdana/backend"
@@ -220,8 +221,16 @@ func CurrentPrompt() string {
 // "once" (this prompt only), "session" (until the launcher quits) or "always"
 // (written to state, until the user takes it back). Anything else is taken as
 // "once", and the scopes are ignored for prompts that can't be remembered.
-func AnswerPrompt(id int, ok bool, index int, scope string) {
-	backend.AnswerPrompt(id, backend.Answer{OK: ok, Index: index, Scope: backend.Scope(scope)})
+// skip is the indexes of the prompt's items the user unticked, separated by
+// commas ("" for none).
+func AnswerPrompt(id int, ok bool, index int, scope string, skip string) {
+	ans := backend.Answer{OK: ok, Index: index, Scope: backend.Scope(scope)}
+	for _, s := range strings.Split(skip, ",") {
+		if i, err := strconv.Atoi(strings.TrimSpace(s)); err == nil {
+			ans.Skip = append(ans.Skip, i)
+		}
+	}
+	backend.AnswerPrompt(id, ans)
 }
 
 // ─── launcher actions ────────────────────────────────────────────

@@ -348,7 +348,10 @@ type promptView struct {
 	ID       int                `json:"id"`
 	Title    string             `json:"title"`
 	Detail   string             `json:"detail"`
+	Warning  string             `json:"warning"`
+	Items    []string           `json:"items"`
 	Code     string             `json:"code"`
+	Summary  string             `json:"summary"`
 	Options  []promptOptionView `json:"options"`
 	Remember bool               `json:"remember"`
 }
@@ -367,8 +370,9 @@ type promptOptionView struct {
 // another prompt queued for this window it will send it right back. scope is
 // how long the answer holds: "once", "session" or "always" (see
 // backend.Scope) — the launcher files the wider ones away and stops asking.
-func promptAnswer(id int, ok bool, index int, scope string) {
-	b, _ := json.Marshal(map[string]any{"ok": ok, "index": index, "scope": scope})
+// skip is the indexes of the items (relays) the user unticked.
+func promptAnswer(id int, ok bool, index int, scope string, skip []int) {
+	b, _ := json.Marshal(map[string]any{"ok": ok, "index": index, "scope": scope, "skip": skip})
 	writeMsg(wireMsg{T: "promptAnswer", ID: id, Params: string(b)})
 }
 
@@ -409,6 +413,7 @@ const promptLibScript = "(function(){" +
 	"var suggest = tok('suggest', dark ? '#1e3a2a' : '#d8efdc');" +
 	"var suggestText = tok('suggest-text', dark ? '#b6e3c1' : '#14532d');" +
 	"var border = tok('border', dark ? '#3a3d45' : '#cccccc');" +
+	"var danger = tok('danger', dark ? '#ff6b6b' : '#cc2222');" +
 	"var o = document.createElement('div');" +
 	"o.id = '__verdana_prompt';" +
 	"o.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;" +
@@ -427,13 +432,58 @@ const promptLibScript = "(function(){" +
 	"d.style.cssText = 'color:' + muted + ';margin-bottom:14px;line-height:1.45;';" +
 	"box.appendChild(d);" +
 	"}" +
+	// the items come with a box each, ticked to start with: the answer
+	// says which ones the user unticked
+	"var boxes = [];" +
+	"if (p.items && p.items.length) {" +
+	"var list = document.createElement('div');" +
+	"list.style.cssText = 'margin:-6px 0 14px;border:1px solid ' + border + ';border-radius:8px;overflow:hidden;';" +
+	"p.items.forEach(function(it, i) {" +
+	"var r = document.createElement('label');" +
+	"r.style.cssText = 'display:flex;align-items:center;gap:8px;cursor:pointer;padding:6px 10px" +
+	";font:12px monospace;word-break:break-all;'" +
+	"+ (i ? 'border-top:1px solid ' + border + ';' : '');" +
+	"var cb = document.createElement('input');" +
+	"cb.type = 'checkbox'; cb.checked = true;" +
+	"cb.style.cssText = 'margin:0;accent-color:' + accent + ';';" +
+	"boxes.push(cb);" +
+	"r.appendChild(cb);" +
+	"r.appendChild(document.createTextNode(it));" +
+	"list.appendChild(r);" +
+	"});" +
+	"box.appendChild(list);" +
+	"}" +
+	"function skipped() {" +
+	"var out = [];" +
+	"boxes.forEach(function(cb, i) { if (!cb.checked) out.push(i) });" +
+	"return out;" +
+	"};" +
+	"if (p.warning) {" +
+	"var w = document.createElement('div');" +
+	"w.textContent = p.warning;" +
+	"w.style.cssText = 'color:' + danger + ';border:1px solid ' + danger + ';border-radius:8px" +
+	";padding:8px 10px;margin:0 0 14px;font-weight:700;line-height:1.4;';" +
+	"box.appendChild(w);" +
+	"}" +
 	"if (p.code) {" +
 	"var c = document.createElement('pre');" +
 	"c.style.cssText = 'white-space:pre-wrap;word-break:break-word;background:' + card " +
 	"+ ';border:1px solid ' + border + ';border-radius:8px;padding:10px" +
-	";max-height:160px;overflow:auto;font:12px monospace;margin:0 0 14px;';" +
+	";max-height:' + (p.summary ? '320px' : '160px') + ';overflow:auto;font:12px monospace;margin:0 0 14px;';" +
 	"c.textContent = p.code;" +
+	// with a summary the payload starts folded under it
+	"if (p.summary) {" +
+	"var f = document.createElement('details');" +
+	"f.style.cssText = 'margin:0 0 14px;';" +
+	"var s = document.createElement('summary');" +
+	"s.textContent = p.summary;" +
+	"s.style.cssText = 'cursor:pointer;color:' + muted + ';font:12px monospace;padding:4px 0;';" +
+	"c.style.marginTop = '6px'; c.style.marginBottom = '0';" +
+	"f.appendChild(s); f.appendChild(c);" +
+	"box.appendChild(f);" +
+	"} else {" +
 	"box.appendChild(c);" +
+	"}" +
 	"}" +
 	"function btn(label, tone, ok, index, scope) {" +
 	"var bgc = card, fgc = fg;" +
@@ -446,7 +496,7 @@ const promptLibScript = "(function(){" +
 	";cursor:pointer;';" +
 	"b.textContent = label;" +
 	"b.title = tip(label, ok, scope);" +
-	"b.onclick = function() { window.__verdana_prompt_answer(p.id, ok, index, scope) };" +
+	"b.onclick = function() { window.__verdana_prompt_answer(p.id, ok, index, scope, skipped()) };" +
 	"return b;" +
 	"};" +
 	// tip is what an answer button says it does, on hover.

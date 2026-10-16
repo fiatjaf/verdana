@@ -52,7 +52,10 @@ type Prompt struct {
 	ID       int            `json:"id"`
 	Title    string         `json:"title"`
 	Detail   string         `json:"detail"`
+	Warning  string         `json:"warning"`
+	Items    []string       `json:"items"`
 	Code     string         `json:"code"`
+	Summary  string         `json:"summary"`
 	Options  []PromptOption `json:"options"`
 	Remember bool           `json:"remember"`
 }
@@ -471,9 +474,10 @@ func (b *Bridge) CurrentPrompt() *Prompt {
 }
 
 // AnswerPrompt sends the user's answer up and takes the overlay down; if the
-// launcher has another prompt for this window it sends it right back.
-func (b *Bridge) AnswerPrompt(id int, ok bool, index int, scope string) {
-	raw, _ := json.Marshal(map[string]any{"ok": ok, "index": index, "scope": scope})
+// launcher has another prompt for this window it sends it right back. skip
+// is the indexes of the items (relays) the user unticked.
+func (b *Bridge) AnswerPrompt(id int, ok bool, index int, scope string, skip []int) {
+	raw, _ := json.Marshal(map[string]any{"ok": ok, "index": index, "scope": scope, "skip": skip})
 	b.send(WireMsg{T: "promptAnswer", ID: id, Params: string(raw)})
 	b.mu.Lock()
 	if b.prompt != nil && b.prompt.ID == id {

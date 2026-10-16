@@ -359,8 +359,8 @@ class NappActivity : ComponentActivity() {
                         // it is a blocking question, not a dialog over the
                         // napp's own chrome
                         Box(Modifier.fillMaxSize().safeDrawingPadding()) {
-                            PromptWindow(prompt) { ok, index, scope ->
-                                VerdanaHost.answer(prompt, ok, index, scope)
+                            PromptWindow(prompt) { ok, index, scope, skip ->
+                                VerdanaHost.answer(prompt, ok, index, scope, skip)
                             }
                         }
                     }

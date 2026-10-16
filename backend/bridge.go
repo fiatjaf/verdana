@@ -104,9 +104,9 @@ func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 			if err := json.Unmarshal([]byte(params), &evt); err != nil {
 				return nil, err
 			}
-			if !askApproval(ci, PermSign, "sign an event with your key",
-				fmt.Sprintf("Kind %d, %d tags.", evt.Kind, len(evt.Tags)),
-				preview(evt.Content, 200)) {
+			if !askApprovalFor(ci, PermSign, "sign "+aKind(evt.Kind, "event"), func() PromptBody {
+				return describeEvent(evt).body(".", nil)
+			}).OK {
 				return nil, errors.New("denied by the user")
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -141,7 +141,10 @@ func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 				perm = PermEncrypt
 				payload = preview(p.Plaintext, 120)
 			}
-			if !askApproval(ci, perm, verb, "Counterparty "+nip19.EncodeNpub(pk)+" ("+strings.SplitN(method, ".", 2)[0]+").", payload) {
+			if !askApproval(ci, perm, verb, PromptBody{
+				Detail: "Counterparty " + nip19.EncodeNpub(pk) + " (" + strings.SplitN(method, ".", 2)[0] + ").",
+				Code:   payload,
+			}) {
 				return "", errors.New("denied by the user")
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -392,7 +395,7 @@ func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 				}
 				url = p.URL
 			}
-			if !askApproval(ci, PermOpenLink, "open a link in your browser", "", preview(url, 200)) {
+			if !askApproval(ci, PermOpenLink, "open a link in your browser", PromptBody{Code: preview(url, 200)}) {
 				return nil, errors.New("denied by the user")
 			}
 			return nil, openExternalLink(url)
@@ -714,7 +717,7 @@ func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 			}
 			name := SanitizeFilename(p.Name)
 			if !askApproval(ci, PermSaveFile, "save a file to your disk",
-				"“"+name+"” goes to "+host.SaveFileTarget()+".", "") {
+				PromptBody{Detail: "“" + name + "” goes to " + host.SaveFileTarget() + "."}) {
 				return nil, errors.New("denied by the user")
 			}
 			return saveFileForNapp(p.Name, p.Data)
@@ -730,7 +733,7 @@ func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 				return nil, errors.New("text is too long to copy")
 			}
 			if !askApproval(ci, PermCopyText, "copy text to your clipboard",
-				strconv.Itoa(len(p.Text))+" characters.", preview(p.Text, 120)) {
+				PromptBody{Detail: strconv.Itoa(len(p.Text)) + " characters.", Code: preview(p.Text, 120)}) {
 				return nil, errors.New("denied by the user")
 			}
 			return copyTextForNapp(p.Text)
@@ -893,11 +896,16 @@ func publishEvent(ci *Instance, evt nostr.Event, requested []string) (any, error
 
 	log.Println("gathered targets: ", targets)
 
-	if !askApproval(ci, PermPublish, "publish an event",
-		fmt.Sprintf("Kind %d to %d relay(s): %s", evt.Kind, len(targets),
-			preview(strings.Join(stripSchemes(targets), ", "), 160)),
-		preview(evt.Content, 200)) {
+	// the relays come a row each, to be unticked by the user, so the line
+	// above them doesn't count them
+	answer := askApprovalFor(ci, PermPublish, "publish "+aKind(evt.Kind, "event"), func() PromptBody {
+		return describeEvent(evt).body(", to these relays:", stripSchemes(targets))
+	})
+	if !answer.OK {
 		return nil, errors.New("denied by the user")
+	}
+	if targets = answer.kept(targets); len(targets) == 0 {
+		return nil, errors.New("no relays chosen by the user")
 	}
 
 	// keep it locally first, so the napp can query it back right away

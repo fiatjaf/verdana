@@ -44,6 +44,37 @@ type promptButtons struct {
 	allow, deny               widget.Clickable
 	sessionAllow, sessionDeny widget.Clickable
 	alwaysAllow, alwaysDeny   widget.Clickable
+
+	// fold opens and closes the payload of the prompt shownFor, when it
+	// comes with a summary, and ticks are the boxes of its items, ticked
+	// to start with
+	fold     widget.Clickable
+	foldOpen bool
+	ticks    []widget.Bool
+	shownFor int
+}
+
+// reset makes the buttons ready for prompt p, the first time it is drawn.
+func (btns *promptButtons) reset(p *backend.Prompt) {
+	if btns.shownFor == p.ID && len(btns.ticks) == len(p.Items) {
+		return
+	}
+	btns.shownFor, btns.foldOpen = p.ID, false
+	btns.ticks = make([]widget.Bool, len(p.Items))
+	for i := range btns.ticks {
+		btns.ticks[i].Value = true
+	}
+}
+
+// skipped is the indexes of the items the user unticked.
+func (btns *promptButtons) skipped() []int {
+	var skip []int
+	for i := range btns.ticks {
+		if !btns.ticks[i].Value {
+			skip = append(skip, i)
+		}
+	}
+	return skip
 }
 
 // layoutPrompt draws the dialog a blocked rpc is waiting on: either an
@@ -55,6 +86,10 @@ func layoutPrompt(
 	btns *promptButtons,
 	optBtns []widget.Clickable,
 ) layout.Dimensions {
+	btns.reset(p)
+	if btns.fold.Clicked(gtx) {
+		btns.foldOpen = !btns.foldOpen
+	}
 	children := []layout.FlexChild{
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			t := material.H6(th, p.Title)
@@ -74,26 +109,80 @@ func layoutPrompt(
 		)
 	}
 
-	if p.Code != "" {
+	// codeBox draws text on a rounded code-coloured block
+	codeBox := func(text string, maxLines int) layout.Widget {
+		return func(gtx layout.Context) layout.Dimensions {
+			macro := op.Record(gtx.Ops)
+			dims := layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				gtx.Constraints.Min.X = gtx.Constraints.Max.X
+				l := material.Body2(th, text)
+				l.Color = currentTheme().codeFg
+				l.MaxLines = maxLines
+				return l.Layout(gtx)
+			})
+			call := macro.Stop()
+			bg := clip.RRect{
+				Rect: image.Rectangle{Max: image.Point{X: gtx.Constraints.Max.X, Y: dims.Size.Y}},
+				NW:   6, NE: 6, SW: 6, SE: 6,
+			}
+			defer bg.Push(gtx.Ops).Pop()
+			paint.Fill(gtx.Ops, currentTheme().codeBg)
+			call.Add(gtx.Ops)
+			return dims
+		}
+	}
+
+	for i, it := range p.Items {
+		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			pointer.CursorPointer.Add(gtx.Ops)
+			cb := material.CheckBox(th, &btns.ticks[i], it)
+			cb.TextSize = th.TextSize * 14 / 16
+			cb.Color = currentTheme().codeFg
+			return cb.Layout(gtx)
+		}))
+	}
+
+	if p.Warning != "" {
 		children = append(children,
 			layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				macro := op.Record(gtx.Ops)
-				dims := layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-					l := material.Body2(th, p.Code)
-					l.Color = currentTheme().codeFg
+				l := material.Body1(th, p.Warning)
+				l.Color = currentTheme().danger
+				l.Font.Weight = font.Bold
+				return l.Layout(gtx)
+			}),
+		)
+	}
+
+	if p.Code != "" && p.Summary != "" {
+		// the payload folded under its summary, opened by clicking that
+		children = append(children,
+			layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				pointer.CursorPointer.Add(gtx.Ops)
+				return btns.fold.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					arrow := "▸ "
+					if btns.foldOpen {
+						arrow = "▾ "
+					}
+					l := material.Body2(th, arrow+p.Summary)
+					l.Color = currentTheme().muted
 					return l.Layout(gtx)
 				})
-				call := macro.Stop()
-				bg := clip.RRect{
-					Rect: image.Rectangle{Max: image.Point{X: gtx.Constraints.Max.X, Y: dims.Size.Y}},
-					NW:   6, NE: 6, SW: 6, SE: 6,
-				}
-				defer bg.Push(gtx.Ops).Pop()
-				paint.Fill(gtx.Ops, currentTheme().codeBg)
-				call.Add(gtx.Ops)
-				return dims
 			}),
+		)
+	}
+
+	if p.Code != "" && (p.Summary == "" || btns.foldOpen) {
+		// this view doesn't scroll: a long payload is cut where it would
+		// push the answers off the window
+		lines := 0
+		if p.Summary != "" {
+			lines = 24
+		}
+		children = append(children,
+			layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
+			layout.Rigid(codeBox(p.Code, lines)),
 		)
 	}
 

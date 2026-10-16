@@ -5,6 +5,7 @@ import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -35,6 +36,7 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -1536,8 +1538,14 @@ private fun SwitcherRow(
 // for it: the launcher when the launcher asked, the napp's own window when
 // a napp did. It is a blocking question — back never dismisses it.
 @Composable
-fun PromptWindow(p: Prompt, onAnswer: (Boolean, Int, String) -> Unit) {
+fun PromptWindow(p: Prompt, onAnswer: (Boolean, Int, String, List<Int>) -> Unit) {
     val theme = themeByName(currentThemeName)
+    // the items come with a box each, ticked to start with: the answer says
+    // which ones the user unticked
+    val ticked = remember(p.id) { mutableStateListOf(*Array(p.items.size) { true }) }
+    val answer = { ok: Boolean, index: Int, scope: String ->
+        onAnswer(ok, index, scope, ticked.indices.filter { !ticked[it] })
+    }
     Column(
         Modifier
             .fillMaxSize()
@@ -1550,8 +1558,64 @@ fun PromptWindow(p: Prompt, onAnswer: (Boolean, Int, String) -> Unit) {
             Spacer(Modifier.height(8.dp))
             Text(p.detail, color = theme.subtle, style = MaterialTheme.typography.bodyMedium)
         }
-        if (p.code.isNotBlank()) {
+        if (p.items.isNotEmpty()) {
+            Spacer(Modifier.height(8.dp))
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(theme.codeBg)
+                    .padding(8.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                p.items.forEachIndexed { i, item ->
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable { ticked[i] = !ticked[i] },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Checkbox(
+                            checked = ticked[i],
+                            onCheckedChange = { ticked[i] = it },
+                            modifier = Modifier.size(32.dp),
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(item, color = theme.codeFg, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                    }
+                }
+            }
+        }
+        if (p.warning.isNotBlank()) {
             Spacer(Modifier.height(10.dp))
+            Text(
+                p.warning,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, theme.danger, RoundedCornerShape(6.dp))
+                    .padding(8.dp),
+                color = theme.danger,
+                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+        // with a summary the payload starts folded under it
+        var unfolded by remember(p.id) { mutableStateOf(false) }
+        if (p.code.isNotBlank() && p.summary.isNotBlank()) {
+            Spacer(Modifier.height(10.dp))
+            Text(
+                (if (unfolded) "▾ " else "▸ ") + p.summary,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { unfolded = !unfolded }
+                    .padding(vertical = 4.dp),
+                color = theme.muted,
+                fontSize = 12.sp,
+                fontFamily = FontFamily.Monospace,
+            )
+        }
+        if (p.code.isNotBlank() && (p.summary.isBlank() || unfolded)) {
+            Spacer(Modifier.height(if (p.summary.isBlank()) 10.dp else 4.dp))
             Text(
                 p.code,
                 modifier = Modifier
@@ -1561,7 +1625,8 @@ fun PromptWindow(p: Prompt, onAnswer: (Boolean, Int, String) -> Unit) {
                     .padding(8.dp),
                 color = theme.codeFg,
                 fontSize = 12.sp,
-                maxLines = 8,
+                fontFamily = if (p.summary.isBlank()) null else FontFamily.Monospace,
+                maxLines = if (p.summary.isBlank()) 8 else Int.MAX_VALUE,
             )
         }
         Spacer(Modifier.weight(1f))
@@ -1581,7 +1646,7 @@ fun PromptWindow(p: Prompt, onAnswer: (Boolean, Int, String) -> Unit) {
                         .padding(bottom = 6.dp)
                         .clip(RoundedCornerShape(8.dp))
                         .background(fill)
-                        .clickable { onAnswer(true, i, "once") }
+                        .clickable { answer(true, i, "once") }
                         .height(IntrinsicSize.Min),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -1617,17 +1682,17 @@ fun PromptWindow(p: Prompt, onAnswer: (Boolean, Int, String) -> Unit) {
                     }
                 }
             }
-            TextButton(onClick = { onAnswer(false, 0, "once") }) {
+            TextButton(onClick = { answer(false, 0, "once") }) {
                 Text("Cancel", color = theme.chipFg)
             }
         } else if (p.remember) {
-            PromptScopes(theme) { ok, scope -> onAnswer(ok, 0, scope) }
+            PromptScopes(theme) { ok, scope -> answer(ok, 0, scope) }
         } else {
             Row {
-                Button(onClick = { onAnswer(true, 0, "once") }) { Text("Allow") }
+                Button(onClick = { answer(true, 0, "once") }) { Text("Allow") }
                 Spacer(Modifier.width(8.dp))
                 Button(
-                    onClick = { onAnswer(false, 0, "once") },
+                    onClick = { answer(false, 0, "once") },
                     colors = ButtonDefaults.buttonColors(containerColor = theme.chipBg, contentColor = theme.chipFg),
                 ) { Text("Deny") }
             }

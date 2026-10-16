@@ -2,6 +2,7 @@ package backend
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -41,11 +42,26 @@ const (
 )
 
 // Answer is what the user chose on a prompt: yes or no, which option of a
-// picker (ignored otherwise), and how long that answer holds.
+// picker (ignored otherwise), how long that answer holds, and which of the
+// prompt's items the user unticked (the relays a publish is not to go to).
+// Skip only ever holds for this one prompt: a remembered answer is the yes
+// or the no alone.
 type Answer struct {
 	OK    bool  `json:"ok"`
 	Index int   `json:"index"`
 	Scope Scope `json:"scope"`
+	Skip  []int `json:"skip,omitempty"`
+}
+
+// kept is the items the user left ticked.
+func (a Answer) kept(items []string) []string {
+	out := make([]string, 0, len(items))
+	for i, it := range items {
+		if !slices.Contains(a.Skip, i) {
+			out = append(out, it)
+		}
+	}
+	return out
 }
 
 // PromptOption is one choice in a picker prompt.
@@ -67,16 +83,34 @@ type PromptOption struct {
 	Uses      int  `json:"uses,omitempty"`
 }
 
+// PromptBody is what a prompt shows under its title, in this order.
+type PromptBody struct {
+	// Detail is the explanation under the title.
+	Detail string `json:"detail"`
+
+	// Warning is something that could hurt, to be shown loud: a follow list
+	// about to lose most of itself.
+	Warning string `json:"warning,omitempty"`
+
+	// Items are what the detail ends by pointing at, a row each: the relays
+	// an event is about to be published to. Each comes with a box, ticked to
+	// start with, and the answer says which ones the user unticked.
+	Items []string `json:"items,omitempty"`
+
+	// Code is an optional monospace block with the payload at stake. With
+	// a Summary it starts folded under that one line ("kind-1 · 3 tags").
+	Code    string `json:"code"`
+	Summary string `json:"summary,omitempty"`
+}
+
 // Prompt is a question the user has to answer before a napp can continue.
 type Prompt struct {
 	// ID identifies the prompt when answering it.
 	ID int `json:"id"`
 
-	// Title is the one-line question, Detail the explanation under it and
-	// Code an optional monospace block previewing the payload at stake.
-	Title  string `json:"title"`
-	Detail string `json:"detail"`
-	Code   string `json:"code"`
+	// Title is the one-line question; the body says what is at stake.
+	Title string `json:"title"`
+	PromptBody
 
 	// Options is empty for a plain approve/deny prompt.
 	Options []PromptOption `json:"options"`
@@ -204,15 +238,14 @@ func (p *Prompt) wait() Answer {
 	}
 }
 
-func newPrompt(napp, title, detail, code string, options []PromptOption) *Prompt {
+func newPrompt(napp, title string, body PromptBody, options []PromptOption) *Prompt {
 	return &Prompt{
-		ID:      int(promptSerial.Add(1)),
-		Napp:    napp,
-		Title:   title,
-		Detail:  detail,
-		Code:    code,
-		Options: options,
-		resp:    make(chan Answer, 1),
+		ID:         int(promptSerial.Add(1)),
+		Napp:       napp,
+		Title:      title,
+		PromptBody: body,
+		Options:    options,
+		resp:       make(chan Answer, 1),
 	}
 }
 
@@ -220,7 +253,14 @@ func newPrompt(napp, title, detail, code string, options []PromptOption) *Prompt
 // already covers it decides right away, and only a question nothing has an
 // answer to becomes a prompt. It is what makes signEvent, nip04/nip44,
 // saveFile, copyText, napp.link and publish "sensitive".
-func askApproval(ci *Instance, perm Permission, title, detail, code string) bool {
+func askApproval(ci *Instance, perm Permission, title string, body PromptBody) bool {
+	return askApprovalFor(ci, perm, title, func() PromptBody { return body }).OK
+}
+
+// askApprovalFor is askApproval with a body that is only worked out when
+// there is a prompt to show it on (no rule answered for it), answering with
+// the whole Answer: a rule's has nothing unticked.
+func askApprovalFor(ci *Instance, perm Permission, title string, body func() PromptBody) Answer {
 	name := "A napp"
 	nappID := ""
 	if ci != nil {
@@ -237,10 +277,10 @@ func askApproval(ci *Instance, perm Permission, title, detail, code string) bool
 	if rule, ok := lookupRule(key); ok {
 		log.Info().Str("napp", name).Str("ask", title).
 			Str("rule", string(rule.Decision)).Msg("approval answered by the rules")
-		return rule.Decision.granted()
+		return Answer{OK: rule.Decision.granted()}
 	}
 
-	p := newPrompt(name, name+" wants to "+title, detail, code, nil)
+	p := newPrompt(name, name+" wants to "+title, body(), nil)
 	p.key = key
 	p.Remember = true
 	if ci != nil {
@@ -251,7 +291,7 @@ func askApproval(ci *Instance, perm Permission, title, detail, code string) bool
 	answer := p.wait()
 	log.Info().Str("napp", name).Str("ask", title).Bool("granted", answer.OK).
 		Str("scope", string(answer.Scope)).Msg("approval answered")
-	return answer.OK
+	return answer
 }
 
 // askActionHandler asks which napp should handle an action when more than one
@@ -300,7 +340,7 @@ func askActionHandler(caller *Instance, action string, payload json.RawMessage, 
 		code = preview(string(payload), 500)
 	}
 
-	p := newPrompt(callerName, "Open “"+action+"” with…", "", code, options)
+	p := newPrompt(callerName, "Open “"+action+"” with…", PromptBody{Code: code}, options)
 	if caller != nil {
 		p.Instance = caller.instance
 	}

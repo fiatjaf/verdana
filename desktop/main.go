@@ -371,6 +371,7 @@ func gioMain() {
 						}
 						// allow and deny, each of them for this prompt only, for
 						// this session or always
+						promptBtns.reset(activePrompt)
 						for _, c := range []struct {
 							ok    bool
 							scope backend.Scope
@@ -384,7 +385,7 @@ func gioMain() {
 							{false, backend.ScopeAlways, &promptBtns.alwaysDeny},
 						} {
 							if c.btn.Clicked(gtx) {
-								backend.AnswerPrompt(activePrompt.ID, backend.Answer{OK: c.ok, Scope: c.scope})
+								backend.AnswerPrompt(activePrompt.ID, backend.Answer{OK: c.ok, Scope: c.scope, Skip: promptBtns.skipped()})
 							}
 						}
 						for i := range activePrompt.Options {
