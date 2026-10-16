@@ -929,6 +929,11 @@ func dispatchToInstance(ctx context.Context, ci *Instance, req *actionRequest) (
 	idx, ok := ci.waitForHandler(waitCtx, req.name)
 	cancel()
 	if !ok {
+		select {
+		case <-ci.gone:
+			return nil, errors.New("the napp window closed before answering")
+		default:
+		}
 		// The napp may only be listening on popstate: still deliver it, but
 		// there is no result to wait for.
 		ci.sendAction(-1, ci.deliveredName(req.name), payload, nil)

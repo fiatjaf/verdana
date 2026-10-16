@@ -5,6 +5,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
 import android.view.ViewGroup
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
@@ -142,6 +143,16 @@ class NappWebView(
 
             override fun onPageStarted(v: WebView, url: String, favicon: Bitmap?) {
                 // nothing: document-start injection already ran
+            }
+
+            // Android kills the renderer to reclaim memory (or it crashes),
+            // which unhandled takes the whole app down with it. The page is
+            // gone either way: close the window, so whatever was waiting on
+            // it (a dispatch, say) stops waiting.
+            override fun onRenderProcessGone(v: WebView, detail: RenderProcessGoneDetail): Boolean {
+                android.util.Log.w("Verdana", "renderer of $instance gone (crashed: ${detail.didCrash()})")
+                onClose()
+                return true
             }
         }
 

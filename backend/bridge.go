@@ -301,8 +301,18 @@ func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 				return nil, err
 			}
 			// no deadline: the handler may be the user typing a note, and the
-			// dispatch ends anyway when its window answers or closes
-			return runNappAction(context.Background(), ci, p.Name, p.Payload, p.Options)
+			// dispatch ends anyway when its window answers or closes, or when
+			// the caller's own window closes and nobody is left to answer to
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			go func() {
+				select {
+				case <-ci.gone:
+					cancel()
+				case <-ctx.Done():
+				}
+			}()
+			return runNappAction(ctx, ci, p.Name, p.Payload, p.Options)
 
 		case "napp.registerAction":
 			var p struct {
