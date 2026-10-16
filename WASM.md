@@ -373,7 +373,7 @@ its window, not the launcher, and a trap closes the window saying why.
 ## Trying one
 
 ```
-cd desktop && go build -o wasmchild/wasmchild ./wasmchild && go build -o verdana -tags 'dev,novulkan' && ./verdana
+cd desktop && go build -o wasmchild/wasmchild ./wasmchild && go build -o verdana -tags dev && ./verdana
 ```
 
 Then the Dev tab, "Load folder", and a napp folder with a `metadata.json`

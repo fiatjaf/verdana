@@ -39,7 +39,7 @@ jobs:
 
       - name: test desktop
         working-directory: desktop
-        run: go test -tags novulkan ./...
+        run: go test ./...
 
   build:
     name: ${{ matrix.id }}
@@ -120,7 +120,7 @@ jobs:
         working-directory: desktop
         env:
           CGO_ENABLED: "1"
-        run: go build -o verdana -tags novulkan -ldflags "-s -w" .
+        run: go build -o verdana -ldflags "-s -w" .
 
       - name: package
         shell: bash

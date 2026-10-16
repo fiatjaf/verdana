@@ -2,10 +2,10 @@
 # is the canvas shell a wasm napp paints into. Both are built before the
 # launcher, because a release build embeds them.
 run:
-    cd desktop && go build -o child/child ./child && go build -o wasmchild/wasmchild ./wasmchild && go build -o verdana -tags 'dev,novulkan' && WEBVIEW_DEBUG=true ./verdana
+    cd desktop && go build -o child/child ./child && go build -o wasmchild/wasmchild ./wasmchild && go build -o verdana -tags dev && WEBVIEW_DEBUG=true ./verdana
 
 prod:
-    cd desktop && go build -o child/child ./child && go build -o wasmchild/wasmchild ./wasmchild && go build -o verdana -tags novulkan .
+    cd desktop && go build -o child/child ./child && go build -o wasmchild/wasmchild ./wasmchild && go build -o verdana .
 
 # the ui kit carries the launcher's own face (desktop/assets/*.ttf is
 # Verdana, in three faces) as woff2, inlined by backend/webview/embed.go.
