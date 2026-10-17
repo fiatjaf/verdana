@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -37,6 +38,14 @@ type extraTab struct {
 }
 
 var extraTabState *extraTab
+
+// detailBtns are the clickables of the header and the ephemeral tab that
+// don't need to be threaded through every layout call.
+var detailBtns struct {
+	selfProfile widget.Clickable // the header's avatar and name
+	profileView widget.Clickable // a profile tab's avatar and name
+	nappEvent   widget.Clickable // a napp tab's "Event" button
+}
 
 func openNappTab(n backend.Napp) {
 	pubkey := ""
@@ -341,6 +350,20 @@ func layoutNappDetail(
 					pointer.CursorPointer.Add(gtx.Ops)
 					return withTooltip(gtx, updateBtn, nappButtonTip("Update", n), material.Button(th, updateBtn, "Update").Layout)
 				}),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					if !hasUpdate || updateBtn == nil {
+						return layout.Dimensions{}
+					}
+					return layout.Spacer{Width: unit.Dp(8)}.Layout(gtx)
+				}),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					pointer.CursorPointer.Add(gtx.Ops)
+					btn := &detailBtns.nappEvent
+					b := material.Button(th, btn, "Event")
+					b.Background = currentTheme().chipBg
+					b.Color = currentTheme().chipFg
+					return withTooltip(gtx, btn, "Open the event that describes "+n.Label()+" in a napp that views kind "+strconv.Itoa(int(n.KindOf()))+" events", b.Layout)
+				}),
 			)
 		})
 	}))
@@ -388,6 +411,8 @@ func layoutProfileDetail(
 	cardBtns, openBtns, actionBtns, updateBtns []widget.Clickable,
 	installedSet map[string]bool,
 	busy map[string]bool,
+	themeBtn, readAuthBtn *widget.Clickable,
+	st backend.State,
 ) layout.Dimensions {
 	pubkey := ""
 	if tab != nil {
@@ -399,23 +424,33 @@ func layoutProfileDetail(
 	}
 	napps, fetching, fetchErr := cachedAuthorNapps(pubkey)
 
+	self := pubkey != "" && pubkey == st.Pubkey
+
 	children := []layout.FlexChild{
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return avatar(gtx, p.Picture, 56)
-				}),
-				layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
-				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-					name := p.ShortName
-					if name == "" {
-						name = pubkey
-					}
-					t := material.H6(th, name)
-					t.Font.Weight = font.Bold
-					return t.Layout(gtx)
-				}),
-			)
+			// the avatar and name fire view:0 from a blank window, so the
+			// user picks the napp that shows this profile
+			name := p.ShortName
+			if name == "" {
+				name = pubkey
+			}
+			pointer.CursorPointer.Add(gtx.Ops)
+			btn := &detailBtns.profileView
+			return withTooltip(gtx, btn, "Open "+name+"'s profile in a napp", func(gtx layout.Context) layout.Dimensions {
+				return btn.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return avatar(gtx, p.Picture, 56)
+						}),
+						layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
+						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+							t := material.H6(th, name)
+							t.Font.Weight = font.Bold
+							return t.Layout(gtx)
+						}),
+					)
+				})
+			})
 		}),
 	}
 	if p.DisplayName != "" && p.DisplayName != p.Name {
@@ -431,8 +466,30 @@ func layoutProfileDetail(
 		detailRow(th, "npub", p.Npub),
 		detailRow(th, "Pubkey", p.Pubkey),
 	)
+	if self {
+		children = append(children,
+			layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				t := emph(material.Body2(th, "Settings"))
+				t.Color = currentTheme().subtle
+				return t.Layout(gtx)
+			}),
+			layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return themeButton(gtx, th, themeBtn)
+					}),
+					layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return readAuthButton(gtx, th, readAuthBtn, st.ReadAuth)
+					}),
+				)
+			}),
+		)
+	}
 	children = append(children,
-		layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(24)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			t := emph(material.Body2(th, "Published napps"))
 			t.Color = currentTheme().subtle
@@ -459,45 +516,42 @@ func layoutProfileDetail(
 			return l.Layout(gtx)
 		}))
 	}
-	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-		children[0],
-		layout.Flexed(0, func(gtx layout.Context) layout.Dimensions {
-			return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children[1:]...)
-		}),
-		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			if len(napps) == 0 {
-				return layout.Dimensions{}
-			}
-			return material.List(th, list).Layout(gtx, len(napps), func(gtx layout.Context, i int) layout.Dimensions {
-				n := napps[i]
-				var cardBtn, openBtn, actBtn, updBtn *widget.Clickable
-				if i < len(cardBtns) {
-					cardBtn = &cardBtns[i]
-				}
-				if i < len(openBtns) && installedSet[n.ID] {
-					openBtn = &openBtns[i]
-				}
-				if i < len(actionBtns) {
-					actBtn = &actionBtns[i]
-				}
-				if i < len(updateBtns) && installedSet[n.ID] && n.UpdateAvailable != nil {
-					updBtn = &updateBtns[i]
-				}
-				label := "Install"
-				if installedSet[n.ID] {
-					label = "Uninstall"
-				}
-				if busy[n.ID] {
-					label = "Working…"
-				}
-				updLabel := ""
-				if updBtn != nil {
-					updLabel = "Update"
-				}
-				// inside a profile the author row is the profile itself:
-				// no nested author button
-				return renderNappCard(gtx, th, cardBtn, nil, openBtn, actBtn, updBtn, label, updLabel, nil, false, n)
+	// the whole page scrolls as one list: item 0 is the profile header,
+	// info rows and settings; the rest are the author's napps
+	return material.List(th, list).Layout(gtx, 1+len(napps), func(gtx layout.Context, i int) layout.Dimensions {
+		if i == 0 {
+			return layout.Inset{Bottom: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
 			})
-		}),
-	)
+		}
+		i--
+		n := napps[i]
+		var cardBtn, openBtn, actBtn, updBtn *widget.Clickable
+		if i < len(cardBtns) {
+			cardBtn = &cardBtns[i]
+		}
+		if i < len(openBtns) && installedSet[n.ID] {
+			openBtn = &openBtns[i]
+		}
+		if i < len(actionBtns) {
+			actBtn = &actionBtns[i]
+		}
+		if i < len(updateBtns) && installedSet[n.ID] && n.UpdateAvailable != nil {
+			updBtn = &updateBtns[i]
+		}
+		label := "Install"
+		if installedSet[n.ID] {
+			label = "Uninstall"
+		}
+		if busy[n.ID] {
+			label = "Working…"
+		}
+		updLabel := ""
+		if updBtn != nil {
+			updLabel = "Update"
+		}
+		// inside a profile the author row is the profile itself:
+		// no nested author button
+		return renderNappCard(gtx, th, cardBtn, nil, openBtn, actBtn, updBtn, label, updLabel, nil, false, n)
+	})
 }

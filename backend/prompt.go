@@ -299,7 +299,7 @@ func askApprovalFor(ci *Instance, perm Permission, title string, body func() Pro
 func askActionHandler(caller *Instance, action string, payload json.RawMessage, candidates []Napp, open []*Instance) (PromptOption, bool) {
 	callerName := "launcher"
 	callerID := ""
-	if caller != nil {
+	if caller != nil && !caller.blank {
 		callerName = caller.napp.Label()
 		callerID = caller.napp.ID
 	}

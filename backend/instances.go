@@ -70,6 +70,10 @@ type Instance struct {
 	// (napp.action with auxiliary:true): it closes as soon as its handler
 	// answers a dispatch.
 	auxiliary bool
+
+	// blank is true for a window the launcher opened only to fire an action
+	// from (see blank.go): its dispatches count as the launcher's own.
+	blank bool
 }
 
 type actionRequest struct {
@@ -714,6 +718,10 @@ func (ci *Instance) setActionState(req *actionRequest, replace bool) {
 type actionOptions struct {
 	Instance  string `json:"instance"`
 	Auxiliary bool   `json:"auxiliary"`
+
+	// onRouted, when set, is called once the handler window is known (and
+	// before the action reaches it): a blank window closes itself there.
+	onRouted func()
 }
 
 // RunAction fires an action from outside any napp (a launcher shortcut, a
@@ -741,15 +749,17 @@ func runNappAction(
 	}
 
 	callerName := "launcher"
-	if caller != nil {
+	callerID := ""
+	if caller != nil && !caller.blank {
 		callerName = caller.napp.Label()
+		callerID = caller.napp.ID
 	}
 
 	req := &actionRequest{name: name, payload: payload}
-
-	callerID := ""
-	if caller != nil {
-		callerID = caller.napp.ID
+	routed := func() {
+		if opts.onRouted != nil {
+			opts.onRouted()
+		}
 	}
 
 	// an explicit instance skips every choice: route it straight there
@@ -760,6 +770,7 @@ func runNappAction(
 		}
 		log.Info().Str("from", callerName).Str("action", name).
 			Str("instance", ci.instance).Msg("dispatching action to instance")
+		routed()
 		return dispatchTo(ctx, callerID, name, ci, req)
 	}
 
@@ -773,6 +784,7 @@ func runNappAction(
 		if len(open) == 1 {
 			log.Info().Str("from", callerName).Str("action", name).
 				Str("instance", open[0].instance).Msg("dispatching action")
+			routed()
 			return dispatchTo(ctx, callerID, name, open[0], req)
 		}
 		log.Info().Str("from", callerName).Str("action", name).
@@ -784,6 +796,7 @@ func runNappAction(
 		if opts.Auxiliary {
 			ci.auxiliary = true
 		}
+		routed()
 		return dispatchTo(ctx, callerID, name, ci, req)
 	}
 
@@ -822,6 +835,7 @@ func runNappAction(
 		if ci == nil {
 			return nil, fmt.Errorf("instance %q is gone", choice.Instance)
 		}
+		routed()
 		return dispatchTo(ctx, callerID, name, ci, req)
 	}
 	for _, n := range candidates {
@@ -833,6 +847,7 @@ func runNappAction(
 			if opts.Auxiliary {
 				ci.auxiliary = true
 			}
+			routed()
 			return dispatchTo(ctx, callerID, name, ci, req)
 		}
 	}

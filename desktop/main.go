@@ -445,6 +445,9 @@ func gioMain() {
 						if readAuthBtn.Clicked(gtx) {
 							backend.SetReadAuth(!backend.ReadAuth())
 						}
+						if detailBtns.selfProfile.Clicked(gtx) && st.Pubkey != "" {
+							openProfileTab(st.Pubkey)
+						}
 						if logoutBtn.Clicked(gtx) {
 							setConfirmLogout(true)
 						}
@@ -698,6 +701,8 @@ func gioMain() {
 								n := detailNapp(extraTabState)
 								if detailAuthorBtn.Clicked(gtx) && n.Author.Hex() != "" {
 									openProfileTab(n.Author.Hex())
+								} else if detailBtns.nappEvent.Clicked(gtx) {
+									backend.ViewNappEvent(n)
 								} else if detailOpenBtn.Clicked(gtx) && installedSet[n.ID] {
 									if in, ok := backend.InstalledNapp(n.ID); ok {
 										backend.Launch(in)
@@ -723,6 +728,9 @@ func gioMain() {
 									}
 								}
 							} else {
+								if detailBtns.profileView.Clicked(gtx) {
+									backend.ViewProfile(extraTabState.pubkey)
+								}
 								// profile tab: size buttons to its napps list
 								pan, _, _ := cachedAuthorNapps(extraTabState.pubkey)
 								for len(profileCardBtns) < len(pan) {
