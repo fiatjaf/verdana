@@ -18,6 +18,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.viewinterop.AndroidView
@@ -43,6 +46,11 @@ import mobile.Mobile
 // no such window open. That window recovers: the backend opens its instance
 // again from the record it kept on disk, and replays the actions it was sent
 // to put it back where it was (see backend/window_records.go).
+//
+// A window can also start as a picker (mode "picker"): no napp yet, only the
+// question of which napp handles an action (see Picker.kt). The napp picked in
+// it is opened under the picker's own instance, and lands right here: the
+// window turns into that napp's, web or wasm, without a new task (become).
 class NappActivity : ComponentActivity() {
 
     lateinit var instance: String
@@ -85,6 +93,13 @@ class NappActivity : ComponentActivity() {
     // waiting for the backend to open it again (see recover)
     private var recovering = false
 
+    // picking is a picker window not yet turned into a napp's: the question
+    // it shows comes down the wire like any message (see deliver), and
+    // opening is the name of what the user picked, until the backend acts
+    private var picking = false
+    private var pickerPrompt by mutableStateOf<Prompt?>(null)
+    private var opening by mutableStateOf<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -105,7 +120,8 @@ class NappActivity : ComponentActivity() {
         nappId = spec.nappId
 
         if (!Mobile.knowsWindow(instance)) {
-            recover(spec)
+            // a picker's question died with the process: nothing to recover
+            if (spec.mode == "picker") finish() else recover(spec)
             return
         }
         build(spec)
@@ -188,6 +204,11 @@ class NappActivity : ComponentActivity() {
     }
 
     private fun build(spec: WindowSpec) {
+        if (spec.mode == "picker") {
+            buildPicker()
+            return
+        }
+
         // The view goes up before the claim is made: claiming hands over
         // whatever the backend sent while this window was starting, and that
         // has to land on a webview that already exists.
@@ -241,6 +262,78 @@ class NappActivity : ComponentActivity() {
         setContent { NappWindow(pull, back) }
     }
 
+    // buildPicker shows the picker until the backend either closes the window
+    // or sends the napp picked in it to become.
+    private fun buildPicker() {
+        // before the claim: claiming hands over the prompt the backend sent
+        // while this window was starting, and it has to land as a picker's
+        picking = true
+        if (!VerdanaHost.claim(this)) {
+            picking = false
+            finish()
+            return
+        }
+        ownsWindow = true
+        applyTaskDescription("Verdana", null)
+        setContent {
+            val theme = themeByName(VerdanaHost.state.theme)
+            MaterialTheme(colorScheme = theme.compose()) {
+                Surface(color = theme.bg, modifier = Modifier.fillMaxSize()) {
+                    BackHandler { cancelPick() }
+                    Box(Modifier.fillMaxSize().safeDrawingPadding()) {
+                        PickerWindow(pickerPrompt, opening, onPick = { pick(it) }, onCancel = { cancelPick() })
+                    }
+                }
+            }
+        }
+    }
+
+    // pick answers the picker with the option at index. An open window is
+    // brought to the front, since the backend closes this one; a napp to
+    // open comes back here, through become.
+    private fun pick(index: Int) {
+        val p = pickerPrompt ?: return
+        val opt = p.options.getOrNull(index) ?: return
+        pickerPrompt = null
+        opening = opt.name.ifBlank { opt.label }
+        Mobile.answerPrompt(p.id, true, index.toLong(), "once", "")
+        if (opt.instance.isNotBlank()) VerdanaHost.surface(opt.instance)
+    }
+
+    private fun cancelPick() {
+        val p = pickerPrompt
+        if (p == null) {
+            finish()
+            return
+        }
+        pickerPrompt = null
+        Mobile.answerPrompt(p.id, false, 0, "once", "")
+    }
+
+    // isPicking says this window is a picker still waiting to become a napp's.
+    fun isPicking(): Boolean = picking && !isFinishing && !isDestroyed
+
+    // become is the backend opening the napp picked in this picker under its
+    // instance: the window is built again from the napp's spec, which is
+    // also what the intent carries from now on, so Recents and a restore
+    // after the process dies see the napp, not the picker.
+    fun become(specJSON: String) {
+        if (!isPicking()) return
+        val spec = try {
+            WindowSpec(specJSON)
+        } catch (e: Exception) {
+            Log.e("Verdana", "unreadable window spec for $instance", e)
+            finishWindow()
+            return
+        }
+        Log.i("Verdana", "picker $instance becomes ${spec.nappId}")
+        picking = false
+        pickerPrompt = null
+        nappId = spec.nappId
+        intent = Intent(intent).putExtra(EXTRA_SPEC, specJSON)
+        build(spec)
+    }
+
     // onNewIntent is what intoExisting delivers when the same instance is
     // launched again: the window was already there, so all that is left is
     // to come back to the front.
@@ -278,7 +371,26 @@ class NappActivity : ComponentActivity() {
 
     // deliver is one wire message from the backend for this window.
     fun deliver(msgJSON: String) {
-        runOnUiThread { shell?.applyMessage(msgJSON) }
+        runOnUiThread {
+            if (picking) pickerMessage(msgJSON) else shell?.applyMessage(msgJSON)
+        }
+    }
+
+    // pickerMessage is the one message a picker cares about: the prompt to
+    // show, or none (the prompt was answered, or ran out of time).
+    private fun pickerMessage(msgJSON: String) {
+        val m = try {
+            org.json.JSONObject(msgJSON)
+        } catch (e: Exception) {
+            return
+        }
+        if (m.optString("t") != "prompt") return
+        pickerPrompt = try {
+            parsePrompt(m.optString("params"))
+        } catch (e: Exception) {
+            Log.w("Verdana", "unreadable prompt for picker $instance", e)
+            null
+        }
     }
 
     // wasmInvalidate is the backend saying a wasm napp has something new to
@@ -359,8 +471,8 @@ class NappActivity : ComponentActivity() {
                         // it is a blocking question, not a dialog over the
                         // napp's own chrome
                         Box(Modifier.fillMaxSize().safeDrawingPadding()) {
-                            PromptWindow(prompt) { ok, index, scope, skip ->
-                                VerdanaHost.answer(prompt, ok, index, scope, skip)
+                            PromptWindow(prompt) { ok, scope, skip ->
+                                VerdanaHost.answer(prompt, ok, scope, skip)
                             }
                         }
                     }

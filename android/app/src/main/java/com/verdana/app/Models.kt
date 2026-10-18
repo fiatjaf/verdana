@@ -56,6 +56,11 @@ data class PromptOption(
     // the backend has already ordered these by how often the user picked
     // them; suggested says which ones carry that evidence
     val suggested: Boolean = false,
+    val dev: Boolean = false,
+    // name is the napp's own name, without the window, and icon its icon's
+    // bytes as base64: only sent to a picker window (see PickerWindow)
+    val name: String = "",
+    val icon: String = "",
 )
 
 data class Prompt(
@@ -199,6 +204,9 @@ fun parsePrompt(json: String): Prompt? {
                 nappId = p.optString("nappId"),
                 instance = p.optString("instance"),
                 suggested = p.optBoolean("suggested"),
+                dev = p.optBoolean("dev"),
+                name = p.optString("name"),
+                icon = p.optString("icon"),
             )
         },
         instance = o.optString("instance"),

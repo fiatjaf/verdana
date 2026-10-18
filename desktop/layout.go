@@ -77,14 +77,13 @@ func (btns *promptButtons) skipped() []int {
 	return skip
 }
 
-// layoutPrompt draws the dialog a blocked rpc is waiting on: either an
-// approve/deny question or a list of napps that can handle an action.
+// layoutPrompt draws the approve/deny dialog a blocked rpc is waiting on. A
+// picker never comes here: it is a window of its own.
 func layoutPrompt(
 	gtx layout.Context,
 	th *material.Theme,
 	p *backend.Prompt,
 	btns *promptButtons,
-	optBtns []widget.Clickable,
 ) layout.Dimensions {
 	btns.reset(p)
 	if btns.fold.Clicked(gtx) {
@@ -188,113 +187,7 @@ func layoutPrompt(
 
 	children = append(children, layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout))
 
-	if len(p.Options) > 0 {
-		for i := range p.Options {
-			i := i
-			children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				if i >= len(optBtns) {
-					return layout.Dimensions{}
-				}
-				return layout.Inset{Bottom: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-					pointer.CursorPointer.Add(gtx.Ops)
-					opt := p.Options[i]
-					p := currentTheme()
-					optTip := "Open " + opt.Label + " to handle this"
-					if opt.Instance != "" {
-						optTip = "Send this to the " + opt.Label + " window that is already open"
-					}
-					return withTooltip(gtx, &optBtns[i], optTip, func(gtx layout.Context) layout.Dimensions {
-						return optBtns[i].Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-							open := opt.Instance != ""
-							// the fill says what kind of napp this is: one the user
-							// keeps picking for this action (which outranks the
-							// rest, it is the reason the list is in this order),
-							// one being developed, or any other. Whether it is a
-							// window already open is told apart by a stripe and a
-							// pill of its own, so it shows whatever the fill is.
-							bgColor, fgColor := p.chipBg, p.chipFg
-							switch {
-							case opt.Suggested:
-								bgColor, fgColor = p.suggestBg, p.suggestFg
-							case opt.Dev:
-								bgColor, fgColor = p.devBg, p.devFg
-							}
-							macro := op.Record(gtx.Ops)
-							dims := layout.Inset{Top: unit.Dp(10), Bottom: unit.Dp(10), Left: unit.Dp(16), Right: unit.Dp(10)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-								return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-									layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-										return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-											layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-												l := material.Body1(th, opt.Label)
-												l.Color = fgColor
-												if open {
-													l.Font.Weight = font.Bold
-												}
-												return l.Layout(gtx)
-											}),
-											layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-												if opt.Detail == "" {
-													return layout.Dimensions{}
-												}
-												l := material.Caption(th, truncate(opt.Detail, 80))
-												if opt.Dev || opt.Suggested {
-													l.Color = fgColor
-												} else {
-													l.Color = p.muted
-												}
-												return l.Layout(gtx)
-											}),
-										)
-									}),
-									layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-										if !open {
-											return layout.Dimensions{}
-										}
-										return layout.Inset{Left: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-											m := op.Record(gtx.Ops)
-											d := layout.Inset{Top: unit.Dp(2), Bottom: unit.Dp(2), Left: unit.Dp(8), Right: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-												l := material.Caption(th, "open")
-												l.Color = p.contrastFg
-												l.Font.Weight = font.Bold
-												return l.Layout(gtx)
-											})
-											c := m.Stop()
-											r := gtx.Dp(9)
-											defer clip.UniformRRect(image.Rectangle{Max: d.Size}, r).Push(gtx.Ops).Pop()
-											paint.Fill(gtx.Ops, p.contrastBg)
-											c.Add(gtx.Ops)
-											return d
-										})
-									}),
-								)
-							})
-							call := macro.Stop()
-							bg := clip.RRect{Rect: image.Rectangle{Max: image.Point{X: gtx.Constraints.Max.X, Y: dims.Size.Y}}, NW: 6, NE: 6, SW: 6, SE: 6}
-							defer bg.Push(gtx.Ops).Pop()
-							paint.Fill(gtx.Ops, bgColor)
-							if open {
-								stripe := clip.Rect{Max: image.Point{X: gtx.Dp(5), Y: dims.Size.Y}}.Push(gtx.Ops)
-								paint.Fill(gtx.Ops, p.contrastBg)
-								stripe.Pop()
-							}
-							call.Add(gtx.Ops)
-							return dims
-						})
-					})
-				})
-			}))
-		}
-		children = append(children,
-			layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				pointer.CursorPointer.Add(gtx.Ops)
-				b := material.Button(th, &btns.deny, "Cancel")
-				b.Background = currentTheme().chipBg
-				b.Color = currentTheme().chipFg
-				return withTooltip(gtx, &btns.deny, "Don't send this anywhere", b.Layout)
-			}),
-		)
-	} else if !p.Remember {
+	if !p.Remember {
 		// nothing to widen the answer into: a plain yes and a plain no
 		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,

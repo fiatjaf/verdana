@@ -408,8 +408,8 @@ func runWindow(picking bool, became <-chan struct{}) {
 					w.Invalidate()
 				})
 			} else if pv != nil {
-				prompt.Layout(gtx, pv, br.ThemeName(), func(id int, ok bool, index int, scope string, skip []int) {
-					br.AnswerPrompt(id, ok, index, scope, skip)
+				prompt.Layout(gtx, pv, br.ThemeName(), func(id int, ok bool, scope string, skip []int) {
+					br.AnswerPrompt(id, ok, 0, scope, skip)
 					w.Invalidate()
 				})
 			} else {

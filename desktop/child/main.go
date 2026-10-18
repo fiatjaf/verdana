@@ -342,27 +342,17 @@ func writeMsg(m wireMsg) {
 // A prompt fired by this napp is shown over its own screen: an opaque
 // overlay that hides the webview until the user answers it.
 
-// promptView and promptOptionView mirror backend.Prompt as the overlay needs
-// to see it.
+// promptView mirrors backend.Prompt as the overlay needs to see it. A
+// picker never comes here: it is a window of its own.
 type promptView struct {
-	ID       int                `json:"id"`
-	Title    string             `json:"title"`
-	Detail   string             `json:"detail"`
-	Warning  string             `json:"warning"`
-	Items    []string           `json:"items"`
-	Code     string             `json:"code"`
-	Summary  string             `json:"summary"`
-	Options  []promptOptionView `json:"options"`
-	Remember bool               `json:"remember"`
-}
-
-type promptOptionView struct {
-	Label     string `json:"label"`
-	Detail    string `json:"detail"`
-	NappID    string `json:"nappId"`
-	Instance  string `json:"instance"`
-	Dev       bool   `json:"dev"`
-	Suggested bool   `json:"suggested"`
+	ID       int      `json:"id"`
+	Title    string   `json:"title"`
+	Detail   string   `json:"detail"`
+	Warning  string   `json:"warning"`
+	Items    []string `json:"items"`
+	Code     string   `json:"code"`
+	Summary  string   `json:"summary"`
+	Remember bool     `json:"remember"`
 }
 
 // promptAnswer is the bound call the overlay's buttons make. It sends the
@@ -371,8 +361,8 @@ type promptOptionView struct {
 // how long the answer holds: "once", "session" or "always" (see
 // backend.Scope) — the launcher files the wider ones away and stops asking.
 // skip is the indexes of the items (relays) the user unticked.
-func promptAnswer(id int, ok bool, index int, scope string, skip []int) {
-	b, _ := json.Marshal(map[string]any{"ok": ok, "index": index, "scope": scope, "skip": skip})
+func promptAnswer(id int, ok bool, scope string, skip []int) {
+	b, _ := json.Marshal(map[string]any{"ok": ok, "scope": scope, "skip": skip})
 	writeMsg(wireMsg{T: "promptAnswer", ID: id, Params: string(b)})
 }
 
@@ -408,10 +398,6 @@ const promptLibScript = "(function(){" +
 	"var muted = tok('text-faint', dark ? '#7d818a' : '#999999');" +
 	"var accent = tok('accent', dark ? '#5c6bc0' : '#3f51b5');" +
 	"var accentText = tok('accent-text', '#ffffff');" +
-	"var dev = tok('dev', dark ? '#5a3b1a' : '#ffe5b4');" +
-	"var devText = tok('dev-text', dark ? '#ffd79a' : '#704000');" +
-	"var suggest = tok('suggest', dark ? '#1e3a2a' : '#d8efdc');" +
-	"var suggestText = tok('suggest-text', dark ? '#b6e3c1' : '#14532d');" +
 	"var border = tok('border', dark ? '#3a3d45' : '#cccccc');" +
 	"var danger = tok('danger', dark ? '#ff6b6b' : '#cc2222');" +
 	"var o = document.createElement('div');" +
@@ -485,23 +471,20 @@ const promptLibScript = "(function(){" +
 	"box.appendChild(c);" +
 	"}" +
 	"}" +
-	"function btn(label, tone, ok, index, scope) {" +
+	"function btn(label, tone, ok, scope) {" +
 	"var bgc = card, fgc = fg;" +
 	"if (tone === 'accent') { bgc = accent; fgc = accentText }" +
-	"if (tone === 'dev') { bgc = dev; fgc = devText }" +
-	"if (tone === 'suggest') { bgc = suggest; fgc = suggestText }" +
 	"var b = document.createElement('button');" +
 	"b.style.cssText = 'display:block;width:100%;max-width:360px;margin:0 auto 8px;padding:10px 14px" +
 	";border:0;border-radius:8px;background:' + bgc + ';color:' + fgc + ';font-size:14px;text-align:left" +
 	";cursor:pointer;';" +
 	"b.textContent = label;" +
 	"b.title = tip(label, ok, scope);" +
-	"b.onclick = function() { window.__verdana_prompt_answer(p.id, ok, index, scope, skipped()) };" +
+	"b.onclick = function() { window.__verdana_prompt_answer(p.id, ok, scope, skipped()) };" +
 	"return b;" +
 	"};" +
 	// tip is what an answer button says it does, on hover.
 	"function tip(label, ok, scope) {" +
-	"if (label === 'Cancel') return \"Don't send this anywhere\";" +
 	"if (scope === 'session') return (ok ? 'Allow' : 'Refuse') + ' it without asking again until the launcher quits';" +
 	"if (scope === 'always') return (ok ? 'Allow' : 'Refuse') + ' it from now on, without ever asking again';" +
 	"return (ok ? 'Allow' : 'Refuse') + ' it this time only';" +
@@ -517,26 +500,14 @@ const promptLibScript = "(function(){" +
 	"}" +
 	"return r;" +
 	"};" +
-	"var isPicker = p.options && p.options.length;" +
-	"if (isPicker) {" +
-	"p.options.forEach(function(opt, i) {" +
-	"var tone = opt.suggested ? 'suggest' : (opt.dev ? 'dev' : (opt.instance ? 'accent' : 'chip'));" +
-	"var b = btn(opt.label, tone, true, i, 'once');" +
-	"b.title = opt.instance ? 'Send this to the ' + opt.label + ' window that is already open' : 'Open ' + opt.label + ' to handle this';" +
-	"if (opt.detail) { var sub = document.createElement('div'); sub.textContent = opt.detail;" +
-	"sub.style.cssText = 'margin-top:3px;color:' + (tone === 'suggest' ? suggestText : (tone === 'dev' ? devText : (tone === 'accent' ? accentText : muted)))" +
-	"+ ';font-size:11px;opacity:.75;'; b.appendChild(sub); }" +
-	"box.appendChild(b);" +
-	"});" +
-	"box.appendChild(btn('Cancel', 'chip', false, 0, 'once'));" +
-	"} else if (p.remember) {" +
-	"box.appendChild(row(btn('Allow', 'accent', true, 0, 'once'), btn('Deny', 'chip', false, 0, 'once')));" +
-	"box.appendChild(row(btn('Allow this session', 'chip', true, 0, 'session')," +
-	"btn('Deny this session', 'chip', false, 0, 'session')));" +
-	"box.appendChild(row(btn('Always allow', 'chip', true, 0, 'always'), btn('Always deny', 'chip', false, 0, 'always')));" +
+	"if (p.remember) {" +
+	"box.appendChild(row(btn('Allow', 'accent', true, 'once'), btn('Deny', 'chip', false, 'once')));" +
+	"box.appendChild(row(btn('Allow this session', 'chip', true, 'session')," +
+	"btn('Deny this session', 'chip', false, 'session')));" +
+	"box.appendChild(row(btn('Always allow', 'chip', true, 'always'), btn('Always deny', 'chip', false, 'always')));" +
 	"} else {" +
-	"box.appendChild(btn('Allow', 'accent', true, 0, 'once'));" +
-	"box.appendChild(btn('Deny', 'chip', false, 0, 'once'));" +
+	"box.appendChild(btn('Allow', 'accent', true, 'once'));" +
+	"box.appendChild(btn('Deny', 'chip', false, 'once'));" +
 	"}" +
 	"o.appendChild(box);" +
 	"document.documentElement.appendChild(o);" +

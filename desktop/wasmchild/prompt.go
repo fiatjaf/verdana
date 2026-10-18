@@ -19,30 +19,26 @@ import (
 	"fiatjaf.com/verdana/desktop/tooltip"
 )
 
-// A prompt fired by this napp (signing, publishing, picking a handler…) is
-// shown over its own window, as the webview shell does it: an opaque cover
+// A prompt fired by this napp (signing, publishing…) is shown over its own
+// window, as the webview shell does it: an opaque cover
 // that hides the canvas until the user answers. The launcher decides what is
 // asked and remembers the answer; this only draws the question.
 
 // promptButton is one answer the overlay offers.
 type promptButton struct {
-	label  string
-	detail string
-	tip    string
-	tone   string
-	open   bool // a window already open: striped and marked, whatever its tone
-	ok     bool
-	index  int
-	scope  string
-	click  widget.Clickable
+	label string
+	tip   string
+	tone  string
+	ok    bool
+	scope string
+	click widget.Clickable
 }
 
 type promptOverlay struct {
 	th      *material.Theme
 	shownID int
 	buttons []*promptButton
-	// rows groups buttons laid side by side (an approval's scopes); a
-	// picker's options are one per row.
+	// rows groups buttons laid side by side (an approval's scopes)
 	rows [][]*promptButton
 	list widget.List
 	tips *tooltip.Layer
@@ -78,45 +74,22 @@ func (p *promptOverlay) build(pv *wasmhost.Prompt) {
 		p.rows = append(p.rows, row)
 		p.buttons = append(p.buttons, row...)
 	}
-	btn := func(label, tone string, ok bool, index int, scope string) *promptButton {
-		return &promptButton{label: label, tone: tone, ok: ok, index: index, scope: scope, tip: promptTip(label, ok, scope)}
+	btn := func(label, tone string, ok bool, scope string) *promptButton {
+		return &promptButton{label: label, tone: tone, ok: ok, scope: scope, tip: promptTip(ok, scope)}
 	}
 
-	switch {
-	case len(pv.Options) > 0:
-		for i, opt := range pv.Options {
-			tone := "chip"
-			switch {
-			case opt.Suggested:
-				tone = "suggest"
-			case opt.Dev:
-				tone = "dev"
-			}
-			b := btn(opt.Label, tone, true, i, "once")
-			b.detail = opt.Detail
-			b.open = opt.Instance != ""
-			b.tip = "Open " + opt.Label + " to handle this"
-			if b.open {
-				b.tip = "Send this to the " + opt.Label + " window that is already open"
-			}
-			add(b)
-		}
-		add(btn("Cancel", "chip", false, 0, "once"))
-	case pv.Remember:
-		add(btn("Allow", "accent", true, 0, "once"), btn("Deny", "chip", false, 0, "once"))
-		add(btn("Allow this session", "chip", true, 0, "session"), btn("Deny this session", "chip", false, 0, "session"))
-		add(btn("Always allow", "chip", true, 0, "always"), btn("Always deny", "chip", false, 0, "always"))
-	default:
-		add(btn("Allow", "accent", true, 0, "once"))
-		add(btn("Deny", "chip", false, 0, "once"))
+	if pv.Remember {
+		add(btn("Allow", "accent", true, "once"), btn("Deny", "chip", false, "once"))
+		add(btn("Allow this session", "chip", true, "session"), btn("Deny this session", "chip", false, "session"))
+		add(btn("Always allow", "chip", true, "always"), btn("Always deny", "chip", false, "always"))
+	} else {
+		add(btn("Allow", "accent", true, "once"))
+		add(btn("Deny", "chip", false, "once"))
 	}
 }
 
 // promptTip is what an answer button says it does, on hover.
-func promptTip(label string, ok bool, scope string) string {
-	if label == "Cancel" {
-		return "Don't send this anywhere"
-	}
+func promptTip(ok bool, scope string) string {
 	switch {
 	case ok && scope == "session":
 		return "Allow it without asking again until the launcher quits"
@@ -171,7 +144,7 @@ func (pal palette) tone(t string) (bg, fg color.NRGBA) {
 // Layout draws the prompt over the whole window and reports a click on one
 // of its answers through answer.
 func (p *promptOverlay) Layout(gtx layout.Context, pv *wasmhost.Prompt, theme string,
-	answer func(id int, ok bool, index int, scope string, skip []int)) layout.Dimensions {
+	answer func(id int, ok bool, scope string, skip []int)) layout.Dimensions {
 	p.build(pv)
 	if p.fold.Clicked(gtx) {
 		p.foldOpen = !p.foldOpen
@@ -184,7 +157,7 @@ func (p *promptOverlay) Layout(gtx layout.Context, pv *wasmhost.Prompt, theme st
 					skip = append(skip, i)
 				}
 			}
-			answer(pv.ID, b.ok, b.index, b.scope, skip)
+			answer(pv.ID, b.ok, b.scope, skip)
 			return layout.Dimensions{Size: gtx.Constraints.Max}
 		}
 	}
@@ -315,63 +288,12 @@ func (p *promptOverlay) buttonBody(gtx layout.Context, pal palette, b *promptBut
 		CornerRadius: 8,
 		Button:       &b.click,
 	}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		dims := layout.Inset{Top: 10, Bottom: 10, Left: 16, Right: 14}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Inset{Top: 10, Bottom: 10, Left: 16, Right: 14}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			gtx.Constraints.Min.X = gtx.Constraints.Max.X
-			return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
-				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-					return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							l := material.Body1(p.th, b.label)
-							l.Color = fg
-							if b.open {
-								l.Font.Weight = font.Bold
-							}
-							return l.Layout(gtx)
-						}),
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							if b.detail == "" {
-								return layout.Dimensions{}
-							}
-							l := material.Caption(p.th, b.detail)
-							l.Color = fg
-							l.Color.A = 0xc0
-							return layout.Inset{Top: 3}.Layout(gtx, l.Layout)
-						}),
-					)
-				}),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					if !b.open {
-						return layout.Dimensions{}
-					}
-					return layout.Inset{Left: 8}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						return layout.Background{}.Layout(gtx,
-							func(gtx layout.Context) layout.Dimensions {
-								sz := gtx.Constraints.Min
-								defer clip.UniformRRect(image.Rectangle{Max: sz}, gtx.Dp(9)).Push(gtx.Ops).Pop()
-								paint.Fill(gtx.Ops, pal.accent)
-								return layout.Dimensions{Size: sz}
-							},
-							func(gtx layout.Context) layout.Dimensions {
-								return layout.Inset{Top: 2, Bottom: 2, Left: 8, Right: 8}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-									l := material.Caption(p.th, "open")
-									l.Color = pal.accentText
-									l.Font.Weight = font.Bold
-									return l.Layout(gtx)
-								})
-							},
-						)
-					})
-				}),
-			)
+			l := material.Body1(p.th, b.label)
+			l.Color = fg
+			return l.Layout(gtx)
 		})
-		if b.open {
-			// the button doesn't clip what it holds, so the stripe follows its
-			// rounded corners by itself
-			defer clip.UniformRRect(image.Rectangle{Max: dims.Size}, gtx.Dp(8)).Push(gtx.Ops).Pop()
-			defer clip.Rect{Max: image.Point{X: gtx.Dp(5), Y: dims.Size.Y}}.Push(gtx.Ops).Pop()
-			paint.Fill(gtx.Ops, pal.accent)
-		}
-		return dims
 	})
 }
 

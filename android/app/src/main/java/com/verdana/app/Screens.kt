@@ -1400,7 +1400,7 @@ private fun fetchImageBitmap(url: String): ImageBitmap? = try {
 }
 
 @Composable
-private fun outlinedColors(theme: Theme) = OutlinedTextFieldDefaults.colors(
+internal fun outlinedColors(theme: Theme) = OutlinedTextFieldDefaults.colors(
     focusedBorderColor = theme.accent,
     unfocusedBorderColor = theme.border,
     cursorColor = theme.accent,
@@ -1546,15 +1546,16 @@ private fun SwitcherRow(
 
 // PromptWindow is the prompt as a full-screen overlay over whatever asked
 // for it: the launcher when the launcher asked, the napp's own window when
-// a napp did. It is a blocking question — back never dismisses it.
+// a napp did. It is a blocking question — back never dismisses it. A picker
+// never comes here: it is a window of its own (see PickerWindow).
 @Composable
-fun PromptWindow(p: Prompt, onAnswer: (Boolean, Int, String, List<Int>) -> Unit) {
+fun PromptWindow(p: Prompt, onAnswer: (Boolean, String, List<Int>) -> Unit) {
     val theme = themeByName(currentThemeName)
     // the items come with a box each, ticked to start with: the answer says
     // which ones the user unticked
     val ticked = remember(p.id) { mutableStateListOf(*Array(p.items.size) { true }) }
-    val answer = { ok: Boolean, index: Int, scope: String ->
-        onAnswer(ok, index, scope, ticked.indices.filter { !ticked[it] })
+    val answer = { ok: Boolean, scope: String ->
+        onAnswer(ok, scope, ticked.indices.filter { !ticked[it] })
     }
     Column(
         Modifier
@@ -1641,68 +1642,14 @@ fun PromptWindow(p: Prompt, onAnswer: (Boolean, Int, String, List<Int>) -> Unit)
         }
         Spacer(Modifier.weight(1f))
         Spacer(Modifier.height(16.dp))
-        if (p.options.isNotEmpty()) {
-            p.options.forEachIndexed { i, opt ->
-                // the fill says whether this is the napp the user keeps
-                // picking for this action (it is why the list is in this
-                // order); a window that is already open gets a stripe and a
-                // pill of its own, so it shows whatever the fill is
-                val open = opt.instance.isNotBlank()
-                val fill = if (opt.suggested) theme.suggestBg else theme.chipBg
-                val ink = if (opt.suggested) theme.suggestFg else theme.chipFg
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 6.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(fill)
-                        .clickable { answer(true, i, "once") }
-                        .height(IntrinsicSize.Min),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Box(
-                        Modifier
-                            .width(5.dp)
-                            .fillMaxHeight()
-                            .background(if (open) theme.accent else fill),
-                    )
-                    Column(Modifier.weight(1f).padding(start = 11.dp, top = 10.dp, bottom = 10.dp, end = 8.dp)) {
-                        Text(opt.label, color = ink, maxLines = 1, fontWeight = if (open) FontWeight.Bold else null)
-                        if (opt.detail.isNotBlank()) {
-                            Text(
-                                opt.detail,
-                                fontSize = 11.sp,
-                                color = if (opt.suggested) ink else theme.muted,
-                                maxLines = 1,
-                            )
-                        }
-                    }
-                    if (open) {
-                        Text(
-                            "open",
-                            modifier = Modifier
-                                .padding(end = 10.dp)
-                                .clip(RoundedCornerShape(9.dp))
-                                .background(theme.accent)
-                                .padding(horizontal = 8.dp, vertical = 2.dp),
-                            color = theme.accentText,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                        )
-                    }
-                }
-            }
-            TextButton(onClick = { answer(false, 0, "once") }) {
-                Text("Cancel", color = theme.chipFg)
-            }
-        } else if (p.remember) {
-            PromptScopes(theme) { ok, scope -> answer(ok, 0, scope) }
+        if (p.remember) {
+            PromptScopes(theme) { ok, scope -> answer(ok, scope) }
         } else {
             Row {
-                Button(onClick = { answer(true, 0, "once") }) { Text("Allow") }
+                Button(onClick = { answer(true, "once") }) { Text("Allow") }
                 Spacer(Modifier.width(8.dp))
                 Button(
-                    onClick = { answer(false, 0, "once") },
+                    onClick = { answer(false, "once") },
                     colors = ButtonDefaults.buttonColors(containerColor = theme.chipBg, contentColor = theme.chipFg),
                 ) { Text("Deny") }
             }

@@ -30,6 +30,11 @@ type UI interface {
 	// everything the page posts up to HandleMessage. A wasm napp (mode
 	// "wasm") is already running in Go by the time this is called: its window
 	// paints what WasmFrame returns and hands its input to WasmInput.
+	//
+	// Mode "picker" is a window with no napp yet: it shows the prompt
+	// it is sent (a "prompt" wire message) and answers it with AnswerPrompt.
+	// A later OpenWindow for the same instance is the napp picked in it,
+	// to be shown in that same window.
 	OpenWindow(instance string, specJSON string) error
 
 	// SendToWindow delivers one wire message to a napp's shell. It is a JSON
@@ -107,10 +112,27 @@ func (h mobileHost) OpenWindow(spec backend.WindowSpec) (backend.Transport, erro
 	return mobileTransport{ui: h.ui, instance: spec.Instance}, nil
 }
 
-// OpenPicker has no picker windows to offer: an Android window is a whole
-// activity, so the picker covers the window that fired the action instead.
-func (h mobileHost) OpenPicker(backend.PickerSpec) (backend.Transport, error) {
-	return nil, errors.New("no picker windows on android")
+// OpenPicker opens a window like any other, with mode "picker": a window
+// with no napp in it yet, showing the prompt it is sent. The napp picked in it
+// is opened under the picker's own instance, and since a window is a whole
+// activity, the activity showing the picker turns into that napp's window
+// whatever the napp is (see NappActivity.become). Nothing here needs to know:
+// OpenWindow with that instance reaches the same activity.
+func (h mobileHost) OpenPicker(spec backend.PickerSpec) (backend.Transport, error) {
+	payload, err := json.Marshal(map[string]any{
+		"instance":  spec.Instance,
+		"mode":      "picker",
+		"name":      "Verdana",
+		"theme":     spec.Theme,
+		"themeVars": spec.ThemeVars,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := h.ui.OpenWindow(spec.Instance, string(payload)); err != nil {
+		return nil, err
+	}
+	return mobileTransport{ui: h.ui, instance: spec.Instance}, nil
 }
 
 func (h mobileHost) StateChanged()                               { h.ui.StateChanged() }

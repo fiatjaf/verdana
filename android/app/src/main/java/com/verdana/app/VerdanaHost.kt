@@ -171,19 +171,11 @@ object VerdanaHost : UI {
         task.moveToFront()
     }
 
-    // answer files a prompt's answer and, when the answer routes somewhere,
-    // puts that window in front of the user. skip is the indexes of the
-    // items (relays) the user unticked.
-    fun answer(p: Prompt, ok: Boolean, index: Int, scope: String, skip: List<Int> = listOf()) {
+    // answer files a prompt's answer. skip is the indexes of the items
+    // (relays) the user unticked.
+    fun answer(p: Prompt, ok: Boolean, scope: String, skip: List<Int> = listOf()) {
         prompt = null
-        Mobile.answerPrompt(p.id, ok, index.toLong(), scope, skip.joinToString(","))
-        if (!ok || index < 0 || index >= p.options.size) return
-        val opt = p.options[index]
-        if (opt.instance.isNotBlank()) {
-            surface(opt.instance)
-        } else if (opt.nappId.isNotBlank()) {
-            windows.values.firstOrNull { it.nappId == opt.nappId }?.let { surface(it.instance) }
-        }
+        Mobile.answerPrompt(p.id, ok, 0, scope, skip.joinToString(","))
     }
 
     // promptFor is the question this window has to cover, or null: a prompt
@@ -207,7 +199,10 @@ object VerdanaHost : UI {
         val ctx = appContext ?: return
         ctx.startActivityOnMain {
             val restored = recovering.remove(instance)
+            val picker = windows[instance]?.takeIf { it.isPicking() }
             when {
+                // the napp picked in a picker opens in it (see NappActivity.become)
+                picker != null -> picker.become(specJSON)
                 restored != null -> restored.rebuild(specJSON)
                 abandoned.remove(instance) -> Mobile.windowClosed(instance)
                 else -> launchWindow(instance, specJSON)

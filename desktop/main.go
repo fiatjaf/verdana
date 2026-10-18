@@ -303,7 +303,6 @@ func gioMain() {
 		profileActionBtns   []widget.Clickable
 		profileUpdateBtns   []widget.Clickable
 		promptBtns          promptButtons
-		optBtns             []widget.Clickable
 
 		createBundleBtn widget.Clickable
 		saveBundleBtn   widget.Clickable
@@ -367,9 +366,6 @@ func gioMain() {
 					// window (it covers the webview until answered), not here.
 					// Only launcher-originated prompts take over this window.
 					if activePrompt != nil && activePrompt.Instance == "" {
-						for len(optBtns) < len(activePrompt.Options) {
-							optBtns = append(optBtns, widget.Clickable{})
-						}
 						// allow and deny, each of them for this prompt only, for
 						// this session or always
 						promptBtns.reset(activePrompt)
@@ -389,12 +385,7 @@ func gioMain() {
 								backend.AnswerPrompt(activePrompt.ID, backend.Answer{OK: c.ok, Scope: c.scope, Skip: promptBtns.skipped()})
 							}
 						}
-						for i := range activePrompt.Options {
-							if optBtns[i].Clicked(gtx) {
-								backend.AnswerPrompt(activePrompt.ID, backend.Answer{OK: true, Index: i, Scope: backend.ScopeOnce})
-							}
-						}
-						return layoutPrompt(gtx, th, activePrompt, &promptBtns, optBtns)
+						return layoutPrompt(gtx, th, activePrompt, &promptBtns)
 					}
 
 					if ui.confirmLogout {

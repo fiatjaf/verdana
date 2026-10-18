@@ -20,8 +20,8 @@ type Host interface {
 	// OpenPicker puts up a window of its own for the user to pick which napp
 	// handles an action (see picker.go). It shows the prompt it is sent the
 	// way a napp window shows an overlay, and answers it the same way. A
-	// host with no such window fails, and the picker covers the window that
-	// fired the action instead.
+	// host with no such window fails, and an action with more than one
+	// handler to choose from then goes nowhere.
 	//
 	// The platform calls WindowClosed when it goes away, unless it went
 	// away to make room for the napp that was picked (see WindowSpec.Reuse).

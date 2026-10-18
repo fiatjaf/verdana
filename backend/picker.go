@@ -45,7 +45,7 @@ func openPicker() *Instance {
 		ThemeVars: themeVars,
 	})
 	if err != nil {
-		log.Debug().Err(err).Msg("no picker window, the picker covers the caller")
+		log.Warn().Err(err).Msg("no picker window to ask which napp handles an action")
 		WindowClosed(ci.instance)
 		return nil
 	}
