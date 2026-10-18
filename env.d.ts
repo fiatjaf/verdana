@@ -359,165 +359,382 @@ type Napp = {
   ui?: NappUi
 }
 
-/** What a kit helper is given, and what it hands back. */
+/**
+ * What a kit helper is given, and what it hands back. The helpers, their
+ * names and their options are the ones every napp launcher's kit has
+ * (nostrapps' napp-env.d.ts is the reference); what they build wears this
+ * kit's classes, which are the reference's classes too (btn, ui-*), styled
+ * the launcher's way. The words this kit had for variants and tones before
+ * (brand, bad, …) still work.
+ */
 type NappButtonOpts = {
   label?: string
   /**
-   * "brand" is the one action a screen is about, "bad" is destructive, "line"
-   * is there but not the point, "quiet" appears on hover, "plain" is inline
-   * text, "icon" is a square for one glyph. The default is the neutral plate.
+   * The class btn-<variant>. "primary" is the one action a screen is about,
+   * "danger" is destructive, "warning" is careful, "outline" (the default)
+   * is there but not the point, "ghost" appears on hover, "link" is inline
+   * text, "icon" is a square for one glyph. brand, bad, warn, line, quiet and
+   * plain are the old names for primary, danger, warning, outline, ghost and
+   * link.
    */
-  variant?: "brand" | "bad" | "quiet" | "line" | "plain" | "icon"
-  /** One of the kit's glyph names, drawn before the label. */
+  variant?:
+    | "primary" | "danger" | "warning" | "outline" | "ghost" | "link" | "icon"
+    | "brand" | "bad" | "warn" | "line" | "quiet" | "plain"
+  /** One of the kit's glyph names, drawn before the label; alone, a square. */
   icon?: string
   /** The tooltip, and the name an icon-only button has. */
   title?: string
   disabled?: boolean
-  type?: string
+  /** "button" unless said: a bare button would submit its form. */
+  type?: "button" | "submit" | "reset"
+  /** Extra classes, for the context. className works too. */
+  class?: string
   className?: string
-  onClick?: (e: Event) => void
+  onClick?: (e: MouseEvent) => void
 }
 
 type NappChipOpts = {
   label: string
   /** The picked one, filled with the brand. */
   active?: boolean
-  /** "bad" | "warn" say what the chip is; "static" makes it a fact, not a pick. */
-  tone?: "bad" | "warn" | "static"
+  /** "danger" | "warning" say what the chip is; "static" makes it a fact, not a pick. */
+  tone?: "danger" | "warning" | "bad" | "warn" | "static"
   icon?: string
   title?: string
+  class?: string
   className?: string
-  onClick?: (e: Event) => void
+  onClick?: (e: MouseEvent) => void
 }
 
-type NappTabsOpts = {
-  items: (string | { value: string; label: string })[]
-  active?: string
-  onChange?: (value: string) => void
+type NappCheckOpts = {
+  checked?: boolean
+  title?: string
+  onChange?: (checked: boolean) => void
+  /** On the box, or on the <label> when there is one. */
+  class?: string
   className?: string
+  /** Text beside the box, as one <label> with it; the box is its .control (and .input). */
+  label?: string
+  /** A grey line under the label. */
+  note?: string
+}
+
+type NappTabs<T extends string> = HTMLDivElement & {
+  /** Move the selection without reporting it. */
+  select(value: T): void
+  readonly value: T | undefined
+}
+
+type NappList<T> = HTMLDivElement & {
+  add(item: T): HTMLDivElement
+  delete(item: T): void
+  /** In order; assign to replace them all. */
+  items: T[]
+}
+
+type NappAppIconSize = "xs" | "s" | "m" | "l" | "xl"
+
+/** A person as authorPicker hands one over. */
+type NappPickedAuthor = {
+  pubkey: string
+  name?: string
+  display_name?: string
+  picture?: string
+  nip05?: string
+  follows?: boolean
 }
 
 type NappUi = {
-  /** el(tag, className, ...children): children are elements or text. */
-  el: (tag: string, className?: string, ...children: (Node | string | null)[]) => HTMLElement
-  /** stack: a column. bar: a row of controls. card: a plate. */
-  stack: (...children: (Node | string)[]) => HTMLElement
-  bar: (...children: (Node | string)[]) => HTMLElement
-  card: (...children: (Node | string)[]) => HTMLElement
-  rule: () => HTMLElement
-  /** The voices: a title, a name, the grey under it, an italic label. */
-  title: (value: string) => HTMLElement
-  heading: (value: string) => HTMLElement
-  caption: (value: string) => HTMLElement
-  hint: (value: string) => HTMLElement
-  mono: (value: string) => HTMLElement
-  code: (value: string) => HTMLElement
-  codeBlock: (value: string) => HTMLElement
-  empty: (value: string) => HTMLElement
-  button: (opts?: NappButtonOpts) => HTMLButtonElement
-  chip: (opts: NappChipOpts) => HTMLButtonElement
-  /** The row, plus select(value) and the value itself. */
-  tabs: (opts: NappTabsOpts) => HTMLElement & {
-    value: string
-    select: (value: string) => void
+  /** el(tag, class, ...children): children are elements or text. */
+  el<K extends keyof HTMLElementTagNameMap>(
+    tag: K,
+    cls?: string,
+    ...children: (Node | string | null | undefined | false)[]
+  ): HTMLElementTagNameMap[K]
+  /** stack: a column. bar: a row of controls that wraps. */
+  stack(...children: (Node | string)[]): HTMLDivElement
+  bar(...children: (Node | string)[]): HTMLDivElement
+  /** Text-like content spaced as it reads; its children carry no margins. */
+  flow(...children: (Node | string)[]): HTMLDivElement
+  /** card: a plate with a line. plate: one with no fill. */
+  card(...children: (Node | string)[]): HTMLDivElement
+  plate(...children: (Node | string)[]): HTMLDivElement
+  /** header is a screen's first line; section is a named group. */
+  header(...children: (Node | string)[]): HTMLDivElement
+  section(label: string, ...children: (Node | string)[]): HTMLDivElement
+  /** grow is a row's filler: what follows it is pushed to the far end. */
+  grow(): HTMLSpanElement
+  divider(): HTMLHRElement
+  /**
+   * Keep an element in view as the rest scrolls: at the top (the default,
+   * at 0), the bottom, or both, each at an offset (a number is px). Only
+   * that: its background is yours.
+   */
+  sticky<T extends HTMLElement>(el: T, opts?: { top?: number | string; bottom?: number | string }): T
+
+  /** The voices: a title, a display, a heading, the grey under it, an italic hint. */
+  title(value: string): HTMLHeadingElement
+  display(value: string): HTMLHeadingElement
+  heading(value: string): HTMLHeadingElement
+  /** The voice that names a group: small caps, tracked, grey. */
+  label(value: string): HTMLDivElement
+  /** The same voice as a caption in a line. */
+  overline(text: string, cls?: string): HTMLSpanElement
+  caption(value: string): HTMLSpanElement
+  hint(value: string): HTMLSpanElement
+  mono(value: string): HTMLSpanElement
+  kbd(value: string): HTMLElement
+  /** Code in a line, a <code>. */
+  code(text: string, cls?: string): HTMLElement
+  /** Code or data in lines on a plate, a <pre>; long lines wrap. */
+  codeBlock(text: string, cls?: string): HTMLPreElement
+  /** The line for when a list or a section has nothing yet. */
+  empty(text: string, cls?: string): HTMLDivElement
+  /** meter says how far along something is; set(v) moves it, v is 0…1. */
+  meter(opts?: { value?: number; tone?: "danger" | "warn" | "bad" }): HTMLDivElement & {
+    value: number
+    set(value: number): void
   }
-  input: (opts?: {
+  /** A word set round a circle, turning; sized by the font-size it sits in. */
+  ring(word: string, cls?: string): SVGElement
+
+  button(opts?: NappButtonOpts): HTMLButtonElement
+  chip(opts: NappChipOpts): HTMLButtonElement
+  /** One tab on its own; toggle .active on it to move the selection. */
+  tab(opts: {
+    label: string
+    active?: boolean
+    onClick?: (e: MouseEvent) => void
+    title?: string
+    class?: string
+  }): HTMLButtonElement
+  /**
+   * A row of tabs that owns the selection and reports the value when it
+   * changes; the first is picked when active is not given. segmented: a
+   * window's sections, sharing the width.
+   */
+  tabs<T extends string>(opts: {
+    items: Array<T | { value: T; label?: string; title?: string; class?: string }>
+    active?: T
+    onChange?: (value: T) => void
+    segmented?: boolean
+    class?: string
+    className?: string
+  }): NappTabs<T>
+  /** States are attributes: required, aria-invalid, readonly. */
+  input(opts?: {
     type?: string
     placeholder?: string
     value?: string
+    autocomplete?: string
+    spellcheck?: boolean
+    class?: string
     className?: string
-  }) => HTMLInputElement
-  textarea: (opts?: {
+  }): HTMLInputElement
+  textarea(opts?: {
     placeholder?: string
     value?: string
     rows?: number
+    class?: string
     className?: string
-  }) => HTMLTextAreaElement
-  /** The voice that names a group: small caps, tracked, grey. */
-  label: (value: string) => HTMLElement
-  display: (value: string) => HTMLElement
-  /** kbd is a key; header is a screen's first line; section is a named group. */
-  kbd: (value: string) => HTMLElement
-  header: (...children: (Node | string)[]) => HTMLElement
-  section: (label: string, ...children: (Node | string)[]) => HTMLElement
-  plate: (...children: (Node | string)[]) => HTMLElement
-  /** grow is a row's filler: what follows it is pushed to the far end. */
-  grow: () => HTMLElement
-  /** meter says how far along something is; set(v) moves it, v is 0…1. */
-  meter: (opts?: { value?: number; tone?: "bad" | "warn" }) => HTMLElement & {
-    value: number
-    set: (value: number) => void
-  }
-  /** switch is a setting that is on or off, and where it stands. */
-  switch: (opts?: {
-    label?: string
-    note?: string
-    checked?: boolean
-    onChange?: (checked: boolean) => void
-  }) => HTMLElement & { input: HTMLInputElement }
-  /** field wraps its control in a label, so the words focus it. */
-  field: (opts: {
+  }): HTMLTextAreaElement
+  /** The form line: the label over the control, a note under; the label focuses it. */
+  field(opts: {
     label?: string
     control?: HTMLElement
     note?: string
+    class?: string
     className?: string
-  }) => HTMLElement
-  check: (opts?: {
+  }): HTMLLabelElement
+  /** The bare box, or with a label (or a note) the box and its words as one <label>. */
+  check(opts: NappCheckOpts & { label: string }): HTMLLabelElement & { input: HTMLInputElement }
+  check(opts?: NappCheckOpts): HTMLInputElement
+  radio(opts: NappCheckOpts & { name: string; label: string }): HTMLLabelElement & { input: HTMLInputElement }
+  radio(opts: NappCheckOpts & { name: string }): HTMLInputElement
+  /**
+   * One of N, labelled, as a group; .value reads and sets the pick. label is
+   * a caption before them; collapse keeps it one line, the caption and the
+   * pick, until clicked, and folds it back once one is chosen.
+   */
+  radios<T extends string>(opts: {
+    name?: string
+    options: Array<T | { value: T; label?: string; title?: string; note?: string }>
+    value?: T
+    onChange?: (value: T) => void
+    label?: string
+    collapse?: boolean
+    class?: string
+    className?: string
+  }): HTMLDivElement & { value: T | undefined }
+  /** switch is a setting that is on or off, and where it stands. */
+  switch(opts?: {
     label?: string
     note?: string
     checked?: boolean
-    title?: string
     onChange?: (checked: boolean) => void
-  }) => HTMLElement & { input: HTMLInputElement }
-  radios: (opts: {
-    name?: string
-    options: (string | { value: string; label?: string; note?: string })[]
-    value?: string
-    onChange?: (value: string) => void
-  }) => HTMLElement
-  details: (
-    opts: { summary: string | Node | (string | Node)[]; open?: boolean; className?: string },
-    ...children: (Node | string)[]
-  ) => HTMLDetailsElement
-  /** rowList() and row() make rows that open, one at a time. */
-  rowList: (className?: string) => HTMLElement & {
-    row: (...summary: (string | Node)[]) => HTMLDetailsElement
-  }
+  }): HTMLLabelElement & { input: HTMLInputElement }
+
   /**
-   * list() draws the rows and the add line; label(item) is the text and
-   * controls(item) what sits at the row's end. It has add(item), delete(item)
-   * and the items it holds.
+   * A <details>: its <summary>, then the children; the summary is text, or
+   * parts in a line. fold is the small one under content; sticky keeps the
+   * summary at the top while the content scrolls under it.
    */
-  list: (opts: {
-    items?: unknown[]
-    label?: (item: any) => string
+  details(
+    opts: {
+      summary: string | Node | Array<string | Node>
+      open?: boolean
+      fold?: boolean
+      sticky?: boolean | { top: number | string }
+      class?: string
+      className?: string
+    },
+    ...children: (Node | string)[]
+  ): HTMLDetailsElement
+  /**
+   * A column of rows: the row's text cut with an ellipsis, then the controls
+   * given; a label that is an element brings its own voice. A row that
+   * failed takes tone "danger".
+   */
+  itemList(cls?: string): HTMLDivElement
+  item(
+    opts: {
+      label: string | HTMLElement
+      title?: string
+      tone?: "danger" | "bad"
+      mono?: boolean
+      class?: string
+    },
+    ...controls: HTMLElement[]
+  ): HTMLDivElement
+  /** Rows that open, one at a time; append a row's content to the row. */
+  rowList(cls?: string): HTMLDivElement & {
+    row(...summary: (string | Node)[]): HTMLDetailsElement
+  }
+  row(list: HTMLElement, ...summary: (string | Node)[]): HTMLDetailsElement
+  /** A button that becomes a field and an add; onAdd returns the error to show, or nothing. */
+  addControl(opts: {
+    label: string
+    placeholder?: string
+    class?: string
+    onAdd: (value: string) => string | void
+  }): HTMLDivElement
+  /** Rows, the add control and the operations; the row's label and controls are yours. */
+  list<T>(opts?: {
+    items?: T[]
+    label?: (item: T) => string | HTMLElement
+    title?: (item: T) => string
     mono?: boolean
-    controls?: (item: any, list: any) => Node | Node[]
+    controls?: (item: T, row: HTMLDivElement) => Node | Node[]
     add?: { label: string; placeholder?: string; onAdd: (value: string) => string | void }
     empty?: string
+    class?: string
     className?: string
-  }) => HTMLElement & {
-    items: unknown[]
-    add: (item: unknown) => void
-    delete: (item: unknown) => void
+  }): NappList<T>
+  /** A line to heed: warn (the default), bad (or danger), good, info; icon: null for none. */
+  notice(
+    text: string,
+    opts?: { tone?: "warn" | "danger" | "good" | "info" | "bad"; icon?: string | null; class?: string }
+  ): HTMLDivElement
+  /** A fact in small caps; a tone colors it. */
+  badge(
+    text: string,
+    opts?: {
+      tone?: "good" | "danger" | "warn" | "brand" | "solid" | "bad"
+      title?: string
+      class?: string
+    }
+  ): HTMLSpanElement
+  /**
+   * An inline svg, 1em, in currentColor; the names are the keys of icons.
+   * flush puts its ink at that edge instead of its box; iconInk says how
+   * far each glyph sits in, add yours there.
+   */
+  icon(name: string, opts?: { flush?: "start" | "end"; class?: string }): SVGElement
+  /** The glyphs icon() draws, the body of a 16×16 viewBox each; add your own. */
+  icons: Record<string, string>
+  iconInk: Record<string, [number, number]>
+  /**
+   * A napp's picture on a plate: xs an author's in a line of text, s in a
+   * row, m beside a name (default), l on a card, xl on its detail. .img is
+   * the <img>, put in once there is a picture; fade eases it in.
+   */
+  appIcon(opts?: {
+    src?: string
+    size?: NappAppIconSize
+    fade?: boolean
+    alt?: string
+    class?: string
+  }): HTMLSpanElement & { img: HTMLImageElement }
+  /**
+   * A person, the same wherever one is named: the name (the profile's name,
+   * else the viewer's petname for them, else the display name, else the
+   * short npub), a picture before it when asked for (true: xs; or an appIcon
+   * size), and after it the petname and a check for someone followed. It
+   * fills itself in when the profile lands. A link to the profile action
+   * unless link is false or onClick says otherwise.
+   */
+  author(
+    pubkey: string,
+    opts?: {
+      picture?: boolean | NappAppIconSize
+      petname?: boolean
+      follows?: boolean
+      prefix?: string
+      link?: boolean
+      onClick?: (pubkey: string, e: MouseEvent) => void
+      class?: string
+    }
+  ): HTMLElement
+  authors: {
+    /**
+     * How the kit loads a profile, encodes an npub, opens a profile and
+     * searches for people; set for napps already. load: null for a napp that
+     * looks profiles up itself and hands them over with set().
+     */
+    use(config: {
+      load?: ((pubkey: string) => Promise<unknown>) | null
+      npub?: (pubkey: string) => string
+      open?: (pubkey: string) => void
+      search?: (
+        term: string,
+        opts: { limit?: number; remote?: boolean; nip05?: boolean }
+      ) => Promise<unknown[]>
+    }): void
+    /** A profile in hand (what loadNostrUser gives, or a kind 0's content). */
+    set(pubkey: string, user: unknown): void
+    /** The viewer's follow list, a kind 3 (null: logged out): petnames and who is followed. */
+    viewer(follows: { tags?: unknown } | null): void
+    /** The name as text, as known right now. */
+    name(pubkey: string): string
+    follows(pubkey: string): boolean
   }
-  /** tone: "warn" (the default) | "bad" | "info". */
-  notice: (
-    message: string,
-    opts?: { tone?: "warn" | "bad" | "info"; icon?: string | null }
-  ) => HTMLElement
-  /** tone: "brand" (a wash) | "solid" (filled) | "bad" | "warn". */
-  badge: (label: string, opts?: { tone?: "brand" | "solid" | "bad" | "warn" }) => HTMLElement
-  icon: (name: string) => HTMLElement
-  /** size: "s" | "m" | "l" | "xl". fade eases the image in. */
-  appIcon: (opts?: { src?: string; size?: string; fade?: boolean; alt?: string }) => HTMLElement & {
-    img: HTMLImageElement
-  }
-  links: (...children: (Node | string)[]) => HTMLElement
-  /** busy(node) breathes it; busy(node, false) stops. */
-  busy: <T extends HTMLElement>(node: T, on?: boolean) => T
+  /**
+   * People to pick as one types. With a trigger ("@"), a text box: the
+   * trigger after a space or at a line's start opens a list at it, and
+   * onPick's string replaces it and what follows. Without, a who field: the
+   * value is the query (an npub, nprofile or hex is that one person) and
+   * onPick's string becomes the value. Known profiles by default; remote
+   * adds relay search, nip05 resolves a typed name@domain (and, since the
+   * launcher checks none, shows no row's nip-05).
+   */
+  authorPicker(
+    target: HTMLTextAreaElement | HTMLInputElement,
+    opts: {
+      trigger?: string
+      onPick: (author: NappPickedAuthor) => string | void
+      limit?: number
+      remote?: boolean
+      nip05?: boolean
+      class?: string
+    }
+  ): { close(): void; detach(): void }
+  links(...children: (Node | string)[]): HTMLElement
+  /** busy(node) breathes it, with aria-busy; busy(node, false) stops. */
+  busy<T extends HTMLElement>(node: T, on?: boolean): T
   /** A ring 1em across: make it bigger through a font-size. */
-  spinner: () => HTMLElement
+  spinner(cls?: string): HTMLSpanElement
+  /** The launcher's face is in the kit already: this resolves at once. */
+  fonts(): Promise<void>
 }
 
 // ── Augment global Window ────────────────────────────────────────────────
@@ -532,9 +749,10 @@ interface Window {
 // "requires": ["ui"] in metadata.json makes the launcher put its kit
 // (napp-ui.css) in the page, ahead of the napp's own styles. The kit carries
 // the launcher's own face — Verdana, in three faces, inlined — so a napp is
-// set in the launcher's typography whatever the machine has. It is classes
-// only: no script, nothing to call, so plain markup looks like the launcher
-// and a napp that disagrees with the kit wins. The colors are the launcher's
+// set in the launcher's typography whatever the machine has. It is classes,
+// so plain markup looks like the launcher and a napp that disagrees with the
+// kit wins; window.napp.ui (the helpers above) builds the same elements for a
+// napp that would rather call than write markup. The colors are the launcher's
 // own tokens, set on <html> as --surface, --surface-alt, --text, --text-muted,
 // --text-faint, --border, --chip, --chip-text, --accent, --accent-text,
 // --danger, --dev and --dev-text, --suggest and --suggest-text, and they
@@ -543,31 +761,49 @@ interface Window {
 // A class says how a thing looks, never where it goes: width, margins and
 // placement are the parent's business.
 //
-//   layout    v-col (a column) · v-bar (a row) · v-grow (a row's filler) ·
-//             v-card (a plate with a line) · v-plate (a plate with no fill) ·
-//             v-header (a name and what acts on it) · v-section (a named
-//             group) · v-divider
-//   type      v-title · v-display · v-heading · v-label (small caps: what
-//             names a group) · v-caption · v-hint (italic) · v-mono · v-kbd
-//   buttons   v-btn, and v-btn--brand | --bad | --quiet | --line | --plain
-//             | --icon
-//   chips     v-chip, v-chip--on (the picked one) · --bad · --warn · --static
-//   tabs      v-tabs, v-tab, v-tab--on
-//   fields    v-input (--mono) · v-field (with v-field-note)
-//   checks    v-check · v-radio · v-check-label (with v-check-text,
-//             v-check-note) · v-radios · v-switch (with v-switch-track)
-//   lists     v-items · v-item · v-item-label (--mono) · v-add (with
-//             v-add-error) · v-rows · v-row
-//   folding   v-disclosure (a <details>) · v-empty
-//   code      v-code (inline) · v-codeblock (a <pre>)
-//   badges    v-badge, v-badge--brand | --solid | --bad | --warn
-//   icons     v-icon with v-icon-<name>: check, x, plus, minus, chevron,
-//             arrow, trash, reload, search, external, warning, info, star,
+//   The names are the reference kit's (nostrapps' napp-ui.css), so markup
+//   written for it looks right here; states are classes of their own (active,
+//   open, danger, …) beside the base one.
+//
+//   layout    ui-stack (a column) · ui-bar (a row) · ui-grow (a row's filler)
+//             · ui-card (a plate with a line) · ui-plate (one with no fill) ·
+//             ui-header (a name and what acts on it) · ui-section (a named
+//             group) · ui-divider · ui-flow (text spaced as it reads) ·
+//             ui-divided (hairlines between children) · ui-sticky (with
+//             top, bottom, and --sticky-top, --sticky-bottom)
+//   type      ui-title · ui-heading · ui-heading-xxl · ui-overline (small
+//             caps: what names a group) · ui-caption · ui-hint (italic) ·
+//             ui-mono · ui-kbd · ui-quote (someone else's words)
+//   buttons   btn, with btn-primary | btn-outline | btn-danger | btn-warning |
+//             btn-ghost | btn-link | btn-icon (the bare btn is a neutral plate)
+//   chips     btn btn-chip (with btn-chip-label), btn-primary while picked,
+//             btn-ghost while not, btn-danger | btn-warning for a tone, static
+//   tabs      ui-tabs, ui-tab, active · ui-segments, ui-segment, active (a
+//             window's sections)
+//   fields    ui-input (mono; required, aria-invalid, readonly; a <select>
+//             too) · ui-field (with ui-field-note) · ui-writing (a textarea to
+//             write in, no box)
+//   checks    ui-check · ui-radio · ui-check-label (with ui-check-text,
+//             ui-check-note) · ui-radios (collapse, open, ui-radios-value) ·
+//             ui-switch (with ui-switch-track)
+//   lists     ui-items · ui-item (danger) · ui-item-label (mono) · ui-add
+//             (with ui-add-form, ui-add-input, ui-add-error) · ui-rows ·
+//             ui-row · ui-list · ui-compact (a list a size down)
+//   folding   ui-details (a <details>; sticky) · ui-fold (the small one under
+//             content) · ui-summary (parts of a summary) · ui-empty
+//   code      ui-code (inline) · ui-code-block (a <pre>)
+//   badges    ui-badge, with good | danger | warn | brand | solid
+//   icons     ui-icon with ui-icon-<name> (flush-start | flush-end): check,
+//             x, close, plus, minus, chevron, arrow, forward, back, trash,
+//             reload, reset, search, external, warning, warn, info, star,
 //             copy, folder, user, home, settings, sun, moon, bolt, link,
-//             save, window
-//   images    v-appicon with v-appicon--s | --m | --l | --xl, --fade
-//   notices   v-notice with v-notice--warn | --bad | --info
-//   more      v-links · v-busy · v-spinner · v-meter (with --v-value)
+//             save, window, move, tile, pack, grid
+//   images    ui-app-icon with ui-app-icon-xs | -s | -m | -l | -xl, fade
+//   people    ui-author (ui-author-name, ui-author-pet, ui-author-follows) ·
+//             ui-author-picker (ui-author-pick, active, ui-author-pick-nip05)
+//   notices   ui-notice with warn | danger | good | info
+//   more      ui-links · ui-busy · ui-spinner · ui-meter (danger | warn, with
+//             --v-value) · ui-ring
 
 // The kit's own names for the launcher's colors, for a napp that paints with
 // them: --v-ink, --v-ink-2, --v-ink-3, --v-fill, --v-fill-2, --v-line,

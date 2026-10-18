@@ -1,12 +1,13 @@
 /* napp-ui.css: Verdana's kit, for napps that declare `requires: ["ui"]`.
  *
  * The launcher injects this file into such a napp's page, ahead of the napp's
- * own styles, so whatever the napp writes still wins. It is classes only: no
- * script, no helpers, nothing to call. Plain markup with these classes looks
- * like the launcher.
+ * own styles, so whatever the napp writes still wins. It is classes: plain
+ * markup with them looks like the launcher, and napp-ui.js (window.napp.ui)
+ * has the helpers that build the same elements, by the names and options
+ * every napp launcher's kit has.
  *
- *   <button class="v-btn v-btn--brand">publish</button>
- *   <div class="v-col"><div class="v-label">relays</div>…</div>
+ *   <button class="btn btn-primary">publish</button>
+ *   <div class="ui-stack"><div class="ui-overline">relays</div>…</div>
  *
  * The look is the launcher's, said loudly: Verdana (the very face the launcher
  * embeds, in three faces, inlined by embed.go), a heavy uppercase voice for
@@ -163,7 +164,7 @@ body {
    The launcher's voices, at two weights and one size for the quiet
    ones. Anything that names a thing is heavy and tracked; anything
    that explains one is grey. */
-.v-title {
+.ui-title {
   margin: 0;
   font-size: var(--v-title);
   font-weight: 700;
@@ -171,7 +172,7 @@ body {
   letter-spacing: 0.01em;
 }
 
-.v-display {
+.ui-heading-xxl {
   margin: 0;
   font-size: var(--v-display);
   font-weight: 700;
@@ -179,7 +180,7 @@ body {
   letter-spacing: -0.01em;
 }
 
-.v-heading {
+.ui-heading {
   margin: 0;
   font-size: var(--v-lead);
   font-weight: 700;
@@ -188,7 +189,7 @@ body {
 
 /* The voice that names a group: a section, a field, a column. Small,
    bold, tracked, grey — and the loudest thing on a quiet screen. */
-.v-label {
+.ui-overline {
   font-size: var(--v-micro);
   font-weight: 700;
   line-height: 1.4;
@@ -197,13 +198,13 @@ body {
   color: var(--v-ink-3);
 }
 
-.v-caption {
+.ui-caption {
   font-size: var(--v-small);
   line-height: 1.45;
   color: var(--v-ink-3);
 }
 
-.v-hint {
+.ui-hint {
   font-size: var(--v-body-s);
   font-style: italic;
   line-height: 1.45;
@@ -211,7 +212,7 @@ body {
 }
 
 /* Machine text: keys, addresses, ids. */
-.v-mono {
+.ui-mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: var(--v-body-s);
   font-variant-numeric: tabular-nums;
@@ -220,14 +221,14 @@ body {
 /* ─── layout ────────────────────────────────────────────────────
    The three shapes everything is built from: a column, a row of
    controls, and a plate with something on it. */
-.v-col {
+.ui-stack {
   display: flex;
   flex-direction: column;
   gap: var(--v-gap);
   min-width: 0;
 }
 
-.v-bar {
+.ui-bar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -235,11 +236,11 @@ body {
 }
 
 /* The filler of a row: everything after it is pushed to the far end. */
-.v-grow {
+.ui-grow {
   margin-left: auto;
 }
 
-.v-card {
+.ui-card {
   padding: var(--v-pad-roomy);
   border: 1px solid var(--v-line);
   border-radius: var(--v-radius-card);
@@ -248,7 +249,7 @@ body {
 }
 
 /* A plate with no fill: for the row that has to sit on a card. */
-.v-plate {
+.ui-plate {
   padding: var(--v-pad-loose);
   border: 1px solid var(--v-line);
   border-radius: var(--v-radius-plate);
@@ -256,7 +257,7 @@ body {
 }
 
 /* A page's first line: a name, and whatever acts on it. */
-.v-header {
+.ui-header {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -266,24 +267,24 @@ body {
   min-width: 0;
 }
 
-.v-header > .v-title,
-.v-header > .v-display {
+.ui-header > .ui-title,
+.ui-header > .ui-heading-xxl {
   margin-right: auto;
 }
 
 /* A named group of rows, with the name shouted over a hairline. */
-.v-section {
+.ui-section {
   display: grid;
   gap: var(--v-gap);
   min-width: 0;
 }
 
-.v-section > .v-label {
+.ui-section > .ui-overline {
   padding-bottom: 5px;
   border-bottom: 1px solid var(--v-line);
 }
 
-.v-divider {
+.ui-divider {
   height: 0;
   margin: var(--v-gap) 0;
   border: 0;
@@ -292,9 +293,9 @@ body {
 
 /* ─── buttons ───────────────────────────────────────────────────
    Filled plates with a pressed edge, the way the launcher's own
-   buttons read. The default is the neutral one; --brand is the one
+   buttons read. The bare .btn is the neutral one; btn-primary is the one
    action a screen is about, and there is one of those. */
-.v-btn {
+.btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -321,62 +322,68 @@ body {
     translate var(--v-move) var(--v-ease);
 }
 
-.v-btn:hover:not(:disabled) {
+.btn:hover:not(:disabled) {
   filter: brightness(0.92);
 }
 
-.v-btn:active:not(:disabled) {
+.btn:active:not(:disabled) {
   translate: 0 1px;
   box-shadow: none;
 }
 
-.v-btn:disabled,
-.v-btn[aria-disabled="true"] {
+.btn:disabled,
+.btn[aria-disabled="true"] {
   opacity: 0.4;
   cursor: default;
   box-shadow: none;
 }
 
 /* The main action: publish, save, install. */
-.v-btn--brand {
+.btn-primary {
   background: var(--v-brand);
   color: var(--v-brand-ink);
 }
 
 /* Destructive, and it says so in the plate, not only in the words. */
-.v-btn--bad {
+.btn-danger {
   background: var(--v-bad);
   color: #ffffff;
 }
 
+/* Careful, but not undoable: the launcher's amber. */
+.btn-warning {
+  background: var(--v-warn);
+  color: var(--v-warn-ink);
+}
+
 /* Nothing to click into, just an action: it appears on hover. */
-.v-btn--quiet {
+.btn-ghost {
   background: transparent;
   color: var(--v-ink-2);
   box-shadow: none;
 }
 
-.v-btn--quiet:hover:not(:disabled) {
+.btn-ghost:hover:not(:disabled) {
   background: var(--v-hover);
   color: var(--v-ink);
   filter: none;
 }
 
 /* Outlined: the action that is there, but not the point. */
-.v-btn--line {
+.btn-outline {
   background: transparent;
   color: var(--v-ink);
   box-shadow: inset 0 0 0 1px var(--v-line);
 }
 
-.v-btn--line:hover:not(:disabled) {
+.btn-outline:hover:not(:disabled) {
   background: var(--v-hover);
   filter: none;
 }
 
 /* For actions inside a sentence: text, in the brand, underlined on
    hover so it is still a link to a screen reader. */
-.v-btn--plain {
+.btn-link {
   padding: 0;
   background: transparent;
   color: var(--v-brand);
@@ -387,13 +394,13 @@ body {
   text-underline-offset: 3px;
 }
 
-.v-btn--plain:hover:not(:disabled) {
+.btn-link:hover:not(:disabled) {
   filter: none;
   text-decoration-color: currentColor;
 }
 
 /* Square, for one glyph: give it a title. */
-.v-btn--icon {
+.btn-icon {
   padding: 6px;
   width: 30px;
   height: 30px;
@@ -402,8 +409,12 @@ body {
 /* ─── chips ─────────────────────────────────────────────────────
    A small pick, and a pill of small caps: a napp's actions, a filter,
    a view that is on. They are the loudest small thing in the kit, on
-   purpose — they are what a row is made of. */
-.v-chip {
+   purpose — they are what a row is made of. A chip is a .btn, and its
+   variant says its state: btn-primary while picked, btn-ghost while
+   not, btn-danger and btn-warning for a tone.
+     <button class="btn btn-ghost btn-chip"><span class="btn-chip-label">name</span></button> */
+.btn.btn-chip {
+  box-shadow: none;
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -428,42 +439,47 @@ body {
     color var(--v-fast) var(--v-ease);
 }
 
-.v-chip:hover {
+.btn.btn-chip:hover:not(:disabled) {
   background: var(--v-press);
   color: var(--v-ink);
+  filter: none;
 }
 
-.v-chip--on,
-.v-chip--on:hover {
+.btn.btn-chip:active:not(:disabled) {
+  translate: none;
+}
+
+.btn-chip.btn-primary,
+.btn-chip.btn-primary:hover:not(:disabled) {
   background: var(--v-brand);
   color: var(--v-brand-ink);
 }
 
-.v-chip--bad,
-.v-chip--bad:hover {
+.btn-chip.btn-danger,
+.btn-chip.btn-danger:hover:not(:disabled) {
   background: var(--v-bad-wash);
   color: var(--v-bad);
 }
 
-.v-chip--warn,
-.v-chip--warn:hover {
+.btn-chip.btn-warning,
+.btn-chip.btn-warning:hover:not(:disabled) {
   background: var(--v-warn);
   color: var(--v-warn-ink);
 }
 
 /* A chip that is a fact, not a pick. */
-.v-chip--static {
+.btn-chip.static {
   cursor: default;
 }
 
-.v-chip--static:hover {
+.btn-chip.static:hover:not(:disabled) {
   background: var(--v-fill);
   color: var(--v-ink-2);
 }
 
 /* A long name crops with an ellipsis instead of widening its row; put
    the whole thing in a title to keep it reachable. */
-.v-chip > span {
+.btn-chip-label {
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -471,7 +487,7 @@ body {
 /* ─── tabs ──────────────────────────────────────────────────────
    One plate, one choice: the blocks share a single well and the
    picked one sits in it, filled. For the sections of a screen. */
-.v-tabs {
+.ui-tabs {
   display: inline-flex;
   align-self: start;
   gap: 2px;
@@ -484,7 +500,7 @@ body {
   overflow-x: auto;
 }
 
-.v-tab {
+.ui-tab {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -507,27 +523,76 @@ body {
     color var(--v-fast) var(--v-ease);
 }
 
-.v-tab:hover {
+.ui-tab:hover {
   background: var(--v-hover);
   color: var(--v-ink);
 }
 
-.v-tab--on,
-.v-tab--on:hover {
+.ui-tab.active,
+.ui-tab.active:hover {
   background: var(--v-brand);
   color: var(--v-brand-ink);
 }
 
 /* A count in a tab, in the fill's own voice. */
-.v-tab .v-caption {
+:is(.ui-tab, .ui-segment) .ui-caption {
   color: inherit;
   opacity: 0.65;
+}
+
+/* Segments: a window's sections, at the top of it. The blocks share
+   the whole width, shouted like the launcher's own headers, and the
+   one you are in is underlined in ink, the way .ui-header rules its
+   name. */
+.ui-segments {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid var(--v-line);
+  min-width: 0;
+}
+
+.ui-segment {
+  flex: 1;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 9px 10px 7px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  background: transparent;
+  color: var(--v-ink-3);
+  font: inherit;
+  font-size: var(--v-micro);
+  font-weight: 700;
+  line-height: 1.4;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  user-select: none;
+  transition:
+    color var(--v-fast) var(--v-ease),
+    border-color var(--v-fast) var(--v-ease),
+    background-color var(--v-fast) var(--v-ease);
+}
+
+.ui-segment:hover {
+  background: var(--v-hover);
+  color: var(--v-ink);
+}
+
+.ui-segment.active,
+.ui-segment.active:hover {
+  border-bottom-color: var(--v-ink);
+  color: var(--v-ink);
 }
 
 /* ─── fields ────────────────────────────────────────────────────
    A bordered box, like the launcher's editors: a 1px line, 6px
    corners, and a focus that is impossible to miss. */
-.v-input {
+.ui-input {
   box-sizing: border-box;
   min-width: 0;
   padding: 7px 10px;
@@ -543,39 +608,114 @@ body {
     box-shadow var(--v-fast) var(--v-ease);
 }
 
-.v-input::placeholder {
+.ui-input::placeholder {
   color: var(--v-ink-3);
 }
 
-.v-input:focus {
+.ui-input:focus {
   outline: none;
   border-color: var(--v-brand);
   box-shadow: 0 0 0 3px var(--v-brand-wash);
 }
 
-.v-input--mono {
+.ui-input.mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: var(--v-small);
 }
 
-textarea.v-input {
+/* WebKit draws a search field as its own rounded box otherwise. */
+.ui-input[type="search"] {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+/* Its states are attributes. required: while empty, the placeholder
+   says so in the bad color. aria-invalid="true": the line goes bad,
+   where a save stopped. readonly: shown, not edited, on the plate
+   instead of the page, and no focus ring to promise typing. */
+.ui-input:required:placeholder-shown {
+  border-color: color-mix(in srgb, var(--v-bad) 45%, var(--v-line));
+}
+
+.ui-input:required::placeholder {
+  color: color-mix(in srgb, var(--v-bad) 70%, var(--v-ink-3));
+}
+
+.ui-input[aria-invalid="true"],
+.ui-input[aria-invalid="true"]:focus {
+  border-color: var(--v-bad);
+  box-shadow: 0 0 0 3px var(--v-bad-wash);
+}
+
+.ui-input[readonly] {
+  background: var(--v-fill-2);
+  color: var(--v-ink-2);
+}
+
+.ui-input[readonly]:focus {
+  border-color: var(--v-line);
+  box-shadow: none;
+}
+
+/* A dropdown: the kit's chevron, turned down, instead of the
+   browser's arrow. An image can't take currentColor, so it is a grey
+   that reads on either theme. */
+select.ui-input {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 30px;
+  cursor: pointer;
+  background:
+    var(--surface)
+    url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjODg4IiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMy41IDZMOCAxMC41IDEyLjUgNiIvPjwvc3ZnPg==")
+    no-repeat right 10px center / 12px 12px;
+}
+
+textarea.ui-input {
   display: block;
   width: 100%;
   resize: vertical;
 }
 
+/* Somewhere to write: a textarea with no box, no fill and no handle,
+   in the page's voice at the reading size. How big it is is the
+   napp's. Class only.
+     <textarea class="ui-writing" placeholder="write a note…"></textarea> */
+.ui-writing {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  padding: var(--v-pad-roomy);
+  border: 0;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: var(--v-lead);
+  line-height: 1.6;
+}
+
+.ui-writing::placeholder {
+  color: var(--v-ink-3);
+}
+
+.ui-writing:focus-visible {
+  outline: none;
+}
+
 /* A labelled line: the label shouted over the control, a note under. */
-.v-field {
+.ui-field {
   display: grid;
   gap: 5px;
   min-width: 0;
 }
 
-.v-field > .v-input {
+.ui-field > .ui-input {
   width: 100%;
 }
 
-.v-field-note {
+.ui-field-note {
   font-size: var(--v-small);
   color: var(--v-ink-3);
 }
@@ -583,7 +723,7 @@ textarea.v-input {
 /* ─── checks, radios, switches ──────────────────────────────────
    16px, a line, and the brand once it is on — the checkbox the
    launcher's own lists are full of. */
-.v-check {
+.ui-check {
   appearance: none;
   -webkit-appearance: none;
   display: inline-grid;
@@ -602,11 +742,11 @@ textarea.v-input {
     border-color var(--v-fast) var(--v-ease);
 }
 
-.v-radio {
+.ui-radio {
   border-radius: 50%;
 }
 
-.v-check::after {
+.ui-check::after {
   content: "";
   width: 12px;
   height: 12px;
@@ -619,18 +759,18 @@ textarea.v-input {
   transition: scale var(--v-fast) var(--v-ease);
 }
 
-.v-check:checked,
-.v-check:indeterminate {
+.ui-check:checked,
+.ui-check:indeterminate {
   background: var(--v-brand);
   border-color: var(--v-brand);
 }
 
-.v-check:checked::after {
+.ui-check:checked::after {
   scale: 1;
 }
 
 /* A radio takes a dot, not the checkbox's tick. */
-.v-radio::after {
+.ui-radio::after {
   width: 8px;
   height: 8px;
   border-radius: 50%;
@@ -640,7 +780,7 @@ textarea.v-input {
 }
 
 /* The box and its words as one <label>, so the words toggle it too. */
-.v-check-label {
+.ui-check-label {
   display: inline-flex;
   align-items: flex-start;
   gap: var(--v-gap);
@@ -650,30 +790,97 @@ textarea.v-input {
   min-width: 0;
 }
 
-.v-check-label > .v-check {
+.ui-check-label > .ui-check {
   margin-top: 2px;
 }
 
-.v-check-text {
+.ui-check-text {
   display: grid;
   gap: 2px;
   min-width: 0;
 }
 
-.v-check-note {
+.ui-check-note {
   font-size: var(--v-small);
   color: var(--v-ink-3);
 }
 
-.v-radios {
+.ui-radios {
   display: flex;
   flex-wrap: wrap;
   gap: var(--v-gap) var(--v-pad-roomy);
 }
 
+/* Its caption sits on the options' line. */
+.ui-radios > .ui-overline {
+  align-self: center;
+}
+
+/* Collapsed: one line, the caption and the pick, until it is clicked;
+   then the options in the pick's place, and choosing folds it back.
+     <div class="ui-radios collapse" role="radiogroup">
+       <span class="ui-overline">kind</span>
+       <button class="ui-radios-value">note</button>
+       <label class="ui-check-label">…</label>…
+     </div> */
+.ui-radios.collapse {
+  align-items: center;
+  gap: var(--v-gap-tight) var(--v-gap-loose);
+}
+
+.ui-radios.collapse:not(.ui-radios.open) > .ui-check-label,
+.ui-radios.collapse.ui-radios.open > .ui-radios-value {
+  display: none;
+}
+
+.ui-radios.collapse > .ui-check-label {
+  align-items: center;
+  font-size: var(--v-body-s);
+}
+
+.ui-radios.collapse > .ui-check-label > .ui-check {
+  margin-top: 0;
+}
+
+/* The pick, as a chip: it is what you click to change it. */
+.ui-radios-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border: 0;
+  border-radius: var(--v-radius-pill);
+  background: var(--v-fill);
+  color: var(--v-ink);
+  font: inherit;
+  font-size: var(--v-micro);
+  font-weight: 700;
+  line-height: 1.6;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  cursor: pointer;
+  transition: background-color var(--v-fast) var(--v-ease);
+}
+
+.ui-radios-value::after {
+  content: "";
+  width: 1em;
+  height: 1em;
+  background-color: currentColor;
+  -webkit-mask: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNNiAzLjVMMTAuNSA4IDYgMTIuNSIvPjwvc3ZnPg==")
+    center / contain no-repeat;
+  mask: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNNiAzLjVMMTAuNSA4IDYgMTIuNSIvPjwvc3ZnPg==")
+    center / contain no-repeat;
+  rotate: 90deg;
+}
+
+.ui-radios-value:hover {
+  background: var(--v-press);
+}
+
 /* A switch for a setting that is on or off, and where it stands: the
    brand filling the well, the knob travelling across it. */
-.v-switch {
+.ui-switch {
   display: inline-flex;
   align-items: center;
   gap: var(--v-gap);
@@ -683,7 +890,7 @@ textarea.v-input {
   min-width: 0;
 }
 
-.v-switch-track {
+.ui-switch-track {
   position: relative;
   flex-shrink: 0;
   box-sizing: border-box;
@@ -697,7 +904,7 @@ textarea.v-input {
     border-color var(--v-fast) var(--v-ease);
 }
 
-.v-switch-track::after {
+.ui-switch-track::after {
   content: "";
   position: absolute;
   top: 2px;
@@ -711,34 +918,34 @@ textarea.v-input {
     background-color var(--v-fast) var(--v-ease);
 }
 
-.v-switch input {
+.ui-switch input {
   position: absolute;
   opacity: 0;
   pointer-events: none;
 }
 
-.v-switch:has(input:checked) .v-switch-track {
+.ui-switch:has(input:checked) .ui-switch-track {
   background: var(--v-brand);
   border-color: var(--v-brand);
 }
 
-.v-switch:has(input:checked) .v-switch-track::after {
+.ui-switch:has(input:checked) .ui-switch-track::after {
   translate: 17px 0;
   background: var(--v-brand-ink);
 }
 
-.v-switch:has(input:focus-visible) .v-switch-track {
+.ui-switch:has(input:focus-visible) .ui-switch-track {
   outline: 2px solid var(--v-brand);
   outline-offset: 2px;
 }
 
-.v-switch-text {
+.ui-switch-text {
   display: grid;
   gap: 2px;
   min-width: 0;
 }
 
-.v-switch-note {
+.ui-switch-note {
   font-size: var(--v-small);
   color: var(--v-ink-3);
 }
@@ -747,18 +954,18 @@ textarea.v-input {
    Rows with a hairline between them, the row's label taking what is
    left, its controls always fitting. A row says it is a row by
    lighting up when it is under the cursor. */
-.v-list {
+.ui-list {
   display: grid;
   min-width: 0;
 }
 
-.v-items {
+.ui-items {
   display: flex;
   flex-direction: column;
   min-width: 0;
 }
 
-.v-item {
+.ui-item {
   display: flex;
   align-items: center;
   gap: var(--v-gap);
@@ -770,15 +977,15 @@ textarea.v-input {
   transition: background-color var(--v-fast) var(--v-ease);
 }
 
-.v-item:last-child {
+.ui-item:last-child {
   border-bottom: 0;
 }
 
-.v-item:hover {
+.ui-item:hover {
   background: var(--v-hover);
 }
 
-.v-item-label {
+.ui-item-label {
   flex: 1;
   min-width: 0;
   font-size: var(--v-body);
@@ -787,44 +994,113 @@ textarea.v-input {
   white-space: nowrap;
 }
 
+/* A label that is code (code(url)) keeps the mono voice and loses the
+   plate: the row is its plate. */
+.ui-item-label.ui-code {
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: var(--v-body-s);
+}
+
 /* A machine label: a relay address, an id. */
-.v-item-label--mono {
+.ui-item-label.mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: var(--v-body-s);
 }
 
-/* The add line under a list: a field, a button, an error. */
-.v-add {
+/* A row that failed: its label in the bad color, its fill a wash. */
+.ui-item.danger {
+  background: var(--v-bad-wash);
+}
+
+.ui-item.danger > .ui-item-label,
+.ui-item.danger > .ui-overline {
+  color: var(--v-bad);
+}
+
+/* A hairline between the children of whatever it is on: rows of a
+   napp's own (the kit's rows draw theirs already). Class only. */
+.ui-divided > * + * {
+  border-top: 1px solid var(--v-line);
+}
+
+/* A long list of small things: everything in it a size down and
+   closer together — its text, fields, rows and buttons. Class only;
+   on the list, or whatever holds its rows. */
+.ui-compact,
+.ui-compact :is(.ui-item-label, .ui-input, .btn, .ui-row > summary) {
+  font-size: var(--v-small);
+}
+
+.ui-compact .ui-input {
+  padding: 4px 8px;
+}
+
+.ui-compact .btn {
+  padding: 3px 9px;
+}
+
+.ui-compact .btn-icon {
+  padding: 3px;
+  width: 24px;
+  height: 24px;
+}
+
+.ui-compact :is(.ui-item, .ui-row > summary) {
+  gap: 6px;
+  padding-block: 3px;
+}
+
+/* The add control under a list: a button, and once it is clicked a
+   field and an add in its place, an error under them.
+     <div class="ui-add">
+       <form class="ui-add-form">
+         <input class="ui-input ui-add-input" /><button class="btn btn-outline">add</button>
+       </form>
+       <div class="ui-add-error"></div>
+     </div> */
+.ui-add {
   display: flex;
-  align-items: center;
-  gap: var(--v-gap);
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
   margin-top: var(--v-gap);
   min-width: 0;
 }
 
-.v-add > .v-input {
+.ui-add-form {
+  display: flex;
+  align-items: center;
+  align-self: stretch;
+  gap: var(--v-gap);
+  margin: 0;
+  min-width: 0;
+}
+
+.ui-add-form > .ui-input {
   flex: 1;
 }
 
-.v-add-error {
+.ui-add-error {
   color: var(--v-bad);
   font-size: var(--v-body-s);
   font-weight: 700;
 }
 
-.v-add-error:empty {
+.ui-add-error:empty {
   display: none;
 }
 
 /* ─── disclosure ────────────────────────────────────────────────
    A <details> that opens: a shouted summary, a chevron at its end,
    the content under it. */
-.v-disclosure {
+.ui-details {
   min-width: 0;
   border-top: 1px solid var(--v-line);
 }
 
-.v-disclosure > summary {
+.ui-details > summary {
   display: flex;
   align-items: center;
   gap: var(--v-gap);
@@ -840,11 +1116,11 @@ textarea.v-input {
   color: var(--v-ink-3);
 }
 
-.v-disclosure > summary::-webkit-details-marker {
+.ui-details > summary::-webkit-details-marker {
   display: none;
 }
 
-.v-disclosure > summary::after {
+.ui-details > summary::after {
   content: "";
   width: 1em;
   height: 1em;
@@ -859,40 +1135,111 @@ textarea.v-input {
   transition: rotate var(--v-fast) var(--v-ease);
 }
 
-.v-disclosure[open] > summary::after {
+.ui-details[open] > summary::after {
   rotate: 90deg;
 }
 
-.v-disclosure > summary:hover {
+.ui-details > summary:hover {
   color: var(--v-ink);
 }
 
-.v-disclosure[open] > summary {
+.ui-details[open] > summary {
+  color: var(--v-ink);
+}
+
+/* Its summary stays at the top while the content scrolls under it,
+   on the page's own surface so nothing shows through; --sticky-top
+   on the summary sets it lower, under something else that sticks. */
+.ui-details.sticky > summary {
+  position: sticky;
+  top: var(--sticky-top, 0px);
+  z-index: 1;
+  background: var(--surface);
+}
+
+/* A summary of more than text: a title and what goes with it (a
+   count, a badge) in a line, the chevron still at its end. */
+.ui-summary {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px var(--v-gap);
+  min-width: 0;
+}
+
+/* The small one under content: the rest of a long text, an example's
+   code. A hairline above, the summary in the text's own voice and
+   grey, a plus that turns to a minus while it is open. */
+.ui-fold {
+  min-width: 0;
+  border-top: 1px solid var(--v-line);
+}
+
+.ui-fold[open] {
+  padding-bottom: var(--v-pad-loose);
+}
+
+.ui-fold > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--v-gap);
+  padding: 7px 2px;
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+  font-size: var(--v-body-s);
+  color: var(--v-ink-2);
+}
+
+.ui-fold > summary::-webkit-details-marker {
+  display: none;
+}
+
+.ui-fold > summary::after {
+  content: "";
+  width: 1em;
+  height: 1em;
+  margin-left: auto;
+  flex-shrink: 0;
+  background-color: currentColor;
+  -webkit-mask: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNOCAzLjV2OU0zLjUgOGg5Ii8+PC9zdmc+")
+    center / contain no-repeat;
+  mask: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNOCAzLjV2OU0zLjUgOGg5Ii8+PC9zdmc+")
+    center / contain no-repeat;
+}
+
+.ui-fold[open] > summary::after {
+  -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMy41IDhoOSIvPjwvc3ZnPg==");
+  mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMy41IDhoOSIvPjwvc3ZnPg==");
+}
+
+.ui-fold > summary:hover,
+.ui-fold[open] > summary {
   color: var(--v-ink);
 }
 
 /* ─── rows that open ────────────────────────────────────────────
    A list of <details> sharing a name attribute: one is open at a
    time, and the others step out of the way while it is. */
-.v-rows {
+.ui-rows {
   display: grid;
   min-width: 0;
 }
 
-.v-rows:has(> .v-row[open]) > .v-row:not([open]) {
+.ui-rows:has(> .ui-row[open]) > .ui-row:not([open]) {
   display: none;
 }
 
-.v-row {
+.ui-row {
   border-bottom: 1px solid var(--v-line);
   min-width: 0;
 }
 
-.v-row:last-of-type {
+.ui-row:last-of-type {
   border-bottom: 0;
 }
 
-.v-row > summary {
+.ui-row > summary {
   display: flex;
   align-items: center;
   gap: var(--v-gap);
@@ -906,15 +1253,15 @@ textarea.v-input {
   transition: background-color var(--v-fast) var(--v-ease);
 }
 
-.v-row > summary:hover {
+.ui-row > summary:hover {
   background: var(--v-hover);
 }
 
-.v-row > summary::-webkit-details-marker {
+.ui-row > summary::-webkit-details-marker {
   display: none;
 }
 
-.v-row > summary::after {
+.ui-row > summary::after {
   content: "";
   width: 1em;
   height: 1em;
@@ -929,18 +1276,18 @@ textarea.v-input {
   transition: rotate var(--v-fast) var(--v-ease);
 }
 
-.v-row[open] > summary::after {
+.ui-row[open] > summary::after {
   rotate: 90deg;
 }
 
-.v-row[open] > summary {
+.ui-row[open] > summary {
   font-weight: 700;
 }
 
 /* ─── code and keys ─────────────────────────────────────────────
    Machine text on a plate, the launcher's plate. A key is the same
    thing with a line around it. */
-.v-code {
+.ui-code {
   padding: 1px 5px;
   border: 1px solid var(--v-line);
   border-radius: 4px;
@@ -949,7 +1296,7 @@ textarea.v-input {
   font-size: 0.9em;
 }
 
-.v-codeblock {
+.ui-code-block {
   margin: 0;
   padding: var(--v-pad-loose);
   border: 1px solid var(--v-line);
@@ -963,7 +1310,7 @@ textarea.v-input {
   tab-size: 2;
 }
 
-.v-kbd {
+.ui-kbd {
   display: inline-block;
   padding: 1px 6px;
   border: 1px solid var(--v-line);
@@ -982,7 +1329,7 @@ textarea.v-input {
 /* ─── how far along ─────────────────────────────────────────────
    A bar with a fill in it. width is the parent's business, so say
    how full it is with --v-value (0%…100%). */
-.v-meter {
+.ui-meter {
   height: 8px;
   border: 1px solid var(--v-line);
   border-radius: var(--v-radius-pill);
@@ -991,7 +1338,7 @@ textarea.v-input {
   --v-value: 0%;
 }
 
-.v-meter::after {
+.ui-meter::after {
   content: "";
   display: block;
   width: var(--v-value);
@@ -1001,18 +1348,18 @@ textarea.v-input {
   transition: width var(--v-move) var(--v-ease);
 }
 
-.v-meter--bad::after {
+.ui-meter.danger::after {
   background: var(--v-bad);
 }
 
-.v-meter--warn::after {
+.ui-meter.warn::after {
   background: var(--v-warn);
 }
 
 /* ─── badges ────────────────────────────────────────────────────
    A fact in small caps: a type, a state, a count. The tone is a
    wash, so a row of them stays readable. */
-.v-badge {
+.ui-badge {
   display: inline-flex;
   align-items: center;
   box-sizing: border-box;
@@ -1030,164 +1377,312 @@ textarea.v-input {
   user-select: none;
 }
 
-.v-badge--brand {
+.ui-badge.brand {
   background: var(--v-brand-wash-2);
   color: var(--v-brand);
 }
 
-.v-badge--solid {
+.ui-badge.solid {
   background: var(--v-brand);
   color: var(--v-brand-ink);
 }
 
-.v-badge--bad {
+.ui-badge.danger {
   background: var(--v-bad-wash);
   color: var(--v-bad);
 }
 
-.v-badge--warn {
+.ui-badge.warn {
   background: var(--v-warn);
   color: var(--v-warn-ink);
 }
 
+/* All is well: the launcher's green, the one it suggests with. */
+.ui-badge.good {
+  background: var(--suggest);
+  color: var(--suggest-text);
+}
+
 /* ─── icons ─────────────────────────────────────────────────────
    Line glyphs, 1em, in the text's own color, so an icon beside
-   words takes their voice. Give an icon-only button a title. */
-.v-icon {
+   words takes their voice. Give an icon-only button a title. icon()
+   draws one as an inline <svg>; markup without the helper takes the
+   same glyph as a mask:
+     <span class="ui-icon ui-icon-plus"></span>
+   A glyph sits a little in from its box. flush-start or flush-end
+   puts its ink at that edge instead, the box narrower by the glyph's
+   own margin (--ink-start, --ink-end): for an icon that ends a line
+   under text, and has to line up with it. */
+.ui-icon {
   display: inline-block;
   flex-shrink: 0;
   width: 1em;
   height: 1em;
   vertical-align: -0.125em;
-  background-color: currentColor;
-  -webkit-mask: center / contain no-repeat;
-  mask: center / contain no-repeat;
 }
 
-.v-icon--check {
+/* longhands, so a glyph's class sets the image whatever the order */
+.ui-icon:not(svg) {
+  background-color: currentColor;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+}
+
+.ui-icon.ui-icon.flush-start {
+  width: calc(1em - var(--ink-start, 0em));
+  -webkit-mask-size: 1em 1em;
+  mask-size: 1em 1em;
+  -webkit-mask-position: right center;
+  mask-position: right center;
+}
+
+.ui-icon.ui-icon.flush-end {
+  width: calc(1em - var(--ink-end, 0em));
+  -webkit-mask-size: 1em 1em;
+  mask-size: 1em 1em;
+  -webkit-mask-position: left center;
+  mask-position: left center;
+}
+
+.ui-icon-check {
+  --ink-start: 0.1719em;
+  --ink-end: 0.1719em;
   -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMy41IDguNWwzIDMgNi02LjUiLz48L3N2Zz4=");
   mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMy41IDguNWwzIDMgNi02LjUiLz48L3N2Zz4=");
 }
 
-.v-icon--x {
+.ui-icon-x {
+  --ink-start: 0.2031em;
+  --ink-end: 0.2031em;
   -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNNCA0bDggOE0xMiA0bC04IDgiLz48L3N2Zz4=");
   mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNNCA0bDggOE0xMiA0bC04IDgiLz48L3N2Zz4=");
 }
 
-.v-icon--plus {
+.ui-icon-plus {
+  --ink-start: 0.1719em;
+  --ink-end: 0.1719em;
   -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNOCAzLjV2OU0zLjUgOGg5Ii8+PC9zdmc+");
   mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNOCAzLjV2OU0zLjUgOGg5Ii8+PC9zdmc+");
 }
 
-.v-icon--minus {
+.ui-icon-minus {
+  --ink-start: 0.1719em;
+  --ink-end: 0.1719em;
   -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMy41IDhoOSIvPjwvc3ZnPg==");
   mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMy41IDhoOSIvPjwvc3ZnPg==");
 }
 
-.v-icon--chevron {
+.ui-icon-chevron {
+  --ink-start: 0.3281em;
+  --ink-end: 0.2969em;
   -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNNiAzLjVMMTAuNSA4IDYgMTIuNSIvPjwvc3ZnPg==");
   mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNNiAzLjVMMTAuNSA4IDYgMTIuNSIvPjwvc3ZnPg==");
 }
 
-.v-icon--arrow {
+.ui-icon-arrow {
+  --ink-start: 0.1406em;
+  --ink-end: 0.1719em;
   -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMyA4aDkuNU05IDQuNUwxMi41IDggOSAxMS41Ii8+PC9zdmc+");
   mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMyA4aDkuNU05IDQuNUwxMi41IDggOSAxMS41Ii8+PC9zdmc+");
 }
 
-.v-icon--trash {
+.ui-icon-back {
+  --ink-start: 0.1719em;
+  --ink-end: 0.1406em;
+  -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMTMgOEgzLjVNNyA0LjVMMy41IDggNyAxMS41Ii8+PC9zdmc+");
+  mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMTMgOEgzLjVNNyA0LjVMMy41IDggNyAxMS41Ii8+PC9zdmc+");
+}
+
+.ui-icon-trash {
+  --ink-start: 0.1406em;
+  --ink-end: 0.1406em;
   -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMyA0LjVoMTBNNi41IDQuNVYzaDN2MS41TTQuNSA0LjVsLjUgOWg2bC41LTlNNi44IDd2NE05LjIgN3Y0Ii8+PC9zdmc+");
   mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMyA0LjVoMTBNNi41IDQuNVYzaDN2MS41TTQuNSA0LjVsLjUgOWg2bC41LTlNNi44IDd2NE05LjIgN3Y0Ii8+PC9zdmc+");
 }
 
-.v-icon--reload {
+.ui-icon-reload {
+  --ink-start: 0.1531em;
+  --ink-end: 0.1281em;
   -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMTIuOCA4YTQuOCA0LjggMCAxIDEtMS43LTMuN00xMy4yIDIuOFY2SDEwIi8+PC9zdmc+");
   mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMTIuOCA4YTQuOCA0LjggMCAxIDEtMS43LTMuN00xMy4yIDIuOFY2SDEwIi8+PC9zdmc+");
 }
 
-.v-icon--search {
+.ui-icon-reset {
+  --ink-start: 0.2031em;
+  --ink-end: 0.1406em;
+  -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMTMgMTMuNVY5LjVhNCA0IDAgMCAwLTQtNEg0Ii8+PHBhdGggZD0iTTcgMi41IDQgNS41IDcgOC41Ii8+PC9zdmc+");
+  mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMTMgMTMuNVY5LjVhNCA0IDAgMCAwLTQtNEg0Ii8+PHBhdGggZD0iTTcgMi41IDQgNS41IDcgOC41Ii8+PC9zdmc+");
+}
+
+.ui-icon-search {
+  --ink-start: 0.1719em;
+  --ink-end: 0.1094em;
   -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48Y2lyY2xlIGN4PSI3IiBjeT0iNyIgcj0iMy41Ii8+PHBhdGggZD0iTTkuNiA5LjZMMTMuNSAxMy41Ii8+PC9zdmc+");
   mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48Y2lyY2xlIGN4PSI3IiBjeT0iNyIgcj0iMy41Ii8+PHBhdGggZD0iTTkuNiA5LjZMMTMuNSAxMy41Ii8+PC9zdmc+");
 }
 
-.v-icon--external {
+.ui-icon-external {
+  --ink-start: 0.1719em;
+  --ink-end: 0.1719em;
   -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNOS41IDMuNUgxMi41djNNMTIuNSAzLjVMNy41IDguNU0xMSA5LjV2M0gzLjVWNUg2LjUiLz48L3N2Zz4=");
   mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNOS41IDMuNUgxMi41djNNMTIuNSAzLjVMNy41IDguNU0xMSA5LjV2M0gzLjVWNUg2LjUiLz48L3N2Zz4=");
 }
 
-.v-icon--warning {
+.ui-icon-warning {
+  --ink-start: 0.0469em;
+  --ink-end: 0.0469em;
   -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNOCAyLjUgMTQuNSAxMy41IDEuNSAxMy41WiIvPjxwYXRoIGQ9Ik04IDYuNXYzLjIiLz48cGF0aCBkPSJNOCAxMS42di42Ii8+PC9zdmc+");
   mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNOCAyLjUgMTQuNSAxMy41IDEuNSAxMy41WiIvPjxwYXRoIGQ9Ik04IDYuNXYzLjIiLz48cGF0aCBkPSJNOCAxMS42di42Ii8+PC9zdmc+");
 }
 
-.v-icon--info {
+.ui-icon-info {
+  --ink-start: 0.1094em;
+  --ink-end: 0.1094em;
   -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48Y2lyY2xlIGN4PSI4IiBjeT0iOCIgcj0iNS41Ii8+PHBhdGggZD0iTTggNy40djQiLz48cGF0aCBkPSJNOCA1di42Ii8+PC9zdmc+");
   mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48Y2lyY2xlIGN4PSI4IiBjeT0iOCIgcj0iNS41Ii8+PHBhdGggZD0iTTggNy40djQiLz48cGF0aCBkPSJNOCA1di42Ii8+PC9zdmc+");
 }
 
-.v-icon--star {
+.ui-icon-star {
+  --ink-start: 0.1031em;
+  --ink-end: 0.1031em;
   -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNOCAyLjVsMS43IDMuNiAzLjkuNS0yLjggMi43LjcgMy45TDggMTEuM2wtMy41IDEuOS43LTMuOUwyLjQgNi42bDMuOS0uNXoiLz48L3N2Zz4=");
   mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNOCAyLjVsMS43IDMuNiAzLjkuNS0yLjggMi43LjcgMy45TDggMTEuM2wtMy41IDEuOS43LTMuOUwyLjQgNi42bDMuOS0uNXoiLz48L3N2Zz4=");
 }
 
-.v-icon--copy {
+.ui-icon-copy {
+  --ink-start: 0.1719em;
+  --ink-end: 0.1719em;
   -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNNS41IDUuNWg3djdoLTd6TTMuNSAxMC41di03aDciLz48L3N2Zz4=");
   mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNNS41IDUuNWg3djdoLTd6TTMuNSAxMC41di03aDciLz48L3N2Zz4=");
 }
 
-.v-icon--folder {
+.ui-icon-folder {
+  --ink-start: 0.1094em;
+  --ink-end: 0.1094em;
   -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMi41IDQuNWg0TDggNi41aDUuNXY2aC0xMXoiLz48L3N2Zz4=");
   mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMi41IDQuNWg0TDggNi41aDUuNXY2aC0xMXoiLz48L3N2Zz4=");
 }
 
-.v-icon--user {
+.ui-icon-user {
+  --ink-start: 0.1719em;
+  --ink-end: 0.1719em;
   -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48Y2lyY2xlIGN4PSI4IiBjeT0iNS41IiByPSIyLjUiLz48cGF0aCBkPSJNMy41IDEzLjVhNC41IDQuNSAwIDAgMSA5IDAiLz48L3N2Zz4=");
   mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48Y2lyY2xlIGN4PSI4IiBjeT0iNS41IiByPSIyLjUiLz48cGF0aCBkPSJNMy41IDEzLjVhNC41IDQuNSAwIDAgMSA5IDAiLz48L3N2Zz4=");
 }
 
-.v-icon--home {
+.ui-icon-home {
+  --ink-start: 0.1406em;
+  --ink-end: 0.1406em;
   -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMyA3LjVMOCAzbDUgNC41VjEzSDN6TTYuNSAxM1Y5LjVoM1YxMyIvPjwvc3ZnPg==");
   mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMyA3LjVMOCAzbDUgNC41VjEzSDN6TTYuNSAxM1Y5LjVoM1YxMyIvPjwvc3ZnPg==");
 }
 
-.v-icon--settings {
+.ui-icon-settings {
+  --ink-start: 0.1406em;
+  --ink-end: 0.1406em;
   -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMyA0LjVoMTBNMyA4aDEwTTMgMTEuNWgxMCIvPjxjaXJjbGUgY3g9IjYiIGN5PSI0LjUiIHI9IjEuNCIvPjxjaXJjbGUgY3g9IjEwIiBjeT0iOCIgcj0iMS40Ii8+PGNpcmNsZSBjeD0iNSIgY3k9IjExLjUiIHI9IjEuNCIvPjwvc3ZnPg==");
   mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMyA0LjVoMTBNMyA4aDEwTTMgMTEuNWgxMCIvPjxjaXJjbGUgY3g9IjYiIGN5PSI0LjUiIHI9IjEuNCIvPjxjaXJjbGUgY3g9IjEwIiBjeT0iOCIgcj0iMS40Ii8+PGNpcmNsZSBjeD0iNSIgY3k9IjExLjUiIHI9IjEuNCIvPjwvc3ZnPg==");
 }
 
-.v-icon--sun {
+.ui-icon-sun {
+  --ink-start: 0.0469em;
+  --ink-end: 0.0469em;
   -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48Y2lyY2xlIGN4PSI4IiBjeT0iOCIgcj0iMyIvPjxwYXRoIGQ9Ik04IDEuNXYxLjRNOCAxMy4xdjEuNE0xLjUgOGgxLjRNMTMuMSA4aDEuNE0zLjQgMy40bDEgMU0xMS42IDExLjZsMSAxTTEyLjYgMy40bC0xIDFNNC40IDExLjZsLTEgMSIvPjwvc3ZnPg==");
   mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48Y2lyY2xlIGN4PSI4IiBjeT0iOCIgcj0iMyIvPjxwYXRoIGQ9Ik04IDEuNXYxLjRNOCAxMy4xdjEuNE0xLjUgOGgxLjRNMTMuMSA4aDEuNE0zLjQgMy40bDEgMU0xMS42IDExLjZsMSAxTTEyLjYgMy40bC0xIDFNNC40IDExLjZsLTEgMSIvPjwvc3ZnPg==");
 }
 
-.v-icon--moon {
+.ui-icon-moon {
+  --ink-start: 0.0934em;
+  --ink-end: 0.1406em;
   -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMTMgOS41QTUuNSA1LjUgMCAwIDEgNi4yIDIuNmE1LjUgNS41IDAgMSAwIDYuOCA2Ljl6Ii8+PC9zdmc+");
   mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMTMgOS41QTUuNSA1LjUgMCAwIDEgNi4yIDIuNmE1LjUgNS41IDAgMSAwIDYuOCA2Ljl6Ii8+PC9zdmc+");
 }
 
-.v-icon--bolt {
+.ui-icon-bolt {
+  --ink-start: 0.2344em;
+  --ink-end: 0.2344em;
   -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNOSAyTDQuNSA5aDNMNyAxNGw0LjUtN2gtM3oiLz48L3N2Zz4=");
   mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNOSAyTDQuNSA5aDNMNyAxNGw0LjUtN2gtM3oiLz48L3N2Zz4=");
 }
 
-.v-icon--link {
+.ui-icon-link {
+  --ink-start: 0.1719em;
+  --ink-end: 0.1719em;
   -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNNi41IDkuNWEyLjUgMi41IDAgMCAwIDMuNSAwbDItMmEyLjUgMi41IDAgMCAwLTMuNS0zLjVsLTEgMU05LjUgNi41YTIuNSAyLjUgMCAwIDAtMy41IDBsLTIgMmEyLjUgMi41IDAgMCAwIDMuNSAzLjVsMS0xIi8+PC9zdmc+");
   mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNNi41IDkuNWEyLjUgMi41IDAgMCAwIDMuNSAwbDItMmEyLjUgMi41IDAgMCAwLTMuNS0zLjVsLTEgMU05LjUgNi41YTIuNSAyLjUgMCAwIDAtMy41IDBsLTIgMmEyLjUgMi41IDAgMCAwIDMuNSAzLjVsMS0xIi8+PC9zdmc+");
 }
 
-.v-icon--save {
+.ui-icon-save {
+  --ink-start: 0.1719em;
+  --ink-end: 0.1719em;
   -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMy41IDMuNWg3TDEyLjUgNS41djdoLTl6TTUuNSAzLjV2M2g0di0zTTUuNSAxMi41VjloNXYzLjUiLz48L3N2Zz4=");
   mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMy41IDMuNWg3TDEyLjUgNS41djdoLTl6TTUuNSAzLjV2M2g0di0zTTUuNSAxMi41VjloNXYzLjUiLz48L3N2Zz4=");
 }
 
-.v-icon--window {
+.ui-icon-window {
+  --ink-start: 0.1094em;
+  --ink-end: 0.1094em;
   -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMi41IDRoMTF2OGgtMTF6TTIuNSA2LjVoMTEiLz48L3N2Zz4=");
   mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMi41IDRoMTF2OGgtMTF6TTIuNSA2LjVoMTEiLz48L3N2Zz4=");
+}
+
+.ui-icon-move {
+  --ink-start: 0.1094em;
+  --ink-end: 0.1406em;
+  -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMi41IDhoNy41TTcgNWwzIDMtMyAzTTEzIDR2OCIvPjwvc3ZnPg==");
+  mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMi41IDhoNy41TTcgNWwzIDMtMyAzTTEzIDR2OCIvPjwvc3ZnPg==");
+}
+
+.ui-icon-tile {
+  --ink-start: 0.1094em;
+  --ink-end: 0.1094em;
+  -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMi41IDIuNWg0djRoLTR6TTkuNSAyLjVoNHY0aC00ek0yLjUgOS41aDR2NGgtNHpNOS41IDkuNWg0djRoLTR6Ii8+PC9zdmc+");
+  mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMi41IDIuNWg0djRoLTR6TTkuNSAyLjVoNHY0aC00ek0yLjUgOS41aDR2NGgtNHpNOS41IDkuNWg0djRoLTR6Ii8+PC9zdmc+");
+}
+
+.ui-icon-pack {
+  --ink-start: 0.1094em;
+  --ink-end: 0.1094em;
+  -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMi41IDZWMi41SDZNMTMuNSA2VjIuNUgxME0yLjUgMTB2My41SDZNMTMuNSAxMHYzLjVIMTAiLz48L3N2Zz4=");
+  mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMi41IDZWMi41SDZNMTMuNSA2VjIuNUgxME0yLjUgMTB2My41SDZNMTMuNSAxMHYzLjVIMTAiLz48L3N2Zz4=");
+}
+
+.ui-icon-grid {
+  --ink-start: 0.1094em;
+  --ink-end: 0.1094em;
+  -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMi41IDIuNWgxMXYxMWgtMTF6TTggMi41djExTTIuNSA4aDExIi8+PC9zdmc+");
+  mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMi41IDIuNWgxMXYxMWgtMTF6TTggMi41djExTTIuNSA4aDExIi8+PC9zdmc+");
+}
+
+.ui-icon-close {
+  --ink-start: 0.2031em;
+  --ink-end: 0.2031em;
+  -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNNCA0bDggOE0xMiA0bC04IDgiLz48L3N2Zz4=");
+  mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNNCA0bDggOE0xMiA0bC04IDgiLz48L3N2Zz4=");
+}
+
+.ui-icon-warn {
+  --ink-start: 0.0469em;
+  --ink-end: 0.0469em;
+  -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNOCAyLjUgMTQuNSAxMy41IDEuNSAxMy41WiIvPjxwYXRoIGQ9Ik04IDYuNXYzLjIiLz48cGF0aCBkPSJNOCAxMS42di42Ii8+PC9zdmc+");
+  mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNOCAyLjUgMTQuNSAxMy41IDEuNSAxMy41WiIvPjxwYXRoIGQ9Ik04IDYuNXYzLjIiLz48cGF0aCBkPSJNOCAxMS42di42Ii8+PC9zdmc+");
+}
+
+.ui-icon-forward {
+  --ink-start: 0.1406em;
+  --ink-end: 0.1719em;
+  -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMyA4aDkuNU05IDQuNUwxMi41IDggOSAxMS41Ii8+PC9zdmc+");
+  mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMyA4aDkuNU05IDQuNUwxMi41IDggOSAxMS41Ii8+PC9zdmc+");
 }
 
 /* ─── app icons ─────────────────────────────────────────────────
    A napp's picture: a rounded square on a plate, so the space is
    held until the image lands. */
-.v-appicon {
+.ui-app-icon {
   display: inline-grid;
   box-sizing: border-box;
   overflow: hidden;
@@ -1198,46 +1693,58 @@ textarea.v-input {
   vertical-align: middle;
 }
 
-.v-appicon > img {
+.ui-app-icon > img {
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
 
-.v-appicon--s {
+/* An image with no picture yet draws nothing, not a frame. */
+.ui-app-icon > img:not([src]) {
+  display: none;
+}
+
+/* An author's, in a line of text. */
+.ui-app-icon-xs {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+}
+
+.ui-app-icon-s {
   width: 20px;
   height: 20px;
 }
 
-.v-appicon--m {
+.ui-app-icon-m {
   width: 40px;
   height: 40px;
 }
 
-.v-appicon--l {
+.ui-app-icon-l {
   width: 48px;
   height: 48px;
   padding: 3px;
 }
 
-.v-appicon--xl {
+.ui-app-icon-xl {
   width: 96px;
   height: 96px;
   padding: 4px;
 }
 
-.v-appicon--l > img,
-.v-appicon--xl > img {
+.ui-app-icon-l > img,
+.ui-app-icon-xl > img {
   border-radius: 4px;
 }
 
 /* The image eases in once it has loaded. */
-.v-appicon--fade > img {
+.ui-app-icon.fade > img {
   opacity: 0;
   transition: opacity var(--v-move) var(--v-ease);
 }
 
-.v-appicon--fade > img.loaded {
+.ui-app-icon.fade > img.loaded {
   opacity: 1;
 }
 
@@ -1245,7 +1752,7 @@ textarea.v-input {
    A line to heed, on a plate in its tone with a rail down its
    near edge. Warn by default — the launcher's amber is the one it
    already has. */
-.v-notice {
+.ui-notice {
   display: flex;
   align-items: flex-start;
   gap: var(--v-gap);
@@ -1259,32 +1766,38 @@ textarea.v-input {
   line-height: 1.45;
 }
 
-.v-notice > .v-icon {
+.ui-notice > .ui-icon {
   margin-top: 0.15em;
 }
 
-.v-notice--warn {
+.ui-notice.warn {
   border-left-color: var(--v-warn);
   background: var(--v-warn);
   color: var(--v-warn-ink);
 }
 
-.v-notice--bad {
+.ui-notice.danger {
   border-left-color: var(--v-bad);
   background: var(--v-bad-wash);
   color: var(--v-bad);
 }
 
-.v-notice--info {
+.ui-notice.info {
   border-left-color: var(--v-brand);
   background: var(--v-brand-wash);
   color: var(--v-ink);
 }
 
+.ui-notice.good {
+  border-left-color: var(--suggest-text);
+  background: var(--suggest);
+  color: var(--suggest-text);
+}
+
 /* ─── empty line ────────────────────────────────────────────────
    What a list says when it has nothing yet: a label, not a
    sentence, so it never competes with the rows. */
-.v-empty {
+.ui-empty {
   padding: var(--v-pad) 2px;
   font-size: var(--v-micro);
   font-weight: 700;
@@ -1297,13 +1810,13 @@ textarea.v-input {
 /* ─── links ─────────────────────────────────────────────────────
    A row of them, wrapping: the brand, underlined from the start so
    a link looks like a link. */
-.v-links {
+.ui-links {
   display: flex;
   flex-wrap: wrap;
   gap: var(--v-gap-tight) var(--v-pad-loose);
 }
 
-.v-links a {
+.ui-links a {
   color: var(--v-brand);
   font-size: var(--v-body);
   font-weight: 700;
@@ -1312,18 +1825,18 @@ textarea.v-input {
   text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
 }
 
-.v-links a:hover {
+.ui-links a:hover {
   text-decoration-color: currentColor;
 }
 
 /* ─── busy ──────────────────────────────────────────────────────
    Something working on it: it breathes until done. */
-.v-busy {
-  animation: v-breathe 1.6s ease-in-out infinite;
+.ui-busy {
+  animation: ui-breathe 1.6s ease-in-out infinite;
   cursor: progress;
 }
 
-@keyframes v-breathe {
+@keyframes ui-breathe {
   0%,
   100% {
     opacity: 1;
@@ -1334,7 +1847,7 @@ textarea.v-input {
 }
 
 /* A ring turning, 1em in the text's color. */
-.v-spinner {
+.ui-spinner {
   display: inline-block;
   box-sizing: border-box;
   width: 1em;
@@ -1344,52 +1857,278 @@ textarea.v-input {
   border: 2px solid color-mix(in srgb, currentColor 22%, transparent);
   border-top-color: currentColor;
   border-radius: 50%;
-  animation: v-spin 0.7s linear infinite;
+  animation: ui-spin 0.7s linear infinite;
 }
 
-@keyframes v-spin {
+@keyframes ui-spin {
   to {
     rotate: 360deg;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .v-busy,
-  .v-spinner {
+  .ui-busy,
+  .ui-spinner {
     animation: none;
   }
 
-  .v-busy {
+  .ui-busy {
     opacity: 0.5;
+  }
+}
+
+/* ─── people ────────────────────────────────────────────────────
+   A person, the same wherever one is named: the name, heavy, cut
+   with an ellipsis where there is no room; a picture before it when
+   asked for (xs in a line of text, s in a row); after it the petname
+   the viewer gave them, in the mono voice, and a check for someone
+   followed. It sits on the line of the text around it.
+     <a class="ui-author" href="#">
+       <span class="ui-app-icon ui-app-icon-xs"><img alt="" /></span>
+       <span class="ui-author-name">name</span>
+       <code class="ui-code ui-author-pet">petname</code>
+     </a> */
+.ui-author {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+  max-width: 100%;
+  color: inherit;
+  text-decoration: none;
+  vertical-align: bottom;
+}
+
+.ui-author > .ui-app-icon,
+.ui-author-follows {
+  align-self: center;
+}
+
+/* beside a picture taller than a line, the name sits at its middle */
+.ui-author:has(> :is(.ui-app-icon-m, .ui-app-icon-l, .ui-app-icon-xl)) {
+  align-items: center;
+}
+
+.ui-author-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 700;
+}
+
+a.ui-author:hover > .ui-author-name {
+  color: var(--v-brand);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.ui-author-pet,
+.ui-author-follows {
+  flex-shrink: 0;
+  color: var(--v-ink-2);
+  font-weight: 400;
+}
+
+.ui-author-follows {
+  display: inline-grid;
+  color: var(--v-brand);
+}
+
+/* The list authorPicker() opens at a text's @ or under a who field:
+   a dropdown plate in the top layer, its rows lit under the cursor
+   and the keys. */
+.ui-author-picker {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  z-index: 200000;
+  box-sizing: border-box;
+  min-width: 15rem;
+  max-width: min(26rem, calc(100vw - 8px));
+  max-height: min(19rem, 50vh);
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--v-line);
+  border-radius: var(--v-radius-plate);
+  background: var(--surface);
+  color: var(--v-ink);
+  box-shadow: 0 6px 24px rgb(0 0 0 / 0.18);
+  font-size: var(--v-body-s);
+}
+
+.ui-author-picker > .ui-empty {
+  padding: 6px var(--v-pad);
+}
+
+.ui-author-pick {
+  display: flex;
+  align-items: center;
+  gap: var(--v-gap);
+  min-width: 0;
+  padding: 5px var(--v-pad);
+  border-radius: var(--v-radius);
+  cursor: pointer;
+}
+
+.ui-author-pick.active {
+  background: var(--v-brand-wash-2);
+}
+
+.ui-author-pick > .ui-author {
+  flex: 0 1 auto;
+}
+
+.ui-author-pick-nip05 {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--v-ink-2);
+}
+
+/* ─── ring ──────────────────────────────────────────────────────
+   A word set round a circle, slowly turning: the label's voice bent
+   into a stamp, in the brand. Its size follows the font-size; where
+   it goes is the napp's. ring() draws it. */
+.ui-ring {
+  font-size: var(--v-micro);
+  color: var(--v-brand);
+  overflow: visible;
+  transform-origin: center;
+  animation: ui-ring-spin 14s linear infinite;
+  pointer-events: none;
+  user-select: none;
+}
+
+.ui-ring text {
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  fill: currentColor;
+}
+
+@keyframes ui-ring-spin {
+  to {
+    transform: rotate(-360deg);
+  }
+}
+
+/* ─── quote ─────────────────────────────────────────────────────
+   Someone else's words: a rail down the near edge, the text in from
+   it and a shade quieter. A blockquote, a quoted note, the note a
+   reply answers. Class only. */
+.ui-quote {
+  margin: 0;
+  padding: 2px 0 2px var(--v-pad-loose);
+  border-left: 3px solid var(--v-line);
+  color: var(--v-ink-2);
+}
+
+/* ─── sticky ────────────────────────────────────────────────────
+   Stays in view while what is around it scrolls: at the top of its
+   scroller, with .bottom at the bottom, with .top.bottom at both.
+   --sticky-top and --sticky-bottom keep it that far from its
+   edge, under or over something else that sticks; they don't
+   inherit, so a sticky inside a sticky starts at 0. Only the
+   sticking: a background, a rule, are the napp's. sticky() sets it.
+     <div class="ui-bar ui-sticky bottom">…</div> */
+@property --sticky-top {
+  syntax: "<length-percentage>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --sticky-bottom {
+  syntax: "<length-percentage>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+.ui-sticky {
+  position: sticky;
+  top: var(--sticky-top);
+  z-index: 10;
+}
+
+.ui-sticky.ui-sticky.bottom {
+  top: auto;
+  bottom: var(--sticky-bottom);
+}
+
+.ui-sticky.ui-sticky.top.ui-sticky.bottom {
+  top: var(--sticky-top);
+}
+
+/* ─── flow ──────────────────────────────────────────────────────
+   Text-like content, spaced as it reads: blocks a line apart, a
+   heading close over what it heads with room before it, a rule with
+   room on both sides. The flow spaces its children, a plain <p>
+   included; they carry no margins. flow() builds one. */
+.ui-flow > * {
+  margin: 0;
+}
+
+.ui-flow > * + * {
+  margin-top: var(--v-gap-loose);
+}
+
+.ui-flow > :where(h1, h2, h3, h4, h5, h6, .ui-title, .ui-heading-xxl, .ui-heading, .ui-overline) + * {
+  margin-top: 6px;
+}
+
+.ui-flow > * + :where(h1, h2, h3, h4, h5, h6, .ui-title, .ui-heading-xxl, .ui-heading),
+.ui-flow > * + hr,
+.ui-flow > hr + * {
+  margin-top: calc(var(--v-pad-roomy) + var(--v-gap));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-ring {
+    animation: none;
   }
 }
 
 /* ─── hidden ────────────────────────────────────────────────────
    The kit sets display on its boxes, which would beat [hidden]. */
 :is(
-    .v-col,
-    .v-bar,
-    .v-card,
-    .v-plate,
-    .v-header,
-    .v-section,
-    .v-btn,
-    .v-chip,
-    .v-tabs,
-    .v-list,
-    .v-items,
-    .v-item,
-    .v-add,
-    .v-radios,
-    .v-check-label,
-    .v-switch,
-    .v-field,
-    .v-disclosure,
-    .v-rows,
-    .v-notice,
-    .v-links,
-    .v-spinner,
-    .v-meter
+    .ui-stack,
+    .ui-bar,
+    .ui-card,
+    .ui-plate,
+    .ui-header,
+    .ui-section,
+    .btn,
+    .btn.btn-chip,
+    .ui-tabs,
+    .ui-tab,
+    .ui-segments,
+    .ui-list,
+    .ui-items,
+    .ui-item,
+    .ui-add,
+    .ui-add-form,
+    .ui-radios,
+    .ui-radios-value,
+    .ui-check-label,
+    .ui-switch,
+    .ui-field,
+    .ui-details,
+    .ui-fold,
+    .ui-summary,
+    .ui-rows,
+    .ui-notice,
+    .ui-links,
+    .ui-spinner,
+    .ui-meter,
+    .ui-icon,
+    .ui-app-icon,
+    .ui-badge,
+    .ui-author,
+    .ui-author-follows,
+    .ui-author-pick,
+    .ui-writing
   )[hidden] {
   display: none;
 }
