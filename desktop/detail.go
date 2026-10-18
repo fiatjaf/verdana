@@ -428,7 +428,7 @@ func layoutProfileDetail(
 
 	children := []layout.FlexChild{
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			// the avatar and name fire view:0 from a blank window, so the
+			// the avatar and name fire view:0 from the launcher, so the
 			// user picks the napp that shows this profile
 			name := p.ShortName
 			if name == "" {

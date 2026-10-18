@@ -66,6 +66,11 @@ type PromptOption struct {
 	Instance  string `json:"instance"`
 	Dev       bool   `json:"dev"`
 	Suggested bool   `json:"suggested"`
+
+	// Name and Icon are only there for a picker window (see backend's
+	// picker.go): the napp's plain name, and its icon's bytes.
+	Name string `json:"name"`
+	Icon []byte `json:"icon"`
 }
 
 type themeState struct {
@@ -136,6 +141,14 @@ func NewBridge(cfg Config) *Bridge {
 		b.theme.Vars = json.RawMessage("{}")
 	}
 	return b
+}
+
+// LoadStorage replaces the napp's storage, for a picker window that just
+// became the window of a napp and so only now knows whose storage it is. It
+// must come before the module runs: nothing guards the storage against a
+// module reading it.
+func (b *Bridge) LoadStorage(raw []byte) {
+	b.store = loadStore(raw)
 }
 
 // SetWake is how the window asks to be woken when there is something for the

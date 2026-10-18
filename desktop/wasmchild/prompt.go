@@ -134,7 +134,7 @@ func promptTip(label string, ok bool, scope string) string {
 
 // palette is the overlay's colours for the launcher's current theme.
 type palette struct {
-	bg, card, fg, muted, accent, accentText, dev, devText, suggest, suggestText, danger color.NRGBA
+	bg, card, fg, muted, accent, accentText, dev, devText, suggest, suggestText, danger, border color.NRGBA
 }
 
 func rgb(c uint32) color.NRGBA {
@@ -146,13 +146,13 @@ func paletteFor(theme string) palette {
 		return palette{
 			bg: rgb(0x17181b), card: rgb(0x23252b), fg: rgb(0xe8e8ea), muted: rgb(0x7d818a),
 			accent: rgb(0x5c6bc0), accentText: rgb(0xffffff), dev: rgb(0x5a3b1a), devText: rgb(0xffd79a),
-			suggest: rgb(0x1e3a2a), suggestText: rgb(0xb6e3c1), danger: rgb(0xff6b6b),
+			suggest: rgb(0x1e3a2a), suggestText: rgb(0xb6e3c1), danger: rgb(0xff6b6b), border: rgb(0x3a3d45),
 		}
 	}
 	return palette{
 		bg: rgb(0xffffff), card: rgb(0xf2f2f2), fg: rgb(0x000000), muted: rgb(0x999999),
 		accent: rgb(0x3f51b5), accentText: rgb(0xffffff), dev: rgb(0xffe5b4), devText: rgb(0x704000),
-		suggest: rgb(0xd8efdc), suggestText: rgb(0x14532d), danger: rgb(0xcc2222),
+		suggest: rgb(0xd8efdc), suggestText: rgb(0x14532d), danger: rgb(0xcc2222), border: rgb(0xcccccc),
 	}
 }
 

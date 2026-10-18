@@ -81,6 +81,12 @@ type PromptOption struct {
 	// usage.go); a UI never has to work it out.
 	Suggested bool `json:"suggested,omitempty"`
 	Uses      int  `json:"uses,omitempty"`
+
+	// Name is the napp's own name, with no window in it, and Icon its
+	// icon's bytes: what a picker window draws its grid of napps with. Only
+	// set for one (see picker.go), never for an overlay.
+	Name string `json:"name,omitempty"`
+	Icon []byte `json:"icon,omitempty"`
 }
 
 // PromptBody is what a prompt shows under its title, in this order.
@@ -296,12 +302,25 @@ func askApprovalFor(ci *Instance, perm Permission, title string, body func() Pro
 
 // askActionHandler asks which napp should handle an action when more than one
 // can. Open windows come first — routing into one keeps the user's state.
-func askActionHandler(caller *Instance, action string, payload json.RawMessage, candidates []Napp, open []*Instance) (PromptOption, bool) {
+//
+// The question is asked in a picker window of its own when the platform has
+// them, and that window comes back with the answer: whoever routes the action
+// either opens the napp that was picked in it or closes it. Elsewhere the
+// question covers the caller's window, and no picker comes back.
+func askActionHandler(caller *Instance, action string, payload json.RawMessage, candidates []Napp, open []*Instance) (PromptOption, *Instance, bool) {
 	callerName := "launcher"
 	callerID := ""
-	if caller != nil && !caller.blank {
+	if caller != nil {
 		callerName = caller.napp.Label()
 		callerID = caller.napp.ID
+	}
+
+	picker := openPicker()
+	icon := func(n Napp) []byte {
+		if picker == nil {
+			return nil
+		}
+		return pickerIcon(n)
 	}
 
 	options := make([]PromptOption, 0, len(candidates)+len(open))
@@ -315,6 +334,8 @@ func askActionHandler(caller *Instance, action string, payload json.RawMessage, 
 				NappID:   ci.napp.ID,
 				Instance: ci.instance,
 				Dev:      dev,
+				Name:     ci.napp.Label(),
+				Icon:     icon(ci.napp),
 			})
 		}
 		for _, n := range candidates {
@@ -326,6 +347,8 @@ func askActionHandler(caller *Instance, action string, payload json.RawMessage, 
 				Detail: n.ID,
 				NappID: n.ID,
 				Dev:    dev,
+				Name:   n.Label(),
+				Icon:   icon(n),
 			})
 		}
 	}
@@ -341,16 +364,24 @@ func askActionHandler(caller *Instance, action string, payload json.RawMessage, 
 	}
 
 	p := newPrompt(callerName, "Open “"+action+"” with…", PromptBody{Code: code}, options)
-	if caller != nil {
+	if picker != nil {
+		p.Instance = picker.instance
+		// closing the picker is saying no
+		go func() {
+			<-picker.gone
+			AnswerPrompt(p.ID, Answer{})
+		}()
+	} else if caller != nil {
 		p.Instance = caller.instance
 	}
-	log.Info().Str("action", action).Int("options", len(options)).Msg("asking the user to pick a handler")
+	log.Info().Str("action", action).Int("options", len(options)).
+		Bool("window", picker != nil).Msg("asking the user to pick a handler")
 	enqueuePrompt(p)
 	answer := p.wait()
 	if !answer.OK || answer.Index < 0 || answer.Index >= len(options) {
-		return PromptOption{}, false
+		return PromptOption{}, picker, false
 	}
-	return options[answer.Index], true
+	return options[answer.Index], picker, true
 }
 
 // ─── showing prompts over the window that asked ──────────────────

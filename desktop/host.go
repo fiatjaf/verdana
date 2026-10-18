@@ -21,11 +21,25 @@ type gioHost struct{}
 
 // OpenWindow picks the shell that matches the napp's mode. Both are the same
 // wire to the backend; only what is inside the window differs.
+//
+// A napp picked in a picker window lands in that window when it is a wasm
+// one, since the picker is a canvas shell already. A web napp can't: a
+// webview can't be drawn in a Gio window, so the picker makes way for one.
 func (gioHost) OpenWindow(spec backend.WindowSpec) (backend.Transport, error) {
+	if picker, ok := spec.Reuse.(*shellTransport); ok {
+		if spec.Mode == backend.ModeWasm {
+			return picker.become(spec), nil
+		}
+		picker.retire()
+	}
 	if spec.Mode == backend.ModeWasm {
 		return startWasmChild(spec)
 	}
 	return startChild(spec)
+}
+
+func (gioHost) OpenPicker(spec backend.PickerSpec) (backend.Transport, error) {
+	return startPicker(spec)
 }
 
 func (gioHost) StateChanged() {

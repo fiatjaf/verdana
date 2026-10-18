@@ -17,6 +17,16 @@ type Host interface {
 	// HandleWireMessage for everything the napp's bridge sends up.
 	OpenWindow(spec WindowSpec) (Transport, error)
 
+	// OpenPicker puts up a window of its own for the user to pick which napp
+	// handles an action (see picker.go). It shows the prompt it is sent the
+	// way a napp window shows an overlay, and answers it the same way. A
+	// host with no such window fails, and the picker covers the window that
+	// fired the action instead.
+	//
+	// The platform calls WindowClosed when it goes away, unless it went
+	// away to make room for the napp that was picked (see WindowSpec.Reuse).
+	OpenPicker(spec PickerSpec) (Transport, error)
+
 	// StateChanged says the launcher's State() changed and whatever renders
 	// it should render it again.
 	StateChanged()
@@ -124,12 +134,32 @@ type WindowSpec struct {
 	// string, injected at document-start so the bridge's synchronous shim
 	// starts from it. Writes go back through the napp.storage* rpcs.
 	StorageJSON string
+
+	// Reuse is the picker window the user just picked this napp in, when
+	// that is how it is being opened. The napp is to land in it instead of
+	// in a new window: in place, when the picker is the kind of window this
+	// napp is drawn in, or by closing it and opening a new one otherwise.
+	// Either way the picker's transport is the host's to finish with.
+	Reuse Transport
+}
+
+// PickerSpec is what a platform needs to know to show a picker window.
+type PickerSpec struct {
+	// Instance is the picker's window id, and the napp's if the picker
+	// becomes the window of the napp the user picked.
+	Instance string
+
+	Theme     string
+	ThemeVars string
 }
 
 // noopHost stands in when a caller (a test, a one-off tool) has no GUI.
 type noopHost struct{}
 
 func (noopHost) OpenWindow(WindowSpec) (Transport, error) {
+	return nil, errors.New("this host cannot open windows")
+}
+func (noopHost) OpenPicker(PickerSpec) (Transport, error) {
 	return nil, errors.New("this host cannot open windows")
 }
 func (noopHost) StateChanged()                           {}

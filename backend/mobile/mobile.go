@@ -107,6 +107,12 @@ func (h mobileHost) OpenWindow(spec backend.WindowSpec) (backend.Transport, erro
 	return mobileTransport{ui: h.ui, instance: spec.Instance}, nil
 }
 
+// OpenPicker has no picker windows to offer: an Android window is a whole
+// activity, so the picker covers the window that fired the action instead.
+func (h mobileHost) OpenPicker(backend.PickerSpec) (backend.Transport, error) {
+	return nil, errors.New("no picker windows on android")
+}
+
 func (h mobileHost) StateChanged()                               { h.ui.StateChanged() }
 func (h mobileHost) PromptsChanged()                             { h.ui.PromptsChanged() }
 func (h mobileHost) CopyText(text string) error                  { return h.ui.CopyText(text) }

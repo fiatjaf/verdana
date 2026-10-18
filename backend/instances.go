@@ -71,9 +71,9 @@ type Instance struct {
 	// answers a dispatch.
 	auxiliary bool
 
-	// blank is true for a window the launcher opened only to fire an action
-	// from (see blank.go): its dispatches count as the launcher's own.
-	blank bool
+	// picker is true for a window that only asks which napp handles an
+	// action (see picker.go): it runs no napp, so it is never listed.
+	picker bool
 }
 
 type actionRequest struct {
@@ -175,6 +175,9 @@ func OpenWindows() []WindowInfo {
 	open := allInstances()
 	out := make([]WindowInfo, 0, len(open))
 	for _, ci := range open {
+		if ci.picker {
+			continue
+		}
 		info := WindowInfo{
 			Instance: ci.instance,
 			NappID:   ci.napp.ID,
@@ -479,10 +482,19 @@ func LaunchByID(id string) {
 
 // launch opens a napp window and returns its instance.
 func launch(ctx context.Context, napp Napp) (*Instance, error) {
-	return launchWithInstance(ctx, napp, "")
+	return launchWithInstance(ctx, napp, "", nil)
 }
 
-func launchWithInstance(ctx context.Context, napp Napp, requestedInstance string) (*Instance, error) {
+// launchWithInstance opens a napp window under the requested instance id (a
+// fresh one when empty), or in the picker window into when there is one: the
+// napp then gets the picker's id and the picker is gone either way.
+func launchWithInstance(ctx context.Context, napp Napp, requestedInstance string, into *Instance) (ci *Instance, err error) {
+	defer func() {
+		if err != nil && into != nil {
+			into.Close()
+		}
+	}()
+
 	id := napp.ID
 	if id == "" {
 		return nil, errors.New("napp has no id")
@@ -522,10 +534,16 @@ func launchWithInstance(ctx context.Context, napp Napp, requestedInstance string
 	themeName, themeVars := Theme()
 	winW, winH := napp.WindowSize()
 	instance := requestedInstance
+	var reuse Transport
+	if into != nil {
+		instance = into.instance
+		reuse = into.handOver()
+		into = nil // the host closes it from here on, whatever happens
+	}
 	if instance == "" {
 		instance = newInstanceID()
 	}
-	ci := &Instance{
+	ci = &Instance{
 		instance:   instance,
 		napp:       napp,
 		subs:       make(map[int]context.CancelFunc),
@@ -557,6 +575,7 @@ func launchWithInstance(ctx context.Context, napp Napp, requestedInstance string
 		Width:       winW,
 		Height:      winH,
 		StorageJSON: StorageSnapshotJSON(napp.ID),
+		Reuse:       reuse,
 	})
 	if err != nil {
 		WindowClosed(ci.instance)
@@ -624,7 +643,7 @@ func ReopenWindow(instance string) error {
 		return fmt.Errorf("napp %s of window %s is not installed", rec.NappID, instance)
 	}
 	go func(rec windowRecord, napp Napp) {
-		ci, err := launchWithInstance(context.Background(), napp, rec.Instance)
+		ci, err := launchWithInstance(context.Background(), napp, rec.Instance, nil)
 		if err != nil {
 			log.Warn().Err(err).Str("instance", rec.Instance).Msg("could not reopen napp window")
 			return
@@ -718,10 +737,6 @@ func (ci *Instance) setActionState(req *actionRequest, replace bool) {
 type actionOptions struct {
 	Instance  string `json:"instance"`
 	Auxiliary bool   `json:"auxiliary"`
-
-	// onRouted, when set, is called once the handler window is known (and
-	// before the action reaches it): a blank window closes itself there.
-	onRouted func()
 }
 
 // RunAction fires an action from outside any napp (a launcher shortcut, a
@@ -750,17 +765,12 @@ func runNappAction(
 
 	callerName := "launcher"
 	callerID := ""
-	if caller != nil && !caller.blank {
+	if caller != nil {
 		callerName = caller.napp.Label()
 		callerID = caller.napp.ID
 	}
 
 	req := &actionRequest{name: name, payload: payload}
-	routed := func() {
-		if opts.onRouted != nil {
-			opts.onRouted()
-		}
-	}
 
 	// an explicit instance skips every choice: route it straight there
 	if opts.Instance != "" {
@@ -770,7 +780,6 @@ func runNappAction(
 		}
 		log.Info().Str("from", callerName).Str("action", name).
 			Str("instance", ci.instance).Msg("dispatching action to instance")
-		routed()
 		return dispatchTo(ctx, callerID, name, ci, req)
 	}
 
@@ -784,7 +793,6 @@ func runNappAction(
 		if len(open) == 1 {
 			log.Info().Str("from", callerName).Str("action", name).
 				Str("instance", open[0].instance).Msg("dispatching action")
-			routed()
 			return dispatchTo(ctx, callerID, name, open[0], req)
 		}
 		log.Info().Str("from", callerName).Str("action", name).
@@ -796,9 +804,17 @@ func runNappAction(
 		if opts.Auxiliary {
 			ci.auxiliary = true
 		}
-		routed()
 		return dispatchTo(ctx, callerID, name, ci, req)
 	}
+
+	// the picker window the user chose in, if they had to: it either
+	// becomes the window of the napp they picked or goes away
+	var picker *Instance
+	defer func() {
+		if picker != nil {
+			picker.Close()
+		}
+	}()
 
 	// who asked matters to the rules: the same action from another napp is
 	// another question
@@ -823,7 +839,9 @@ func runNappAction(
 			Str("napp", picked.NappID).Msg("the rules picked the handler")
 		choice = picked
 	} else {
-		picked, ok := askActionHandler(caller, name, payload, candidates, open)
+		var picked PromptOption
+		var ok bool
+		picked, picker, ok = askActionHandler(caller, name, payload, candidates, open)
 		if !ok {
 			return nil, errors.New("action handler selection cancelled")
 		}
@@ -831,23 +849,29 @@ func runNappAction(
 	}
 
 	if choice.Instance != "" {
+		// the picker has nothing left to show: it goes now, not once the
+		// window it routed to has answered
+		if picker != nil {
+			picker.Close()
+			picker = nil
+		}
 		ci := lookupInstance(choice.Instance)
 		if ci == nil {
 			return nil, fmt.Errorf("instance %q is gone", choice.Instance)
 		}
-		routed()
 		return dispatchTo(ctx, callerID, name, ci, req)
 	}
 	for _, n := range candidates {
 		if n.ID == choice.NappID {
-			ci, err := launch(ctx, n)
+			into := picker
+			picker = nil
+			ci, err := launchWithInstance(ctx, n, "", into)
 			if err != nil {
 				return nil, err
 			}
 			if opts.Auxiliary {
 				ci.auxiliary = true
 			}
-			routed()
 			return dispatchTo(ctx, callerID, name, ci, req)
 		}
 	}

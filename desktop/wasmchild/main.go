@@ -9,6 +9,11 @@
 // It talks to the launcher over stdin/stdout with the same wire messages the
 // webview shell uses (see backend.WireMsg), so the backend does not know the
 // difference.
+//
+// It is also the window the user picks an action's handler in: started with
+// no module, as a picker (see picker.go), it shows the launcher's question
+// and then either closes or becomes the window of the wasm napp that was
+// picked, in place, when the launcher sends it that napp with "become".
 package main
 
 import (
@@ -61,12 +66,9 @@ type nappMeta struct {
 
 var meta nappMeta
 
-// br is this window's bridge to the launcher: napp_call goes out through it,
-// and everything the launcher sends comes in through it.
-var br *wasmhost.Bridge
-
-func main() {
-	meta = nappMeta{
+// readMeta is what the environment says about the napp this window runs.
+func readMeta() nappMeta {
+	m := nappMeta{
 		ID:       os.Getenv("VERDANA_NAPP_ID"),
 		Name:     os.Getenv("VERDANA_NAPP_NAME"),
 		Wasm:     os.Getenv("VERDANA_NAPP_WASM"),
@@ -74,15 +76,25 @@ func main() {
 		Width:    envSize("VERDANA_WINDOW_WIDTH", wasm.DefaultWidth),
 		Height:   envSize("VERDANA_WINDOW_HEIGHT", wasm.DefaultHeight),
 	}
-	if meta.Name == "" {
-		meta.Name = meta.ID
+	if m.Name == "" {
+		m.Name = m.ID
 	}
-	if meta.Wasm == "" {
+	return m
+}
+
+// br is this window's bridge to the launcher: napp_call goes out through it,
+// and everything the launcher sends comes in through it.
+var br *wasmhost.Bridge
+
+func main() {
+	meta = readMeta()
+	picking := os.Getenv("VERDANA_PICKER") == "1"
+	if meta.Wasm == "" && !picking {
 		fail("the launcher did not say which module to run")
 	}
 
 	log.Info().Str("napp", meta.ID).Str("instance", meta.Instance).Str("wasm", meta.Wasm).
-		Msg("wasm napp window started")
+		Bool("picker", picking).Msg("wasm napp window started")
 
 	wasmhost.SetLogger(log)
 	storage, _ := os.ReadFile(os.Getenv("VERDANA_NAPP_STORAGE_FILE"))
@@ -104,20 +116,33 @@ func main() {
 	// prompts, and "close", which is the one thing about a window's lifetime
 	// that is not ours to decide. The module is in this process's memory and
 	// goes away with it, so leaving is the whole cleanup there is.
+	//
+	// "become" is the picker's one message of its own: the environment of the
+	// napp it is to run, which it takes on as if it had started with it. The
+	// window only learns of it once meta and the storage are in place.
 	stop := make(chan struct{})
-	go func() {
+	became := make(chan struct{})
+	go func(waiting bool) {
 		dec := json.NewDecoder(os.Stdin)
 		for {
 			var m wasmhost.WireMsg
 			if err := dec.Decode(&m); err != nil {
 				break
 			}
+			if m.T == "become" {
+				if waiting {
+					waiting = false
+					become(m.Params)
+					close(became)
+				}
+				continue
+			}
 			if !br.HandleWire(m) {
 				break
 			}
 		}
 		close(stop)
-	}()
+	}(picking)
 
 	go func() {
 		<-stop
@@ -127,10 +152,29 @@ func main() {
 	// Gio wants the main goroutine for itself (macOS will not draw a window
 	// from any other), so the window's loop is the one that goes elsewhere.
 	go func() {
-		runWindow()
+		runWindow(picking, became)
 		os.Exit(0)
 	}()
 	app.Main()
+}
+
+// become takes on the environment the launcher sent with "become", and the
+// storage of the napp it names.
+func become(params string) {
+	var env map[string]string
+	if err := json.Unmarshal([]byte(params), &env); err != nil {
+		fail("unreadable napp from the launcher: " + err.Error())
+	}
+	for k, v := range env {
+		os.Setenv(k, v)
+	}
+	meta = readMeta()
+	if meta.Wasm == "" {
+		fail("the launcher did not say which module to run")
+	}
+	storage, _ := os.ReadFile(os.Getenv("VERDANA_NAPP_STORAGE_FILE"))
+	br.LoadStorage(storage)
+	log.Info().Str("napp", meta.ID).Str("wasm", meta.Wasm).Msg("picker becomes the napp")
 }
 
 // fail says what went wrong where the user will see it and leaves. An empty
@@ -163,14 +207,20 @@ func envSize(key string, fallback int) int {
 var background = color.NRGBA{R: 0x14, G: 0x15, B: 0x18, A: 0xff}
 
 // runWindow is the whole window: a canvas, a module, and an event loop. No
-// chrome of its own — the napp painted every pixel there is.
-func runWindow() {
+// chrome of its own — the napp painted every pixel there is. A picker draws
+// its question instead, until it has become a napp's window.
+func runWindow(picking bool, became <-chan struct{}) {
 	w := new(app.Window)
-	w.Option(app.Title(windowTitle(meta.Name, os.Getenv("VERDANA_INSTANCE_ID"))),
-		app.Size(unit.Dp(meta.Width), unit.Dp(meta.Height)))
+	if picking {
+		w.Option(app.Title("Verdana"), app.Size(unit.Dp(meta.Width), unit.Dp(meta.Height)))
+	} else {
+		w.Option(app.Title(windowTitle(meta.Name, meta.Instance)),
+			app.Size(unit.Dp(meta.Width), unit.Dp(meta.Height)))
+	}
 
 	loaded := make(chan *wasmhost.Napp, 1)
 	failures := make(chan error, 1)
+	morphed := make(chan struct{}, 1)
 
 	// Compiling the module takes a moment and must not hold up the window, so
 	// it happens beside the event loop and the first frames just wait. The
@@ -178,6 +228,11 @@ func runWindow() {
 	// ready while nothing else is happening would sit there unseen until the
 	// user moved the mouse.
 	go func() {
+		if picking {
+			<-became
+			morphed <- struct{}{}
+			w.Invalidate()
+		}
 		n, err := wasmhost.Load(meta.Wasm, nowMS, br.Call)
 		if err != nil {
 			failures <- err
@@ -195,7 +250,13 @@ func runWindow() {
 		// input is the tag the window's pointer events are addressed to.
 		input  int
 		prompt = newPromptOverlay()
+		picker *pickerView
+		// titled is the prompt the picker's title was last set from
+		titled int
 	)
+	if picking {
+		picker = newPickerView()
+	}
 
 	// Whatever the launcher sends wakes the window, so a napp parked on an
 	// idle canvas still hears its answers on the frame right after.
@@ -209,6 +270,15 @@ func runWindow() {
 		// the frame that wakes us is the one that has to see the module.
 		// Checked before blocking instead, that frame would paint nothing
 		// and a napp that settles at once would never be asked again.
+		// The picker going away comes before the module, which is only
+		// loaded once the window took on the napp's name and size.
+		select {
+		case <-morphed:
+			picker = nil
+			w.Option(app.Title(windowTitle(meta.Name, meta.Instance)),
+				app.Size(unit.Dp(meta.Width), unit.Dp(meta.Height)))
+		default:
+		}
 		select {
 		case n = <-loaded:
 			log.Info().Msg("first canvas coming up")
@@ -328,7 +398,16 @@ func runWindow() {
 				animating = n.Animating()
 			}
 
-			if pv != nil {
+			if picker != nil && (pv == nil || len(pv.Options) > 0) {
+				if pv != nil && pv.ID != titled {
+					titled = pv.ID
+					w.Option(app.Title(pv.Title))
+				}
+				picker.Layout(gtx, pv, br.ThemeName(), func(id int, ok bool, index int) {
+					br.AnswerPrompt(id, ok, index, "once", nil)
+					w.Invalidate()
+				})
+			} else if pv != nil {
 				prompt.Layout(gtx, pv, br.ThemeName(), func(id int, ok bool, index int, scope string, skip []int) {
 					br.AnswerPrompt(id, ok, index, scope, skip)
 					w.Invalidate()
