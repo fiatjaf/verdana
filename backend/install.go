@@ -36,6 +36,20 @@ func Install(n Napp) {
 	setBusy(n.ID, true)
 	defer setBusy(n.ID, false)
 
+	// a previewed napp is already on disk: installing the same version
+	// only moves it to the installed list
+	stateMu.Lock()
+	if p, ok := state.PreviewNapps[n.ID]; ok && p.CreatedAt >= n.CreatedAt {
+		delete(state.PreviewNapps, n.ID)
+		state.InstalledNapps[n.ID] = p
+		saveState()
+		stateMu.Unlock()
+		refreshInstalled()
+		log.Info().Str("napp", n.ID).Str("name", n.Name).Msg("previewed napp installed")
+		return
+	}
+	stateMu.Unlock()
+
 	base := nappBaseDir(n.ID)
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
@@ -52,6 +66,7 @@ func Install(n Napp) {
 		state.InstalledNapps = make(map[string]Napp)
 	}
 	state.InstalledNapps[n.ID] = n
+	delete(state.PreviewNapps, n.ID)
 	saveState()
 	stateMu.Unlock()
 
@@ -59,8 +74,8 @@ func Install(n Napp) {
 	log.Info().Str("napp", n.ID).Str("name", n.Name).Msg("install complete")
 }
 
-// Uninstall removes a napp's files and forgets it. Installed-only by
-// convention: it silently no-ops for ids the launcher doesn't know.
+// Uninstall removes a napp's files and forgets it, installed or previewed. It
+// silently no-ops for ids the launcher doesn't know.
 func Uninstall(id string) {
 	log.Info().Str("napp", id).Msg("uninstalling napp")
 	setBusy(id, true)
@@ -70,6 +85,7 @@ func Uninstall(id string) {
 
 	stateMu.Lock()
 	delete(state.InstalledNapps, id)
+	delete(state.PreviewNapps, id)
 	delete(state.LaunchCounts, id)
 	state.Pinned = slices.DeleteFunc(state.Pinned, func(p string) bool { return p == id })
 	saveState()

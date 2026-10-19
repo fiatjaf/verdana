@@ -298,6 +298,16 @@ func Install(id string) {
 	}
 }
 
+// Preview opens a napp the launcher knows, by id, without installing it: it
+// goes on the previews list instead of the installed one. With checkUpdate an
+// already previewed napp is first updated if a newer version is out (cards
+// ask for it, the napp's own page already checked when it opened).
+func Preview(id string, checkUpdate bool) {
+	if !backend.PreviewByID(id, checkUpdate) {
+		backend.SetFetchErr("nothing known about napp " + id)
+	}
+}
+
 // Update applies newer event already found by update check.
 func Update(id string) { go backend.Update(id) }
 

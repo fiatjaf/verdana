@@ -18,18 +18,21 @@ import (
 // napps it found new versions for. Non-blocking: watch UpdateCheckRunning and
 // the per-napp UpdateAvailable flags in the state for the outcome.
 func CheckForUpdates() {
-	if len(state.InstalledNapps) == 0 {
-		return
-	}
-
-	// the check runs from a copy of the installed list: an install or
-	// uninstall starting meanwhile doesn't change what this round asks
+	// the check runs from a copy of the installed (and previewed) lists:
+	// an install or uninstall starting meanwhile doesn't change what this
+	// round asks
 	stateMu.Lock()
-	napps := make([]Napp, 0, len(state.InstalledNapps))
+	napps := make([]Napp, 0, len(state.InstalledNapps)+len(state.PreviewNapps))
 	for _, n := range state.InstalledNapps {
 		napps = append(napps, n)
 	}
+	for _, n := range state.PreviewNapps {
+		napps = append(napps, n)
+	}
 	stateMu.Unlock()
+	if len(napps) == 0 {
+		return
+	}
 
 	updateChecking.Store(true)
 	defer func() {
@@ -49,8 +52,9 @@ func CheckForUpdates() {
 	}
 }
 
-// CheckForUpdate looks for a newer version of one installed napp only (what
-// a napp detail page does when it opens) and flags it if one is found. It
+// CheckForUpdate looks for a newer version of one installed (or previewed)
+// napp only (what a napp detail page does when it opens) and flags it if one
+// is found. It
 // leaves the other napps' flags and UpdateCheckRunning alone. Blocks; call it
 // off the render loop.
 func CheckForUpdate(id string) {
@@ -156,7 +160,8 @@ func Update(id string) {
 // until they are all done.
 func UpdateAll() {
 	var wg sync.WaitGroup
-	for _, n := range Snapshot().Installed {
+	st := Snapshot()
+	for _, n := range append(st.Installed, st.Previews...) {
 		if n.UpdateAvailable != nil {
 			wg.Go(func() { Update(n.ID) })
 		}
@@ -189,7 +194,11 @@ func applyUpdate(current, newer Napp) {
 	// kept: updating is not reopening from zero.
 	newer.ID = current.ID
 	stateMu.Lock()
-	state.InstalledNapps[current.ID] = newer
+	if _, ok := state.PreviewNapps[current.ID]; ok {
+		state.PreviewNapps[current.ID] = newer
+	} else {
+		state.InstalledNapps[current.ID] = newer
+	}
 	saveState()
 	stateMu.Unlock()
 

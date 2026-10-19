@@ -181,11 +181,21 @@ func (n Napp) Handles(action string) bool {
 	return false
 }
 
-// InstalledNapp looks an installed napp up by id.
+// InstalledNapp looks a napp that is on disk up by id: installed or
+// previewed, which work the same everywhere but on the installed list and in
+// the choice of action handlers.
 func InstalledNapp(id string) (Napp, bool) {
 	stateMu.Lock()
 	defer stateMu.Unlock()
-	n, ok := state.InstalledNapps[id]
+	return localNappLocked(id)
+}
+
+// localNappLocked is InstalledNapp with stateMu held.
+func localNappLocked(id string) (Napp, bool) {
+	if n, ok := state.InstalledNapps[id]; ok {
+		return n, true
+	}
+	n, ok := state.PreviewNapps[id]
 	return n, ok
 }
 

@@ -96,6 +96,9 @@ class MainActivity : ComponentActivity() {
     fun fetchNapps() = Mobile.fetch()
     fun saveRelays(text: String) = Mobile.setRelays(text)
     fun install(id: String) = Mobile.install(id)
+    // checkUpdate: bring an already previewed napp up to date before opening
+    // it (everywhere but its own page, which checks when it opens)
+    fun preview(id: String, checkUpdate: Boolean = true) = Mobile.preview(id, checkUpdate)
     fun update(id: String) = Mobile.update(id)
     fun updateAll() = Mobile.updateAll()
     fun uninstall(id: String) = Mobile.uninstall(id)

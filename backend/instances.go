@@ -922,7 +922,8 @@ func handlerOption(target string, candidates []Napp, open []*Instance) (PromptOp
 }
 
 // findHandlersForAction lists the installed and dev napps declaring this action
-// plus the already-open windows among them. "view" declared by a napp matches
+// plus the already-open windows among them. Previewed napps are no candidates,
+// but their open windows that handle it are. "view" declared by a napp matches
 // every "view:<number>" dispatch.
 func findHandlersForAction(name string) ([]Napp, []*Instance) {
 	candidates := make([]Napp, 0, 2)
@@ -941,6 +942,11 @@ func findHandlersForAction(name string) ([]Napp, []*Instance) {
 	open := make([]*Instance, 0, 2)
 	for _, n := range candidates {
 		open = append(open, runningForNapp(n.ID)...)
+	}
+	for _, n := range previewNapps() {
+		if n.Handles(name) {
+			open = append(open, runningForNapp(n.ID)...)
+		}
 	}
 	return candidates, open
 }

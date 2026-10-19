@@ -130,6 +130,8 @@ data class LauncherState(
     val readAuth: Boolean = true,
     val relays: List<String>,
     val installed: List<Napp>,
+    // napps opened without installing them: on disk, but not on the installed list
+    val previews: List<Napp> = listOf(),
     val discovery: List<Napp>,
     val pinned: List<Napp> = listOf(),
     val home: List<HomeItem> = listOf(),
@@ -162,6 +164,7 @@ fun parseState(json: String): LauncherState {
         readAuth = o.optBoolean("readAuth", true),
         relays = (0 until relaysArr.length()).map { relaysArr.getString(it) },
         installed = napps("installed"),
+        previews = napps("previews"),
         discovery = napps("discovery"),
         pinned = napps("pinned"),
         home = (0 until (o.optJSONArray("home")?.length() ?: 0)).map { i ->

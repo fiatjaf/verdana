@@ -271,6 +271,7 @@ fun LauncherScreen(activity: MainActivity, st: LauncherState) {
     // keep the detail napp fresh (install/uninstall/update reflect immediately)
     val freshDetail = detailNapp?.let { d ->
         st.installed.firstOrNull { it.id == d.id }
+            ?: st.previews.firstOrNull { it.id == d.id }
             ?: st.discovery.firstOrNull { it.id == d.id }
             ?: d
     }
@@ -597,25 +598,56 @@ private fun DiscoveryTab(
             }
         }
         items(visible, key = { it.id }) { napp ->
-            val installed = st.installed.any { it.id == napp.id }
-            val busy = st.busy.contains(napp.id)
+            val b = cardButtons(st, napp)
             NappCard(
                 activity, napp, theme,
                 onDetail = { onDetail(napp) },
                 onAuthor = { onAuthor(napp.author) },
-                onLaunch = { activity.launch(napp.id) },
-                showOpen = installed,
-                primaryLabel = when {
-                    busy -> "Working…"
-                    installed -> "Uninstall"
-                    else -> "Install"
-                },
-                onPrimary = { if (installed) activity.uninstall(napp.id) else activity.install(napp.id) },
-                secondaryLabel = if (installed && napp.updateAvailable) "Update" else null,
-                onSecondary = { activity.install(napp.id) },
+                onLaunch = { onCardOpen(activity, st, napp) },
+                showOpen = b.open,
+                openLabel = b.openLabel,
+                primaryLabel = b.primary,
+                onPrimary = { onCardPrimary(activity, st, napp) },
+                secondaryLabel = b.secondary,
+                onSecondary = { onCardSecondary(activity, st, napp) },
             )
         }
     }
+}
+
+// CardButtons is what a discovery or profile card offers for a napp: Open
+// for an installed napp and Preview for any other (downloaded already or
+// not), the primary button (install/uninstall) and the second one (update,
+// when it is on disk and has one).
+private data class CardButtons(val open: Boolean, val openLabel: String, val primary: String, val secondary: String?)
+
+private fun cardButtons(st: LauncherState, napp: Napp): CardButtons {
+    val installed = st.installed.firstOrNull { it.id == napp.id }
+    val local = installed ?: st.previews.firstOrNull { it.id == napp.id }
+    val openLabel = if (installed != null) "Open" else "Preview"
+    if (st.busy.contains(napp.id)) return CardButtons(installed != null, openLabel, "Working…", null)
+    return CardButtons(
+        open = true,
+        openLabel = openLabel,
+        primary = if (installed != null) "Uninstall" else "Install",
+        secondary = if (local?.updateAvailable == true) "Update" else null,
+    )
+}
+
+// onCardOpen opens an installed napp, previews any other (the backend just
+// opens one that is already downloaded)
+private fun onCardOpen(activity: MainActivity, st: LauncherState, napp: Napp) {
+    if (st.installed.any { it.id == napp.id }) activity.launch(napp.id)
+    else if (!st.busy.contains(napp.id)) activity.preview(napp.id)
+}
+
+private fun onCardPrimary(activity: MainActivity, st: LauncherState, napp: Napp) {
+    if (st.busy.contains(napp.id)) return
+    if (st.installed.any { it.id == napp.id }) activity.uninstall(napp.id) else activity.install(napp.id)
+}
+
+private fun onCardSecondary(activity: MainActivity, st: LauncherState, napp: Napp) {
+    if (cardButtons(st, napp).secondary == "Update") activity.update(napp.id)
 }
 
 @Composable
@@ -635,6 +667,9 @@ private fun NappCard(
     onAuthor: (() -> Unit)? = null,
     onLaunch: (() -> Unit)? = null,
     showOpen: Boolean = false,
+    // openLabel is "Preview" on napps that aren't installed: the same button
+    // opens them without installing them
+    openLabel: String = "Open",
     // onPin draws the Pin/Unpin toggle for the home tab
     pinned: Boolean = false,
     onPin: (() -> Unit)? = null,
@@ -719,7 +754,7 @@ private fun NappCard(
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = theme.suggestBg, contentColor = theme.suggestFg),
                 ) {
-                    Text("Open", fontSize = 13.sp)
+                    Text(openLabel, fontSize = 13.sp)
                 }
             }
             if (secondaryLabel != null && onSecondary != null) {
@@ -1712,6 +1747,7 @@ fun NappDetailScreen(
     onOpenNapp: (Napp) -> Unit,
 ) {
     val installed = st.installed.any { it.id == napp.id }
+    val previewed = st.previews.any { it.id == napp.id }
     val pinned = st.pinned.any { it.id == napp.id }
     val busy = st.busy.contains(napp.id)
     // every time this page opens, look for a newer version of this napp only
@@ -1758,16 +1794,28 @@ fun NappDetailScreen(
         }
         Spacer(Modifier.height(12.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            if (installed) {
+            if (installed || !busy) {
+                // installed: open it; anything else: preview it (opening
+                // it without installing it, downloading it first if needed)
                 Button(
-                    onClick = { activity.launch(napp.id) },
+                    onClick = { if (installed) activity.launch(napp.id) else activity.preview(napp.id, checkUpdate = false) },
                     colors = ButtonDefaults.buttonColors(containerColor = theme.suggestBg, contentColor = theme.suggestFg),
-                ) { Text("Open") }
+                ) { Text(if (installed) "Open" else "Preview") }
                 Spacer(Modifier.width(8.dp))
+            }
+            if (installed || previewed) {
                 Button(
                     onClick = { if (pinned) activity.unpin(napp.id) else activity.pin(napp.id) },
                     colors = ButtonDefaults.buttonColors(containerColor = theme.chipBg, contentColor = theme.chipFg),
                 ) { Text(if (pinned) "Unpin" else "Pin") }
+                Spacer(Modifier.width(8.dp))
+            }
+            if (previewed && !installed && !busy) {
+                // a previewed napp has no Uninstall: this removes it
+                Button(
+                    onClick = { activity.uninstall(napp.id) },
+                    colors = ButtonDefaults.buttonColors(containerColor = theme.chipBg, contentColor = theme.chipFg),
+                ) { Text("Remove") }
                 Spacer(Modifier.width(8.dp))
             }
             Button(
@@ -1776,7 +1824,7 @@ fun NappDetailScreen(
                 colors = if (installed) ButtonDefaults.buttonColors(containerColor = theme.chipBg, contentColor = theme.chipFg)
                 else ButtonDefaults.buttonColors(),
             ) { Text(if (busy) "Working…" else if (installed) "Uninstall" else "Install") }
-            if (installed && napp.updateAvailable) {
+            if ((installed || previewed) && napp.updateAvailable) {
                 Spacer(Modifier.width(8.dp))
                 Button(onClick = { activity.update(napp.id) }) { Text("Update") }
             }
@@ -1850,18 +1898,18 @@ fun AuthorProfileDetailScreen(
                 napps == null -> Text("Fetching napps…", color = theme.muted, fontSize = 13.sp)
                 napps!!.isEmpty() -> Text("No napps found on their relays.", color = theme.muted, fontSize = 13.sp)
                 else -> napps!!.forEach { n ->
-                    val installed = st.installed.any { it.id == n.id }
-                    val busy = st.busy.contains(n.id)
+                    val b = cardButtons(st, n)
                     NappCard(
                         activity, n, theme,
                         onDetail = { onOpenNapp(n) },
                         onAuthor = null,
-                        onLaunch = { activity.launch(n.id) },
-                        showOpen = installed,
-                        primaryLabel = if (busy) "Working…" else if (installed) "Uninstall" else "Install",
-                        onPrimary = { if (installed) activity.uninstall(n.id) else activity.install(n.id) },
-                        secondaryLabel = if (installed && n.updateAvailable) "Update" else null,
-                        onSecondary = { activity.install(n.id) },
+                        onLaunch = { onCardOpen(activity, st, n) },
+                        showOpen = b.open,
+                        openLabel = b.openLabel,
+                        primaryLabel = b.primary,
+                        onPrimary = { onCardPrimary(activity, st, n) },
+                        secondaryLabel = b.secondary,
+                        onSecondary = { onCardSecondary(activity, st, n) },
                     )
                     Spacer(Modifier.height(8.dp))
                 }

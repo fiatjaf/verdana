@@ -1019,22 +1019,12 @@ func layoutDiscoveryTab(
 					updBtn = &updateBtns[row]
 				}
 				n := discovery[row]
-				label := "Install"
-				if installedSet[n.ID] {
-					label = "Uninstall"
-				}
-				if busy[n.ID] {
-					label = "Working\u2026"
-				}
-				updLabel := ""
-				if installedSet[n.ID] && n.UpdateAvailable != nil {
-					updLabel = "Update"
-				}
+				label, updLabel, canOpen := cardLabels(n, installedSet, busy)
 				var cardBtn, openBtn, authorBtn *widget.Clickable
 				if row < len(cardBtns) {
 					cardBtn = &cardBtns[row]
 				}
-				if row < len(openBtns) && installedSet[n.ID] {
+				if row < len(openBtns) && canOpen {
 					openBtn = &openBtns[row]
 				}
 				if row < len(authorBtns) {
@@ -1503,12 +1493,13 @@ func renderNappCard(
 					}
 					return layout.Inset{Left: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 						pointer.CursorPointer.Add(gtx.Ops)
-						b := material.Button(th, openBtn, "Open")
+						label := openLabel(napp)
+						b := material.Button(th, openBtn, label)
 						b.Background = currentTheme().suggestBg
 						b.Color = currentTheme().suggestFg
 						b.TextSize = unit.Sp(13)
 						b.Inset = layout.UniformInset(unit.Dp(8))
-						return withTooltip(gtx, openBtn, "Open "+napp.Label()+" in a new window", b.Layout)
+						return withTooltip(gtx, openBtn, nappButtonTip(label, napp), b.Layout)
 					})
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -1621,8 +1612,14 @@ func pinTip(pinned bool) string {
 // (or busy) button, by its label.
 func nappButtonTip(label string, napp backend.Napp) string {
 	switch label {
+	case "Open":
+		return "Open " + napp.Label() + " in a new window"
 	case "Install":
 		return "Download " + napp.Label() + " to this computer, so it can be opened"
+	case "Preview":
+		return "Try " + napp.Label() + " in a new window without adding it to the installed napps"
+	case "Remove":
+		return "Delete the previewed " + napp.Label() + " from this computer"
 	case "Uninstall":
 		return "Remove " + napp.Label() + " from this computer"
 	case "Update":

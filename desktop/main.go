@@ -344,8 +344,20 @@ func gioMain() {
 			ui.mu.Unlock()
 
 			installedSet := make(map[string]bool, len(st.Installed))
+			installedNow = installedSet
+			updatable = make(map[string]bool)
 			for _, n := range st.Installed {
 				installedSet[n.ID] = true
+				if n.UpdateAvailable != nil {
+					updatable[n.ID] = true
+				}
+			}
+			previewSet = make(map[string]bool, len(st.Previews))
+			for _, n := range st.Previews {
+				previewSet[n.ID] = true
+				if n.UpdateAvailable != nil {
+					updatable[n.ID] = true
+				}
 			}
 			busy := make(map[string]bool, len(st.Busy))
 			for _, id := range st.Busy {
@@ -645,12 +657,8 @@ func gioMain() {
 							}
 							if !acted {
 								for _, i := range vis {
-									if installedSet[st.Discovery[i].ID] && discoOpenBtns[i].Clicked(gtx) {
-										if n, ok := backend.InstalledNapp(st.Discovery[i].ID); ok {
-											backend.Launch(n)
-										} else {
-											backend.Launch(st.Discovery[i])
-										}
+									if discoOpenBtns[i].Clicked(gtx) {
+										openOrPreview(st.Discovery[i], installedSet, busy, true)
 										acted = true
 									}
 								}
@@ -670,7 +678,7 @@ func gioMain() {
 										acted = true
 									}
 									if updateBtns[i].Clicked(gtx) {
-										go backend.Install(st.Discovery[i])
+										cardSecondClicked(st.Discovery[i], installedSet, busy)
 										acted = true
 									}
 								}
@@ -694,12 +702,10 @@ func gioMain() {
 									openProfileTab(n.Author.Hex())
 								} else if detailBtns.nappEvent.Clicked(gtx) {
 									backend.ViewNappEvent(n)
-								} else if detailOpenBtn.Clicked(gtx) && installedSet[n.ID] {
-									if in, ok := backend.InstalledNapp(n.ID); ok {
-										backend.Launch(in)
-									} else {
-										backend.Launch(n)
-									}
+								} else if detailBtns.nappRemove.Clicked(gtx) && previewSet[n.ID] && !installedSet[n.ID] && !busy[n.ID] {
+									go backend.Uninstall(n.ID)
+								} else if detailOpenBtn.Clicked(gtx) {
+									openOrPreview(n, installedSet, busy, false)
 								} else if detailPrimaryBtn.Clicked(gtx) {
 									if busy[n.ID] {
 									} else if installedSet[n.ID] {
@@ -711,7 +717,7 @@ func gioMain() {
 									}
 								} else if detailUpdateBtn.Clicked(gtx) {
 									go backend.Update(n.ID)
-								} else if detailPinBtn.Clicked(gtx) && installedSet[n.ID] {
+								} else if detailPinBtn.Clicked(gtx) && (installedSet[n.ID] || previewSet[n.ID]) {
 									if backend.IsPinned(n.ID) {
 										backend.Unpin(n.ID)
 									} else {
@@ -735,12 +741,8 @@ func gioMain() {
 									if i >= len(profileOpenBtns) {
 										break
 									}
-									if installedSet[pn.ID] && profileOpenBtns[i].Clicked(gtx) {
-										if in, ok := backend.InstalledNapp(pn.ID); ok {
-											backend.Launch(in)
-										} else {
-											backend.Launch(pn)
-										}
+									if profileOpenBtns[i].Clicked(gtx) {
+										openOrPreview(pn, installedSet, busy, true)
 										pacted = true
 									}
 								}
@@ -761,7 +763,7 @@ func gioMain() {
 											pacted = true
 										}
 										if i < len(profileUpdateBtns) && profileUpdateBtns[i].Clicked(gtx) {
-											go backend.Install(pn)
+											cardSecondClicked(pn, installedSet, busy)
 											pacted = true
 										}
 									}

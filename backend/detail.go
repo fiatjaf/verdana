@@ -117,6 +117,9 @@ func FetchAuthorNapps(pubkeyHex string) []Napp {
 // or dev — by id, so a detail tab can refresh its copy every frame.
 func LookupNapp(id string) (Napp, bool) {
 	if n, ok := InstalledNapp(id); ok {
+		if newVersion, ok := updateSet.Load().Load(id); ok {
+			n.UpdateAvailable = &newVersion
+		}
 		return n, true
 	}
 	if n, ok := DiscoveredNapp(id); ok {

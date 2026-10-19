@@ -63,6 +63,11 @@ type State struct {
 	Installed []Napp `json:"installed"`
 	Discovery []Napp `json:"discovery"`
 
+	// Previews are the napps opened without installing them (see
+	// preview.go), by name: on disk like the installed ones, but kept
+	// apart from them.
+	Previews []Napp `json:"previews"`
+
 	// Pinned are the installed napps the user put on the home tab, in the
 	// order they were pinned.
 	Pinned []Napp `json:"pinned"`
@@ -210,9 +215,18 @@ func Snapshot() State {
 	s.ManagedWindows = ManagedWindows()
 	s.Bundles = bundles()
 	s.UpdateCheckRunning = updateChecking.Load()
+	s.Previews = previewNapps()
 	for i := range s.Installed {
 		if newVersion, ok := updateSet.Load().Load(s.Installed[i].ID); ok {
 			s.Installed[i].UpdateAvailable = &newVersion
+		}
+	}
+	for i := range s.Previews {
+		if newVersion, ok := updateSet.Load().Load(s.Previews[i].ID); ok {
+			s.Previews[i].UpdateAvailable = &newVersion
+		}
+		if s.Previews[i].AuthorName == "" {
+			s.Previews[i].AuthorName = s.Previews[i].AuthorShortName()
 		}
 	}
 	// napps with an update available float to the top of the installed
@@ -231,7 +245,10 @@ func Snapshot() State {
 		}
 	}
 
-	byID := make(map[string]Napp, len(s.Installed))
+	byID := make(map[string]Napp, len(s.Installed)+len(s.Previews))
+	for _, n := range s.Previews {
+		byID[n.ID] = n
+	}
 	for _, n := range s.Installed {
 		byID[n.ID] = n
 	}

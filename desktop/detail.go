@@ -45,6 +45,61 @@ var detailBtns struct {
 	selfProfile widget.Clickable // the header's avatar and name
 	profileView widget.Clickable // a profile tab's avatar and name
 	nappEvent   widget.Clickable // a napp tab's "Event" button
+	nappRemove  widget.Clickable // a napp tab's "Remove" button (previews)
+}
+
+// installedNow and previewSet hold the ids of the installed and of the
+// previewed napps, updatable those of either with a newer version out, all
+// refreshed every frame from the state: cards and the napp page show a
+// previewed napp as on disk but not installed.
+var installedNow, previewSet, updatable map[string]bool
+
+// openLabel is what the Open button of a napp says: "Open" for an installed
+// napp, "Preview" for any other (downloaded already or not), which opens it
+// without installing it.
+func openLabel(n backend.Napp) string {
+	if installedNow[n.ID] {
+		return "Open"
+	}
+	return "Preview"
+}
+
+// openOrPreview runs the Open button (see openLabel). checkUpdate is for the
+// buttons outside the napp's own page, which checks for updates on its own.
+func openOrPreview(n backend.Napp, installedSet, busy map[string]bool, checkUpdate bool) {
+	if in, ok := backend.InstalledNapp(n.ID); ok && installedSet[n.ID] {
+		backend.Launch(in)
+	} else if !busy[n.ID] {
+		go backend.Preview(n, checkUpdate)
+	}
+}
+
+// cardLabels says what a discovery or profile card offers for a napp: the
+// primary button (install/uninstall), the second one (update, when the napp
+// is on disk and has one) and whether the Open/Preview button shows.
+func cardLabels(n backend.Napp, installedSet, busy map[string]bool) (primary, second string, open bool) {
+	local := installedSet[n.ID] || previewSet[n.ID]
+	primary = "Install"
+	if installedSet[n.ID] {
+		primary = "Uninstall"
+	}
+	if busy[n.ID] {
+		return "Working…", "", installedSet[n.ID]
+	}
+	if local && updatable[n.ID] {
+		second = "Update"
+	}
+	return primary, second, true
+}
+
+// cardSecondClicked runs a card's second button (see cardLabels).
+func cardSecondClicked(n backend.Napp, installedSet, busy map[string]bool) {
+	if busy[n.ID] {
+		return
+	}
+	if _, second, _ := cardLabels(n, installedSet, busy); second == "Update" {
+		go backend.Update(n.ID)
+	}
 }
 
 func openNappTab(n backend.Napp) {
@@ -219,6 +274,8 @@ func layoutNappDetail(
 		return l.Layout(gtx)
 	}
 	installed := installedSet[n.ID]
+	previewed := previewSet[n.ID]
+	local := installed || previewed
 	working := busy[n.ID]
 	primaryLabel := "Install"
 	if installed {
@@ -300,23 +357,35 @@ func layoutNappDetail(
 		return layout.Inset{Top: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					if !installed || openBtn == nil {
+					if (!installed && working) || openBtn == nil {
 						return layout.Dimensions{}
 					}
 					pointer.CursorPointer.Add(gtx.Ops)
-					b := material.Button(th, openBtn, "Open")
+					label := openLabel(n)
+					b := material.Button(th, openBtn, label)
 					b.Background = currentTheme().suggestBg
 					b.Color = currentTheme().suggestFg
-					return withTooltip(gtx, openBtn, "Open "+n.Label()+" in a new window", b.Layout)
+					return layout.Inset{Right: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						return withTooltip(gtx, openBtn, nappButtonTip(label, n), b.Layout)
+					})
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					if !installed || openBtn == nil {
+					// a previewed napp has no Uninstall: this removes it
+					if !previewed || installed || working {
 						return layout.Dimensions{}
 					}
-					return layout.Spacer{Width: unit.Dp(8)}.Layout(gtx)
+					label := "Remove"
+					pointer.CursorPointer.Add(gtx.Ops)
+					btn := &detailBtns.nappRemove
+					b := material.Button(th, btn, label)
+					b.Background = currentTheme().chipBg
+					b.Color = currentTheme().chipFg
+					return layout.Inset{Right: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						return withTooltip(gtx, btn, nappButtonTip(label, n), b.Layout)
+					})
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					if !installed || pinBtn == nil {
+					if !local || pinBtn == nil {
 						return layout.Dimensions{}
 					}
 					pointer.CursorPointer.Add(gtx.Ops)
@@ -531,25 +600,15 @@ func layoutProfileDetail(
 		if i < len(cardBtns) {
 			cardBtn = &cardBtns[i]
 		}
-		if i < len(openBtns) && installedSet[n.ID] {
+		label, updLabel, canOpen := cardLabels(n, installedSet, busy)
+		if i < len(openBtns) && canOpen {
 			openBtn = &openBtns[i]
 		}
 		if i < len(actionBtns) {
 			actBtn = &actionBtns[i]
 		}
-		if i < len(updateBtns) && installedSet[n.ID] && n.UpdateAvailable != nil {
+		if i < len(updateBtns) && updLabel != "" {
 			updBtn = &updateBtns[i]
-		}
-		label := "Install"
-		if installedSet[n.ID] {
-			label = "Uninstall"
-		}
-		if busy[n.ID] {
-			label = "Working…"
-		}
-		updLabel := ""
-		if updBtn != nil {
-			updLabel = "Update"
 		}
 		// inside a profile the author row is the profile itself:
 		// no nested author button

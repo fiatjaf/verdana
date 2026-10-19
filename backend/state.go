@@ -20,6 +20,12 @@ type AppState struct {
 	Relays         []string        `json:"relays"`
 	InstalledNapps map[string]Napp `json:"installed_napps"`
 
+	// PreviewNapps are napps the user opened without installing them (see
+	// preview.go). They are on disk and behave like installed ones, except
+	// they stay off the installed list and are only offered as handlers of
+	// an action while they have a window open.
+	PreviewNapps map[string]Napp `json:"preview_napps,omitempty"`
+
 	// LaunchCounts records how many times the user started a napp from
 	// the launcher's Open buttons, so the installed list can be shown
 	// most-opened first. Launches that happen because another napp
@@ -92,6 +98,9 @@ func loadState() {
 	if state.InstalledNapps == nil {
 		state.InstalledNapps = make(map[string]Napp)
 	}
+	if state.PreviewNapps == nil {
+		state.PreviewNapps = make(map[string]Napp)
+	}
 	if state.LaunchCounts == nil {
 		state.LaunchCounts = make(map[string]int)
 	}
@@ -104,13 +113,13 @@ func loadState() {
 	}
 	state.LastLaunched = nil
 	importShortcutFiles()
-	// pins only ever name installed napps and existing bundles, so a
+	// pins only ever name napps on disk and existing bundles, so a
 	// position on the home tab is a position in this list (see MovePin)
 	state.Pinned = slices.DeleteFunc(state.Pinned, func(id string) bool {
 		if name, ok := strings.CutPrefix(id, bundlePinPrefix); ok {
 			return bundleIndexLocked(name) < 0
 		}
-		_, ok := state.InstalledNapps[id]
+		_, ok := localNappLocked(id)
 		return !ok
 	})
 	if state.Rules == nil {
@@ -211,7 +220,7 @@ func installedNapps() []Napp {
 // because the user didn't pick that napp from the launcher.
 func markLaunched(id string) {
 	stateMu.Lock()
-	if _, ok := state.InstalledNapps[id]; ok {
+	if _, ok := localNappLocked(id); ok {
 		if state.LaunchCounts == nil {
 			state.LaunchCounts = make(map[string]int)
 		}
@@ -223,10 +232,11 @@ func markLaunched(id string) {
 
 // ─── pinned napps ────────────────────────────────────────────────
 
-// Pin puts an installed napp on the home tab, after the ones pinned before.
+// Pin puts an installed (or previewed) napp on the home tab, after the ones
+// pinned before.
 func Pin(id string) {
 	stateMu.Lock()
-	if _, ok := state.InstalledNapps[id]; !ok || slices.Contains(state.Pinned, id) {
+	if _, ok := localNappLocked(id); !ok || slices.Contains(state.Pinned, id) {
 		stateMu.Unlock()
 		return
 	}
@@ -283,7 +293,8 @@ func pinnedIDs() []string {
 	return append([]string(nil), state.Pinned...)
 }
 
-// IsInstalled says whether a napp is on disk.
+// IsInstalled says whether a napp is installed (a previewed one isn't, see
+// IsPreview).
 func IsInstalled(id string) bool {
 	stateMu.Lock()
 	defer stateMu.Unlock()
