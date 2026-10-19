@@ -54,6 +54,7 @@ func openNappTab(n backend.Napp) {
 	}
 	extraTabState = &extraTab{kind: "napp", title: truncate(n.Label(), 18), nappID: n.ID, napp: n, pubkey: pubkey}
 	ensureProfile(pubkey)
+	go backend.CheckForUpdate(n.ID)
 	setTab(tabExtra)
 }
 

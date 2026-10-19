@@ -1714,6 +1714,8 @@ fun NappDetailScreen(
     val installed = st.installed.any { it.id == napp.id }
     val pinned = st.pinned.any { it.id == napp.id }
     val busy = st.busy.contains(napp.id)
+    // every time this page opens, look for a newer version of this napp only
+    LaunchedEffect(napp.id) { activity.checkForUpdate(napp.id) }
     Column(
         Modifier
             .fillMaxSize()

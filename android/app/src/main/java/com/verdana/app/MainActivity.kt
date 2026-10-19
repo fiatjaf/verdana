@@ -176,6 +176,7 @@ class MainActivity : ComponentActivity() {
 
     private fun toast(msg: String) = android.widget.Toast.makeText(this, msg, android.widget.Toast.LENGTH_LONG).show()
     fun checkForUpdates() = Mobile.checkForUpdates()
+    fun checkForUpdate(id: String) = Mobile.checkForUpdate(id)
     fun toggleTheme() = VerdanaHost.toggleTheme()
     fun setReadAuth(on: Boolean) = Mobile.setReadAuth(on)
 

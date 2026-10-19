@@ -49,6 +49,23 @@ func CheckForUpdates() {
 	}
 }
 
+// CheckForUpdate looks for a newer version of one installed napp only (what
+// a napp detail page does when it opens) and flags it if one is found. It
+// leaves the other napps' flags and UpdateCheckRunning alone. Blocks; call it
+// off the render loop.
+func CheckForUpdate(id string) {
+	n, ok := InstalledNapp(id)
+	if !ok {
+		return
+	}
+
+	if upd, ok := checkAllUpdates([]Napp{n})[id]; ok {
+		log.Info().Str("id", id).Msg("update check found a new version")
+		updateSet.Load().Store(id, upd)
+		notifyState()
+	}
+}
+
 // checkAllUpdates asks the relays about every napp at once (one filter per
 // relay set, so the outbox queries stay separate from the discovery query),
 // then refreshes the update cache. Returns whether every relay answered.

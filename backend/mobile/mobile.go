@@ -309,6 +309,9 @@ func UpdateAll() { go backend.UpdateAll() }
 // found updates for (watch the state's updateCheckRunning/updateAvailable).
 func CheckForUpdates() { go backend.CheckForUpdates() }
 
+// CheckForUpdate looks for a newer version of one installed napp only.
+func CheckForUpdate(id string) { go backend.CheckForUpdate(id) }
+
 // Uninstall removes an installed napp.
 func Uninstall(id string) { go backend.Uninstall(id) }
 
