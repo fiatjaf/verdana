@@ -85,6 +85,13 @@ var (
 	// with the window's other widgets).
 	filterEd          widget.Editor
 	installedFilterEd widget.Editor
+
+	// the napps tab shows either what the discovery relays have or what the
+	// people the user follows published (contactsMode), switched by these.
+	contactsMode       bool
+	modeDiscoBtn       widget.Clickable
+	modeContactsBtn    widget.Clickable
+	contactsRefreshBtn widget.Clickable
 )
 
 const APP_TITLE = "Verdana"
@@ -214,13 +221,22 @@ func setBundleEdit(edit *bundleEditState) {
 	}
 }
 
-// discoveryFilter returns the indices of st.Discovery that pass the filter
+// discoNapps is the list the napps tab is showing: the discovery relays' or
+// the contacts'.
+func discoNapps(st backend.State) []backend.Napp {
+	if contactsMode {
+		return st.Contacts
+	}
+	return st.Discovery
+}
+
+// discoveryFilter returns the indices of discoNapps that pass the filter
 // editor's text: a case-insensitive substring on name, description, author
 // pubkey and author name. Clicks and rendering both walk this same index
 // list, so buttons stay glued to their napp no matter what the filter hides.
 func discoveryFilter(st backend.State) []int {
 	q := strings.ToLower(strings.TrimSpace(filterEd.Text()))
-	return nappFilter(st.Discovery, q)
+	return nappFilter(discoNapps(st), q)
 }
 
 // installedFilter is the same thing for the installed list.
@@ -459,6 +475,20 @@ func gioMain() {
 							backend.SetRelays(parseRelays(relaysEd.Text()))
 							go backend.Discover()
 						}
+						if modeDiscoBtn.Clicked(gtx) {
+							contactsMode = false
+						}
+						if modeContactsBtn.Clicked(gtx) {
+							contactsMode = true
+						}
+						if contactsMode && tab == tabDiscovery {
+							// fetched the first time the mode is looked at
+							backend.EnsureContacts()
+						}
+						if contactsRefreshBtn.Clicked(gtx) && !st.ContactsFetching {
+							go backend.DiscoverContacts()
+						}
+						disco := discoNapps(st)
 						for len(cardBtns) < len(st.Installed) {
 							cardBtns = append(cardBtns, widget.Clickable{})
 						}
@@ -477,19 +507,19 @@ func gioMain() {
 						for len(installedPinBtns) < len(st.Installed) {
 							installedPinBtns = append(installedPinBtns, widget.Clickable{})
 						}
-						for len(actionBtns) < len(st.Discovery) {
+						for len(actionBtns) < len(disco) {
 							actionBtns = append(actionBtns, widget.Clickable{})
 						}
-						for len(updateBtns) < len(st.Discovery) {
+						for len(updateBtns) < len(disco) {
 							updateBtns = append(updateBtns, widget.Clickable{})
 						}
-						for len(discoCardBtns) < len(st.Discovery) {
+						for len(discoCardBtns) < len(disco) {
 							discoCardBtns = append(discoCardBtns, widget.Clickable{})
 						}
-						for len(discoOpenBtns) < len(st.Discovery) {
+						for len(discoOpenBtns) < len(disco) {
 							discoOpenBtns = append(discoOpenBtns, widget.Clickable{})
 						}
-						for len(discoAuthorBtns) < len(st.Discovery) {
+						for len(discoAuthorBtns) < len(disco) {
 							discoAuthorBtns = append(discoAuthorBtns, widget.Clickable{})
 						}
 						for len(devOpenBtns) < len(st.Dev) {
@@ -652,14 +682,14 @@ func gioMain() {
 							acted := false
 							for _, i := range vis {
 								if discoAuthorBtns[i].Clicked(gtx) {
-									openProfileTab(st.Discovery[i].Author.Hex())
+									openProfileTab(disco[i].Author.Hex())
 									acted = true
 								}
 							}
 							if !acted {
 								for _, i := range vis {
 									if discoOpenBtns[i].Clicked(gtx) {
-										openOrPreview(st.Discovery[i], installedSet, busy, true)
+										openOrPreview(disco[i], installedSet, busy, true)
 										acted = true
 									}
 								}
@@ -667,7 +697,7 @@ func gioMain() {
 							if !acted {
 								for _, i := range vis {
 									if actionBtns[i].Clicked(gtx) {
-										n := st.Discovery[i]
+										n := disco[i]
 										if busy[n.ID] {
 											continue
 										}
@@ -679,7 +709,7 @@ func gioMain() {
 										acted = true
 									}
 									if updateBtns[i].Clicked(gtx) {
-										cardSecondClicked(st.Discovery[i], installedSet, busy)
+										cardSecondClicked(disco[i], installedSet, busy)
 										acted = true
 									}
 								}
@@ -687,7 +717,7 @@ func gioMain() {
 							if !acted {
 								for _, i := range vis {
 									if discoCardBtns[i].Clicked(gtx) {
-										openNappTab(st.Discovery[i])
+										openNappTab(disco[i])
 									}
 								}
 							}

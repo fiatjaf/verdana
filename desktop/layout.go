@@ -413,7 +413,7 @@ func layoutMain(
 			}
 			if tab == 2 {
 				return layoutDiscoveryTab(gtx, th, discoveryList, relaysEd, filterEd, fetchBtn, actionBtns,
-					updateBtns, discoCardBtns, discoOpenBtns, discoAuthorBtns, vis, st.FetchErr, st.Fetching, st.Discovery, installedSet, busy)
+					updateBtns, discoCardBtns, discoOpenBtns, discoAuthorBtns, vis, st, installedSet, busy)
 			}
 			if tab == 4 && extra != nil {
 				if extra.kind == "napp" {
@@ -475,7 +475,7 @@ func layoutTabs(
 		}),
 		layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return tabBtn(gtx, discoBtn, "Discovery", "Find napps published on the relays and install them", tab == 2)
+			return tabBtn(gtx, discoBtn, "Napps", "Find napps published on the relays or by the people you follow, and install them", tab == 2)
 		}),
 	}
 	// devBtn is nil outside dev builds: no dev tab there
@@ -846,7 +846,7 @@ func layoutNappsTab(
 		pinnedSet[n.ID] = true
 	}
 	if len(st.Installed) == 0 {
-		l := material.Body2(th, "No napps installed yet. Find some in the Discovery tab.")
+		l := material.Body2(th, "No napps installed yet. Find some in the Napps tab.")
 		l.Color = currentTheme().muted
 		return l.Layout(gtx)
 	}
@@ -953,21 +953,66 @@ func layoutDiscoveryTab(
 	openBtns,
 	authorBtns []widget.Clickable,
 	vis []int,
-	fetchErr string,
-	fetching bool,
-	discovery []backend.Napp,
+	st backend.State,
 	installedSet,
 	busy map[string]bool,
 ) layout.Dimensions {
+	discovery := discoNapps(st)
+	fetchErr, fetching := st.FetchErr, st.Fetching
+	if contactsMode {
+		fetchErr, fetching = "", st.ContactsFetching
+	}
+	modeBtn := func(gtx layout.Context, btn *widget.Clickable, label, tip string, active bool) layout.Dimensions {
+		pointer.CursorPointer.Add(gtx.Ops)
+		b := material.Button(th, btn, label)
+		b.TextSize = unit.Sp(13)
+		b.Inset = layout.Inset{Top: unit.Dp(6), Bottom: unit.Dp(6), Left: unit.Dp(12), Right: unit.Dp(12)}
+		if active {
+			b.Background = th.Palette.ContrastBg
+		} else {
+			b.Background = currentTheme().chipBg
+			b.Color = currentTheme().chipFg
+		}
+		return withTooltip(gtx, btn, tip, b.Layout)
+	}
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-		// the filter box comes first, narrowing the entries below by name,
-		// author, author name or description.
+		// discovery relays or contacts
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return modeBtn(gtx, &modeDiscoBtn, "Discovery", "Napps published on the relays below", !contactsMode)
+				}),
+				layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return modeBtn(gtx, &modeContactsBtn, "Contacts", "Napps published by the people you follow, from their own relays", contactsMode)
+				}),
+			)
+		}),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
+		// the filter box, narrowing the entries below by name, author,
+		// author name or description.
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return editorBox(gtx, th, filterEd, "filter by name, author or description")
 		}),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
-		// then the relays editor
+		// contacts mode only gets a refresh button
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if !contactsMode {
+				return layout.Dimensions{}
+			}
+			pointer.CursorPointer.Add(gtx.Ops)
+			label := "Refresh"
+			if fetching {
+				label = "Fetching\u2026"
+			}
+			return withTooltip(gtx, &contactsRefreshBtn, "Ask your contacts' relays again for the napps they published",
+				material.Button(th, &contactsRefreshBtn, label).Layout)
+		}),
+		// discovery mode gets the relays editor
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if contactsMode {
+				return layout.Dimensions{}
+			}
 			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					l := emph(material.Body2(th, "Relays (one per line)"))
@@ -980,8 +1025,16 @@ func layoutDiscoveryTab(
 				}),
 			)
 		}),
-		layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if contactsMode {
+				return layout.Dimensions{}
+			}
+			return layout.Spacer{Height: unit.Dp(8)}.Layout(gtx)
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if contactsMode {
+				return layout.Dimensions{}
+			}
 			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					pointer.CursorPointer.Add(gtx.Ops)
@@ -1006,8 +1059,14 @@ func layoutDiscoveryTab(
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			if len(vis) == 0 {
 				msg := "No napps yet. Pick some good relays and click \"Fetch napps\"."
+				if contactsMode {
+					msg = "None of the people you follow published a napp."
+				}
 				if fetching {
 					msg = "Searching relays\u2026"
+					if contactsMode {
+						msg = "Searching your contacts' relays\u2026"
+					}
 				}
 				if len(discovery) > 0 {
 					msg = "Nothing matches the filter."

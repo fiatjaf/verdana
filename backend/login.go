@@ -181,6 +181,7 @@ func Logout() {
 	userKeyer = nil
 	userPubkey = nostr.PubKey{}
 	applyReadAuth()
+	resetContacts()
 
 	stateMu.Lock()
 	state.Login = ""

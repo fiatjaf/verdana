@@ -230,7 +230,7 @@ fun LoginScreen(activity: MainActivity, st: LauncherState) {
 @Composable
 fun LauncherScreen(activity: MainActivity, st: LauncherState) {
     val theme = themeByName(st.theme)
-    // tabs: 0 home, 1 windows, 2 installed, 3 discovery. Home is where the
+    // tabs: 0 home, 1 windows, 2 installed, 3 napps. Home is where the
     // launcher opens as long as anything is pinned there.
     var tab by remember {
         mutableStateOf(
@@ -246,6 +246,8 @@ fun LauncherScreen(activity: MainActivity, st: LauncherState) {
     var bundleEdit by remember { mutableStateOf<BundleEdit?>(null) }
     var relaysEd by remember(st.relays.hashCode()) { mutableStateOf(st.relays.joinToString("\n")) }
     var discoveryFilter by remember { mutableStateOf("") }
+    // the napps tab lists the discovery relays' napps or the contacts' ones
+    var contactsMode by remember { mutableStateOf(false) }
     var installedFilter by remember { mutableStateOf("") }
     // ephemeral detail tabs: vanish the moment any other tab is picked
     var detailNapp by remember { mutableStateOf<Napp?>(null) }
@@ -286,6 +288,7 @@ fun LauncherScreen(activity: MainActivity, st: LauncherState) {
         st.installed.firstOrNull { it.id == d.id }
             ?: st.previews.firstOrNull { it.id == d.id }
             ?: st.discovery.firstOrNull { it.id == d.id }
+            ?: st.contacts.firstOrNull { it.id == d.id }
             ?: d
     }
 
@@ -299,7 +302,7 @@ fun LauncherScreen(activity: MainActivity, st: LauncherState) {
                 Spacer(Modifier.width(8.dp))
                 TabChip("Installed", tab == 2 && detailNapp == null && detailProfile == null, theme) { pickTab(2) }
                 Spacer(Modifier.width(8.dp))
-                TabChip("Discovery", tab == 3 && detailNapp == null && detailProfile == null, theme) { pickTab(3) }
+                TabChip("Napps", tab == 3 && detailNapp == null && detailProfile == null, theme) { pickTab(3) }
                 if (freshDetail != null) {
                     Spacer(Modifier.width(8.dp))
                     TabChip(freshDetail.name.ifBlank { freshDetail.id }.take(18), true, theme) { }
@@ -326,7 +329,8 @@ fun LauncherScreen(activity: MainActivity, st: LauncherState) {
                 tab == 1 -> WindowsTab(activity, st, theme, bundleEdit, { bundleEdit = it })
                 tab == 2 -> InstalledTab(activity, st, theme, installedFilter, { installedFilter = it },
                     onDetail = { openNapp(it) }, onAuthor = { openProfile(it) })
-                else -> DiscoveryTab(activity, st, theme, relaysEd, { relaysEd = it }, discoveryFilter, { discoveryFilter = it },
+                else -> DiscoveryTab(activity, st, theme, contactsMode, { contactsMode = it },
+                    relaysEd, { relaysEd = it }, discoveryFilter, { discoveryFilter = it },
                     onDetail = { openNapp(it) }, onAuthor = { openProfile(it) })
             }
         }
@@ -569,7 +573,7 @@ private fun InstalledTab(activity: MainActivity, st: LauncherState, theme: Theme
             Spacer(Modifier.height(6.dp))
         }
         if (st.installed.isEmpty()) {
-            Text("No napps installed yet. Find some in Discovery.", color = theme.muted)
+            Text("No napps installed yet. Find some in the Napps tab.", color = theme.muted)
             return
         }
         if (visible.isEmpty()) {
@@ -621,6 +625,8 @@ private fun DiscoveryTab(
     activity: MainActivity,
     st: LauncherState,
     theme: Theme,
+    contactsMode: Boolean,
+    setContactsMode: (Boolean) -> Unit,
     relaysEd: String,
     setRelaysEd: (String) -> Unit,
     filter: String,
@@ -628,13 +634,25 @@ private fun DiscoveryTab(
     onDetail: (Napp) -> Unit,
     onAuthor: (String) -> Unit,
 ) {
+    // the contacts' napps are only fetched once that mode is looked at
+    LaunchedEffect(contactsMode, st.pubkey) {
+        if (contactsMode) activity.fetchContacts()
+    }
+    val list = if (contactsMode) st.contacts else st.discovery
+    val fetching = if (contactsMode) st.contactsFetching else st.fetching
     // the filter matches on name, description, author pubkey and author
     // name (see matchesQuery); applied to the snapshot's list, cards stay
     // keyed by id either way
-    val visible = st.discovery.matching(filter)
+    val visible = list.matching(filter)
     LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
-            // the filter comes first
+            // discovery relays or contacts
+            Row {
+                TabChip("Discovery", !contactsMode, theme) { setContactsMode(false) }
+                Spacer(Modifier.width(6.dp))
+                TabChip("Contacts", contactsMode, theme) { setContactsMode(true) }
+            }
+            Spacer(Modifier.height(10.dp))
             OutlinedTextField(
                 value = filter,
                 onValueChange = setFilter,
@@ -644,40 +662,49 @@ private fun DiscoveryTab(
                 singleLine = true,
             )
             Spacer(Modifier.height(10.dp))
-            Column {
-                Text("Relays (one per line)", color = theme.subtle, fontSize = 13.sp)
-                Spacer(Modifier.height(6.dp))
-                OutlinedTextField(
-                    value = relaysEd,
-                    onValueChange = setRelaysEd,
-                    modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("relay.example.com", color = theme.inputHint) },
-                    colors = outlinedColors(theme),
-                    minLines = 2,
-                )
-            }
-            Spacer(Modifier.height(8.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Button(
-                    onClick = {
-                        activity.saveRelays(relaysEd)
-                        activity.fetchNapps()
-                    },
-                    enabled = !st.fetching,
-                ) {
-                    Text(if (st.fetching) "Fetching…" else "Fetch napps")
+            if (contactsMode) {
+                Button(onClick = { activity.refetchContacts() }, enabled = !fetching) {
+                    Text(if (fetching) "Fetching…" else "Refresh")
                 }
-                if (st.fetchErr.isNotBlank()) {
-                    Spacer(Modifier.width(12.dp))
-                    Text(st.fetchErr, color = theme.danger, fontSize = 12.sp, modifier = Modifier.weight(1f))
+            } else {
+                Column {
+                    Text("Relays (one per line)", color = theme.subtle, fontSize = 13.sp)
+                    Spacer(Modifier.height(6.dp))
+                    OutlinedTextField(
+                        value = relaysEd,
+                        onValueChange = setRelaysEd,
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("relay.example.com", color = theme.inputHint) },
+                        colors = outlinedColors(theme),
+                        minLines = 2,
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Button(
+                        onClick = {
+                            activity.saveRelays(relaysEd)
+                            activity.fetchNapps()
+                        },
+                        enabled = !st.fetching,
+                    ) {
+                        Text(if (st.fetching) "Fetching…" else "Fetch napps")
+                    }
+                    if (st.fetchErr.isNotBlank()) {
+                        Spacer(Modifier.width(12.dp))
+                        Text(st.fetchErr, color = theme.danger, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                    }
                 }
             }
             Spacer(Modifier.height(12.dp))
             if (visible.isEmpty()) {
                 Text(
                     when {
-                        st.fetching -> "Searching relays…"
-                        st.discovery.isNotEmpty() -> "Nothing matches the filter."                        else -> "No napps yet. Tap \"Fetch napps\"."
+                        fetching && contactsMode -> "Searching your contacts' relays…"
+                        fetching -> "Searching relays…"
+                        list.isNotEmpty() -> "Nothing matches the filter."
+                        contactsMode -> "None of the people you follow published a napp."
+                        else -> "No napps yet. Tap \"Fetch napps\"."
                     },
                     color = theme.muted,
                 )

@@ -7,6 +7,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"fiatjaf.com/nostr"
 	"github.com/puzpuzpuz/xsync/v3"
 )
 
@@ -62,6 +63,12 @@ type State struct {
 	// ones not installed yet first — see sortDiscovery.
 	Installed []Napp `json:"installed"`
 	Discovery []Napp `json:"discovery"`
+
+	// Contacts are the napps published by the people the user follows,
+	// fetched from each one's write relays (see contacts.go), sorted like
+	// Discovery. ContactsFetching is true while that is running.
+	Contacts         []Napp `json:"contacts"`
+	ContactsFetching bool   `json:"contactsFetching"`
 
 	// Previews are the napps opened without installing them (see
 	// preview.go), by name: on disk like the installed ones, but kept
@@ -150,6 +157,11 @@ type launcherState struct {
 	devLoading bool
 	busy       map[string]bool
 
+	// contacts is the contacts mode's list, fetched for contactsFor.
+	contacts         []Napp
+	contactsFor      nostr.PubKey
+	contactsFetching bool
+
 	// changed is closed and replaced on every phase change, so a waiter can
 	// block until the launcher is out of PhaseLoading.
 	changed chan struct{}
@@ -188,22 +200,24 @@ func Snapshot() State {
 
 	ls.mu.Lock()
 	s := State{
-		Phase:          ls.phase,
-		LoginErr:       ls.loginErr,
-		LoginStatus:    ls.loginStat,
-		ProfileName:    ls.profName,
-		ProfilePicture: ls.profPic,
-		Pubkey:         ls.pubkey,
-		FetchErr:       ls.fetchErr,
-		Fetching:       ls.fetching,
-		Theme:          name,
-		ReadAuth:       ReadAuth(),
-		Installed:      append([]Napp(nil), ls.installed...),
-		Discovery:      append([]Napp(nil), ls.discovery...),
-		Dev:            append([]Napp(nil), ls.dev...),
-		DevErr:         ls.devErr,
-		DevLoading:     ls.devLoading,
-		Busy:           make([]string, 0, len(ls.busy)),
+		Phase:            ls.phase,
+		LoginErr:         ls.loginErr,
+		LoginStatus:      ls.loginStat,
+		ProfileName:      ls.profName,
+		ProfilePicture:   ls.profPic,
+		Pubkey:           ls.pubkey,
+		FetchErr:         ls.fetchErr,
+		Fetching:         ls.fetching,
+		Theme:            name,
+		ReadAuth:         ReadAuth(),
+		Installed:        append([]Napp(nil), ls.installed...),
+		Discovery:        append([]Napp(nil), ls.discovery...),
+		Contacts:         append([]Napp(nil), ls.contacts...),
+		ContactsFetching: ls.contactsFetching,
+		Dev:              append([]Napp(nil), ls.dev...),
+		DevErr:           ls.devErr,
+		DevLoading:       ls.devLoading,
+		Busy:             make([]string, 0, len(ls.busy)),
 	}
 	for id := range ls.busy {
 		s.Busy = append(s.Busy, id)
@@ -274,6 +288,11 @@ func Snapshot() State {
 	for i := range s.Discovery {
 		if s.Discovery[i].AuthorName == "" {
 			s.Discovery[i].AuthorName = s.Discovery[i].AuthorShortName()
+		}
+	}
+	for i := range s.Contacts {
+		if s.Contacts[i].AuthorName == "" {
+			s.Contacts[i].AuthorName = s.Contacts[i].AuthorShortName()
 		}
 	}
 	for i := range s.Dev {
@@ -407,7 +426,7 @@ func setDiscovery(list []Napp) {
 }
 
 // sortDiscovery floats the napps the user hasn't installed to the top of the
-// discovery list: that tab exists to show what's missing, and the ones already
+// discovery list (and of the contacts one): that tab exists to show what's missing, and the ones already
 // on disk are the ones they came here without. The ones on disk sink to the
 // bottom, where their buttons offer uninstall and update instead of install.
 // Within each group the order the relays delivered is kept.
@@ -416,11 +435,13 @@ func setDiscovery(list []Napp) {
 // or uninstalled after discovery ran moves between the groups immediately.
 func (l *launcherState) sortDiscovery() {
 	installed := installedIDs()
-	sort.SliceStable(l.discovery, func(i, j int) bool {
-		_, iIn := installed[l.discovery[i].ID]
-		_, jIn := installed[l.discovery[j].ID]
-		return jIn && !iIn
-	})
+	for _, list := range [][]Napp{l.discovery, l.contacts} {
+		sort.SliceStable(list, func(i, j int) bool {
+			_, iIn := installed[list[i].ID]
+			_, jIn := installed[list[j].ID]
+			return jIn && !iIn
+		})
+	}
 }
 
 func setBusy(id string, busy bool) {
@@ -441,12 +462,17 @@ func IsBusy(id string) bool {
 	return ls.busy[id]
 }
 
-// DiscoveredNapp looks a napp up among what discovery last found, so a UI can
-// act on an id alone.
+// DiscoveredNapp looks a napp up among what discovery (or the contacts mode)
+// last found, so a UI can act on an id alone.
 func DiscoveredNapp(id string) (Napp, bool) {
 	ls.mu.Lock()
 	defer ls.mu.Unlock()
 	for _, n := range ls.discovery {
+		if n.ID == id {
+			return n, true
+		}
+	}
+	for _, n := range ls.contacts {
 		if n.ID == id {
 			return n, true
 		}

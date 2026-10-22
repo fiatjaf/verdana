@@ -133,6 +133,10 @@ data class LauncherState(
     // napps opened without installing them: on disk, but not on the installed list
     val previews: List<Napp> = listOf(),
     val discovery: List<Napp>,
+    // napps published by the people the user follows (the napps tab's
+    // contacts mode), fetched on demand
+    val contacts: List<Napp> = listOf(),
+    val contactsFetching: Boolean = false,
     val pinned: List<Napp> = listOf(),
     val home: List<HomeItem> = listOf(),
     val bundles: List<BundleInfo> = listOf(),
@@ -166,6 +170,8 @@ fun parseState(json: String): LauncherState {
         installed = napps("installed"),
         previews = napps("previews"),
         discovery = napps("discovery"),
+        contacts = napps("contacts"),
+        contactsFetching = o.optBoolean("contactsFetching"),
         pinned = napps("pinned"),
         home = (0 until (o.optJSONArray("home")?.length() ?: 0)).map { i ->
             val h = o.optJSONArray("home")!!.getJSONObject(i)
