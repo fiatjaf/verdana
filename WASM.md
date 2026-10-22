@@ -198,8 +198,8 @@ window until it is answered, exactly like a web napp's overlay.
 | `napp.verifyEvent`                         | event                                       | bool                                    | `napp.utils.verifyEvent`       |
 | `napp.generateKey`                         | —                                           | `{sk, pk}`                              | `napp.utils.generateKey`       |
 | `napp.signWithKey`                         | `{event, sk}`                               | signed event                            | `napp.utils.signWithKey`       |
-| `napp.saveFile`                            | `{name, data, type}`, data **base64**       | null                                    | `napp.utils.saveFile`          |
-| `napp.copyText`                            | `{text}`                                    | null                                    | `napp.utils.copyText`          |
+| `napp.saveFile`                            | `{name, data, type}`, data **base64**       | `{name, size}`                          | `napp.utils.saveFile`          |
+| `napp.copyText`                            | `{text}`                                    | `{length}`                              | `napp.utils.copyText`          |
 | `napp.publish`                             | `{event, relays?}`                          | `{relays, published, failed}`           | `napp.utils.publish`           |
 | `napp.subscribe`                           | `{relays, filter, label?, maxEoseTimeout?}` | null, then subscription messages        | `napp.utils.subscribe`         |
 | `napp.unsubscribe`                         | `{callbackId}`                              | null                                    | the closer `subscribe` returns |

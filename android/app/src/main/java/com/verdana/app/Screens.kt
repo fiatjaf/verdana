@@ -268,6 +268,19 @@ fun LauncherScreen(activity: MainActivity, st: LauncherState) {
         detailNapp = null
     }
 
+    // a pasted code or a nostr: link that came out as a user or a napp
+    // opens its page here
+    val opened = activity.openedPage
+    LaunchedEffect(opened) {
+        if (opened == null) return@LaunchedEffect
+        activity.openedPage = null
+        when {
+            opened.kind == "profile" -> openProfile(opened.pubkey)
+            opened.kind == "napp" && opened.napp != null -> openNapp(opened.napp)
+        }
+    }
+    var showOpenCode by remember { mutableStateOf(false) }
+
     // keep the detail napp fresh (install/uninstall/update reflect immediately)
     val freshDetail = detailNapp?.let { d ->
         st.installed.firstOrNull { it.id == d.id }
@@ -276,44 +289,117 @@ fun LauncherScreen(activity: MainActivity, st: LauncherState) {
             ?: d
     }
 
-    Column(Modifier.fillMaxSize().padding(16.dp)) {
-        // tabs, with the ephemeral one at the end
-        Row(Modifier.horizontalScroll(rememberScrollState())) {
-            TabChip("Home", tab == 0 && detailNapp == null && detailProfile == null, theme) { pickTab(0) }
-            Spacer(Modifier.width(8.dp))
-            TabChip("Windows", tab == 1 && detailNapp == null && detailProfile == null, theme) { pickTab(1) }
-            Spacer(Modifier.width(8.dp))
-            TabChip("Installed", tab == 2 && detailNapp == null && detailProfile == null, theme) { pickTab(2) }
-            Spacer(Modifier.width(8.dp))
-            TabChip("Discovery", tab == 3 && detailNapp == null && detailProfile == null, theme) { pickTab(3) }
-            if (freshDetail != null) {
+    Box(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize().padding(16.dp)) {
+            // tabs, with the ephemeral one at the end
+            Row(Modifier.horizontalScroll(rememberScrollState())) {
+                TabChip("Home", tab == 0 && detailNapp == null && detailProfile == null, theme) { pickTab(0) }
                 Spacer(Modifier.width(8.dp))
-                TabChip(freshDetail.name.ifBlank { freshDetail.id }.take(18), true, theme) { }
-            } else if (detailProfile != null) {
+                TabChip("Windows", tab == 1 && detailNapp == null && detailProfile == null, theme) { pickTab(1) }
                 Spacer(Modifier.width(8.dp))
-                TabChip("Profile", true, theme) { }
+                TabChip("Installed", tab == 2 && detailNapp == null && detailProfile == null, theme) { pickTab(2) }
+                Spacer(Modifier.width(8.dp))
+                TabChip("Discovery", tab == 3 && detailNapp == null && detailProfile == null, theme) { pickTab(3) }
+                if (freshDetail != null) {
+                    Spacer(Modifier.width(8.dp))
+                    TabChip(freshDetail.name.ifBlank { freshDetail.id }.take(18), true, theme) { }
+                } else if (detailProfile != null) {
+                    Spacer(Modifier.width(8.dp))
+                    TabChip("Profile", true, theme) { }
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            when {
+                freshDetail != null -> NappDetailScreen(activity, st, theme, freshDetail,
+                    onBack = { detailNapp = null },
+                    onAuthor = { openProfile(it) },
+                    onOpenNapp = { openNapp(it) })
+                detailProfile != null -> AuthorProfileDetailScreen(activity, st, theme, detailProfile!!,
+                    onBack = { detailProfile = null },
+                    onOpenNapp = { openNapp(it) })
+                tab == 0 -> HomeTab(activity, st, theme, onDetail = { openNapp(it) }, onEditBundle = {
+                    bundleEdit = BundleEdit(it.name, activity.bundleDraft(it.name))
+                    pickTab(1)
+                })
+                tab == 1 -> WindowsTab(activity, st, theme, bundleEdit, { bundleEdit = it })
+                tab == 2 -> InstalledTab(activity, st, theme, installedFilter, { installedFilter = it },
+                    onDetail = { openNapp(it) }, onAuthor = { openProfile(it) })
+                else -> DiscoveryTab(activity, st, theme, relaysEd, { relaysEd = it }, discoveryFilter, { discoveryFilter = it },
+                    onDetail = { openNapp(it) }, onAuthor = { openProfile(it) })
             }
         }
+        // "+": open a pasted npub, nprofile, nevent, naddr or note
+        FloatingActionButton(
+            onClick = { showOpenCode = true },
+            containerColor = theme.suggestBg,
+            contentColor = theme.suggestFg,
+            modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
+        ) { Text("+", fontSize = 24.sp) }
+    }
+    if (showOpenCode) {
+        OpenCodeDialog(activity, theme, onDismiss = { showOpenCode = false })
+    }
+}
 
-        Spacer(Modifier.height(12.dp))
-
-        when {
-            freshDetail != null -> NappDetailScreen(activity, st, theme, freshDetail,
-                onBack = { detailNapp = null },
-                onAuthor = { openProfile(it) },
-                onOpenNapp = { openNapp(it) })
-            detailProfile != null -> AuthorProfileDetailScreen(activity, st, theme, detailProfile!!,
-                onBack = { detailProfile = null },
-                onOpenNapp = { openNapp(it) })
-            tab == 0 -> HomeTab(activity, st, theme, onDetail = { openNapp(it) }, onEditBundle = {
-                bundleEdit = BundleEdit(it.name, activity.bundleDraft(it.name))
-                pickTab(1)
-            })
-            tab == 1 -> WindowsTab(activity, st, theme, bundleEdit, { bundleEdit = it })
-            tab == 2 -> InstalledTab(activity, st, theme, installedFilter, { installedFilter = it },
-                onDetail = { openNapp(it) }, onAuthor = { openProfile(it) })
-            else -> DiscoveryTab(activity, st, theme, relaysEd, { relaysEd = it }, discoveryFilter, { discoveryFilter = it },
-                onDetail = { openNapp(it) }, onAuthor = { openProfile(it) })
+// OpenCodeDialog takes a pasted nostr code: a user opens their page, a napp
+// its page, any other event goes to a napp that views its kind (see
+// MainActivity.openCode). It stays up with the error when that fails.
+@Composable
+private fun OpenCodeDialog(activity: MainActivity, theme: Theme, onDismiss: () -> Unit) {
+    var input by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var err by remember { mutableStateOf("") }
+    fun submit() {
+        if (input.isBlank() || busy) return
+        busy = true
+        err = ""
+        activity.openCode(input.trim()) { e ->
+            busy = false
+            if (e == null) onDismiss() else err = e
+        }
+    }
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(theme.card)
+                .padding(20.dp),
+        ) {
+            Text("Open", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium, color = theme.fg)
+            Spacer(Modifier.height(8.dp))
+            OutlinedTextField(
+                value = input,
+                onValueChange = { input = it; err = "" },
+                placeholder = { Text("npub, nprofile, nevent, naddr…") },
+                singleLine = true,
+                enabled = !busy,
+                colors = outlinedColors(theme),
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                    imeAction = androidx.compose.ui.text.input.ImeAction.Go,
+                ),
+                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onGo = { submit() }),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            if (err.isNotBlank()) {
+                Spacer(Modifier.height(8.dp))
+                Text(err, color = theme.danger, style = MaterialTheme.typography.bodySmall)
+            }
+            Spacer(Modifier.height(16.dp))
+            Row {
+                Button(
+                    onClick = { submit() },
+                    enabled = !busy && input.isNotBlank(),
+                    colors = ButtonDefaults.buttonColors(containerColor = theme.suggestBg, contentColor = theme.suggestFg),
+                ) { Text(if (busy) "Opening…" else "Open") }
+                Spacer(Modifier.width(12.dp))
+                Button(
+                    onClick = onDismiss,
+                    colors = ButtonDefaults.buttonColors(containerColor = theme.chipBg, contentColor = theme.chipFg),
+                ) { Text("Cancel") }
+            }
         }
     }
 }
@@ -1871,7 +1957,12 @@ fun AuthorProfileDetailScreen(
             Text("← Back", color = theme.muted, fontSize = 13.sp)
         }
         Spacer(Modifier.height(8.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        // the avatar and name fire view:0, so the user picks the napp that
+        // shows this profile
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.clickable { activity.viewProfile(pubkeyHex) },
+        ) {
             Avatar(profile?.picture ?: "", theme, 56)
             Spacer(Modifier.width(12.dp))
             Text(

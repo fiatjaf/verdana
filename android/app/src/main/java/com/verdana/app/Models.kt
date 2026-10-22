@@ -266,6 +266,20 @@ fun parseProfile(json: String): ProfileDetail? {
     } catch (_: Exception) { null }
 }
 
+// Opened is what a pasted nostr code or nostr: link turned out to be (see
+// OpenCode in backend/resolve.go): a "profile" page, a "napp" page, or an
+// "action" already handed to a napp, with nothing for the launcher to show.
+data class Opened(val kind: String, val pubkey: String, val napp: Napp?)
+
+fun parseOpened(json: String): Opened? = try {
+    val o = JSONObject(json)
+    Opened(
+        kind = o.optString("kind"),
+        pubkey = o.optString("pubkey"),
+        napp = o.optJSONObject("napp")?.let { parseNapp(it) },
+    )
+} catch (_: Exception) { null }
+
 fun parseNapps(json: String): List<Napp> {
     if (json.isBlank()) return listOf()
     return try {

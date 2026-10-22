@@ -38,6 +38,14 @@ class MainActivity : ComponentActivity() {
 
     private var showProfile by mutableStateOf(false)
 
+    // a page an opened nostr code asks for (see openCode), for the
+    // launcher screen to show and clear
+    var openedPage by mutableStateOf<Opened?>(null)
+
+    // a nostr: link another app sent us, waiting for the backend to be
+    // logged in before it is opened
+    var pendingLink by mutableStateOf<String?>(null)
+
     // the bundles in the Verdana icon's long-press menu (see
     // BundleShortcuts), read again whenever the launcher comes back
     var appMenuBundles by mutableStateOf(setOf<String>())
@@ -72,12 +80,25 @@ class MainActivity : ComponentActivity() {
 
         // started by a bundle's shortcut; not again when Android recreates
         // the activity with the same intent
-        if (savedInstanceState == null) runBundleIntent(intent)
+        if (savedInstanceState == null) {
+            runBundleIntent(intent)
+            takeNostrLink(intent)
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         runBundleIntent(intent)
+        takeNostrLink(intent)
+    }
+
+    // a nostr:<code> link opened from elsewhere goes the way a pasted code
+    // does, once the launcher is logged in (see Launcher)
+    private fun takeNostrLink(intent: Intent?) {
+        val uri = intent?.data ?: return
+        if (intent.action != Intent.ACTION_VIEW || !uri.scheme.equals("nostr", ignoreCase = true)) return
+        setIntent(Intent(intent).setAction(Intent.ACTION_MAIN).setData(null))
+        pendingLink = uri.toString()
     }
 
     private fun runBundleIntent(intent: Intent?) {
@@ -191,6 +212,33 @@ class MainActivity : ComponentActivity() {
     // back to its window, which finishes itself.
     fun closeWindow(instance: String) = Mobile.closeWindow(instance)
 
+    // fires view:0 with this pubkey's profile, for the user to pick the napp
+    // that shows it
+    fun viewProfile(pubkeyHex: String) = Mobile.viewProfile(pubkeyHex)
+
+    // openCode works out what a pasted nostr code (or nostr: link) is: a
+    // user or a napp is put on openedPage for the launcher to show, any
+    // other event the backend already handed to a napp. onDone gets null
+    // when it worked, or what went wrong.
+    fun openCode(input: String, onDone: (String?) -> Unit) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            var err: String? = null
+            val opened = try {
+                parseOpened(Mobile.openCode(input))
+            } catch (e: Exception) {
+                err = e.message ?: "couldn't open that"
+                null
+            }
+            withContext(Dispatchers.Main) {
+                if (opened != null && opened.kind != "action") {
+                    showProfile = false
+                    openedPage = opened
+                }
+                onDone(err)
+            }
+        }
+    }
+
     fun loadIcon(napp: Napp, onReady: (ByteArray?) -> Unit) {
         lifecycleScope.launch(Dispatchers.IO) {
             val bytes = try {
@@ -235,6 +283,14 @@ class MainActivity : ComponentActivity() {
         val prompt = VerdanaHost.promptFor("")
         androidx.compose.material3.MaterialTheme(colorScheme = theme.compose()) {
             androidx.compose.material3.Surface(color = theme.bg) {
+                // a nostr: link waits for the login to be done with
+                val link = pendingLink
+                androidx.compose.runtime.LaunchedEffect(link, state.phase) {
+                    if (link != null && state.phase == "main") {
+                        pendingLink = null
+                        openCode(link) { err -> if (err != null) toast(err) }
+                    }
+                }
                 BackHandler(enabled = showProfile && state.phase == "main" && prompt == null) {
                     showProfile = false
                 }

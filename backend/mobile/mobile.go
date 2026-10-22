@@ -454,12 +454,34 @@ func AuthorNapps(pubkeyHex string) string {
 	return string(data)
 }
 
+// ViewProfile fires view:0 with the pubkey's profile, so the user picks the
+// napp that shows it.
+func ViewProfile(pubkeyHex string) { backend.ViewProfile(pubkeyHex) }
+
+// OpenCode works out what a pasted nostr code or nostr: link is, as JSON:
+// {"kind":"profile","pubkey":…}, {"kind":"napp","napp":{…}} or
+// {"kind":"action"} when it was handed to a napp with a view:<kind> action.
+// Blocks while fetching; call it off the main thread.
+func OpenCode(input string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	opened, err := backend.OpenCode(ctx, input)
+	if err != nil {
+		return "", err
+	}
+	data, err := json.Marshal(opened)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
 // NappIcon is the bytes of a napp's icon, from disk when it is installed and
 // from its author's blossom servers otherwise.
 func NappIcon(id string) ([]byte, error) {
 	n, ok := backend.InstalledNapp(id)
 	if !ok {
-		n, ok = backend.DiscoveredNapp(id)
+		n, ok = backend.LookupNapp(id)
 	}
 	if !ok {
 		return nil, errNoNapp(id)

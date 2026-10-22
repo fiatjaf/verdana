@@ -33,6 +33,14 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- nostr:<npub|nprofile|nevent|naddr|note> links from other
+                 apps: opened like a code pasted in the launcher -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="nostr" />
+            </intent-filter>
         </activity>
 
         <!-- one napp window = one task = one card in Recents. intoExisting

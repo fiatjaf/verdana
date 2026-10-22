@@ -99,14 +99,18 @@ func Uninstall(id string) {
 	log.Info().Str("napp", id).Msg("uninstall complete")
 }
 
-// InstallFromDiscovery resolves an id the launcher knows — installed or just
-// discovered — into a napp and installs (or updates) it.
+// InstallFromDiscovery resolves an id the launcher knows — installed, just
+// discovered or seen elsewhere — into a napp and installs (or updates) it.
 func InstallFromDiscovery(id string) bool {
 	if n, ok := InstalledNapp(id); ok {
 		go Install(n)
 		return true
 	}
 	if n, ok := DiscoveredNapp(id); ok {
+		go Install(n)
+		return true
+	}
+	if n, ok := seenNapp(id); ok {
 		go Install(n)
 		return true
 	}

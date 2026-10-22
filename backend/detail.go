@@ -109,12 +109,14 @@ func FetchAuthorNapps(pubkeyHex string) []Napp {
 		if out[i].AuthorName == "" {
 			out[i].AuthorName = out[i].AuthorShortName()
 		}
+		rememberNapp(out[i])
 	}
 	return out
 }
 
-// LookupNapp finds a napp the launcher already knows — installed, discovered
-// or dev — by id, so a detail tab can refresh its copy every frame.
+// LookupNapp finds a napp the launcher already knows — installed, discovered,
+// dev or seen elsewhere (see seenNapps) — by id, so a detail tab can
+// refresh its copy every frame.
 func LookupNapp(id string) (Napp, bool) {
 	if n, ok := InstalledNapp(id); ok {
 		if newVersion, ok := updateSet.Load().Load(id); ok {
@@ -128,5 +130,5 @@ func LookupNapp(id string) (Napp, bool) {
 	if d := devLookup(id); d != nil {
 		return d.napp, true
 	}
-	return Napp{}, false
+	return seenNapp(id)
 }

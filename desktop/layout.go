@@ -497,7 +497,14 @@ func layoutTabs(
 			}),
 		)
 	}
-	return layout.Flex{Axis: layout.Horizontal}.Layout(gtx, children...)
+	// the box for nostr codes takes up whatever the tabs leave
+	children = append(children,
+		layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			return layoutOpenBox(gtx, th)
+		}),
+	)
+	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx, children...)
 }
 
 func layoutWindowsTab(

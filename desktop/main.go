@@ -424,6 +424,7 @@ func gioMain() {
 						}
 						return layoutLogin(gtx, th, &loginEd, &loginBtn, &googleBtn, st.LoginErr, st.LoginStatus)
 					case backend.PhaseMain:
+						handleOpenBox(gtx)
 						if tabHomeBtn.Clicked(gtx) {
 							setTab(tabHome)
 						}
