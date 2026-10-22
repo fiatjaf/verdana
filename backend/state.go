@@ -93,6 +93,7 @@ func loadState() {
 		state.Relays = []string{
 			"relay.nostrapps.com",
 			"relay.nostrapps.com/public",
+			"relay.nostrapps.com/network",
 		}
 	}
 	if state.InstalledNapps == nil {

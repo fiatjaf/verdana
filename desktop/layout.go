@@ -325,7 +325,6 @@ func layoutMain(
 	th *material.Theme,
 	tabHomeBtn,
 	tabWindowsBtn,
-	tabNappsBtn,
 	tabDiscoBtn,
 	tabDevBtn,
 	themeBtn,
@@ -394,7 +393,7 @@ func layoutMain(
 		}),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layoutTabs(gtx, th, tabHomeBtn, tabWindowsBtn, tabNappsBtn, tabDiscoBtn, tab, len(st.Installed), len(st.Discovery), extra, extraBtn)
+			return layoutTabs(gtx, th, tabHomeBtn, tabWindowsBtn, tabDiscoBtn, tab, len(st.Installed), len(st.Discovery), extra, extraBtn)
 		}),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
@@ -402,14 +401,11 @@ func layoutMain(
 				return layoutBundleEditor(gtx, th, saveBundleBtn, cancelBundleBtn, editing)
 			}
 			if tab == tabHome {
-				return home.Layout(gtx, th, st)
+				return layoutHomeTab(gtx, th, installedList, installedFilterEd, cardBtns, uninstBtns, installedUpdateBtns, installedOpenBtns, installedAuthorBtns, pinBtns, checkUpdBtn, updateAllBtn, instVis, st)
 			}
 			if tab == 0 {
 				return layoutWindowsTab(gtx, th, windowsList,
 					closeBtns, reopenBtns, createBundleBtn, bundleBtns, st)
-			}
-			if tab == 1 {
-				return layoutNappsTab(gtx, th, installedList, installedFilterEd, cardBtns, uninstBtns, installedUpdateBtns, installedOpenBtns, installedAuthorBtns, pinBtns, checkUpdBtn, updateAllBtn, instVis, st)
 			}
 			if tab == 2 {
 				return layoutDiscoveryTab(gtx, th, tabDevBtn, discoveryList, relaysEd, filterEd, fetchBtn, actionBtns,
@@ -441,7 +437,6 @@ func layoutTabs(
 	th *material.Theme,
 	homeBtn,
 	windowsBtn,
-	nappsBtn,
 	discoBtn *widget.Clickable,
 	tab,
 	nInstalled,
@@ -462,19 +457,15 @@ func layoutTabs(
 	}
 	children := []layout.FlexChild{
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return tabBtn(gtx, homeBtn, "Home", "The napps and bundles you pinned, one click away", tab == tabHome)
+			return tabBtn(gtx, homeBtn, "Home", "The napps and bundles you pinned, and every napp on this computer", tab == tabHome)
 		}),
 		layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return tabBtn(gtx, windowsBtn, "Windows", "The napp windows opened this run, and the bundles made from them", tab == 0)
+			return tabBtn(gtx, windowsBtn, "Sessions", "The napp windows opened this run, and the bundles made from them", tab == 0)
 		}),
 		layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return tabBtn(gtx, nappsBtn, "Installed", "The napps on this computer: open, pin, update or uninstall them", tab == 1)
-		}),
-		layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return tabBtn(gtx, discoBtn, "Napps", "Find napps published on the relays or by the people you follow, and install them", tab == tabDiscovery || tab == tabDev)
+			return tabBtn(gtx, discoBtn, "Explore", "Find napps published on the relays or by the people you follow, and install them", tab == tabDiscovery || tab == tabDev)
 		}),
 	}
 	// the ephemeral detail tab lives at the end and vanishes the moment
@@ -721,7 +712,7 @@ func bundleRows(th *material.Theme, st backend.State, btns []bundleRowBtns) (out
 }
 
 // layoutBundleEditor is the overlay a "Create bundle…" (or an "Edit")
-// click opens over the Windows tab: the bundle name, the actions of each napp
+// click opens over the Sessions tab: the bundle name, the actions of each napp
 // of the bundle as pills that can be removed, save and cancel.
 func layoutBundleEditor(
 	gtx layout.Context,
@@ -808,7 +799,9 @@ func layoutBundleEditor(
 	)
 }
 
-func layoutNappsTab(
+// layoutInstalledList is the installed napps, under the pinned grid on the
+// home tab.
+func layoutInstalledList(
 	gtx layout.Context,
 	th *material.Theme,
 	list *widget.List,
@@ -829,7 +822,7 @@ func layoutNappsTab(
 		pinnedSet[n.ID] = true
 	}
 	if len(st.Installed) == 0 {
-		l := material.Body2(th, "No napps installed yet. Find some in the Napps tab.")
+		l := material.Body2(th, "No napps installed yet. Find some in the Explore tab.")
 		l.Color = currentTheme().muted
 		return l.Layout(gtx)
 	}

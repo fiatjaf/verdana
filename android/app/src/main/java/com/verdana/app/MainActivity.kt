@@ -135,7 +135,7 @@ class MainActivity : ComponentActivity() {
     fun reopenWindow(instance: String) = Mobile.reopenWindow(instance)
 
     // the bundle editor's drafts: a new one from the windows picked on the
-    // Windows tab, or a stored bundle's (see backend/bundle_draft.go)
+    // Sessions tab, or a stored bundle's (see backend/bundle_draft.go)
     fun bundleDraftFromWindows(instances: List<String>): List<BundleDraftEntry> =
         parseBundleDraft(Mobile.bundleDraftFromWindows(org.json.JSONArray(instances).toString()))
     fun bundleDraft(name: String): List<BundleDraftEntry> = parseBundleDraft(Mobile.bundleDraft(name))

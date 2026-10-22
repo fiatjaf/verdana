@@ -13,7 +13,7 @@ import (
 )
 
 // The bundle editor: everything the Gio window needs to turn the checkboxes
-// of the Windows tab into a stored bundle (with one call to
+// of the Sessions tab into a stored bundle (with one call to
 // backend.SaveBundle behind it).
 
 // pickedBundleWindows is the checked windows, in listed order.
@@ -86,7 +86,7 @@ func bundleDraft(edit *bundleEditState) []backend.BundleDraftEntry {
 
 // saveBundle runs the actual save off the Gio loop: state.json and a
 // shortcut file to rewrite are not frame work. An error goes back to the
-// Windows tab instead of vanishing into a goroutine.
+// Sessions tab instead of vanishing into a goroutine.
 func saveBundle(name, oldName string, draft []backend.BundleDraftEntry, editing *bundleEditState) {
 	if err := backend.SaveBundleDraft(oldName, name, draft); err != nil {
 		if !errors.Is(err, backend.ErrShortcutNotUpdated) {
@@ -101,7 +101,7 @@ func saveBundle(name, oldName string, draft []backend.BundleDraftEntry, editing 
 }
 
 // runInBackground does a bundle operation off the Gio loop, showing its error
-// on the Windows tab.
+// on the Sessions tab.
 func runInBackground(f func() error) {
 	go func() {
 		if err := f(); err != nil {

@@ -39,12 +39,12 @@ type gioState struct {
 	clipboard []string
 
 	// bundleEditing is the bundle being created (from the checked
-	// windows) or edited (a stored one), parked over the Windows tab the
+	// windows) or edited (a stored one), parked over the Sessions tab the
 	// same dialogs are; nil the rest of the time.
 	bundleEditing *bundleEditState
 
 	// bundleErr is why the last bundle save (or pin, or shortcut) didn't work,
-	// shown on the Windows tab (the editor keeps itself open on error).
+	// shown on the Sessions tab (the editor keeps itself open on error).
 	bundleErr string
 }
 
@@ -66,12 +66,12 @@ type bundleEditEntry struct {
 	removeBtns []widget.Clickable
 }
 
-// bundleRowBtns are the buttons of one bundle row on the Windows tab.
+// bundleRowBtns are the buttons of one bundle row on the Sessions tab.
 type bundleRowBtns struct {
 	pin, shortcut, edit, del widget.Clickable
 }
 
-// checked is the bundle-creation checkboxes of the Windows tab, keyed by
+// checked is the bundle-creation checkboxes of the Sessions tab, keyed by
 // window instance, living across frames so state survives redraws.
 var bundleChecks = make(map[string]*widget.Bool)
 
@@ -163,12 +163,9 @@ func main() {
 	// the palette the user last chose, and its CSS tokens for napps
 	applyStoredTheme()
 
-	// startup tab: home if anything is pinned, else installed if any
-	// napps, else discovery
-	if snap := backend.Snapshot(); len(snap.Pinned) > 0 {
+	// startup tab: home if anything is pinned or installed, else explore
+	if snap := backend.Snapshot(); len(snap.Pinned) > 0 || len(snap.Installed) > 0 {
 		ui.tab = tabHome
-	} else if len(snap.Installed) > 0 {
-		ui.tab = tabInstalled
 	} else {
 		ui.tab = tabDiscovery
 	}
@@ -210,7 +207,7 @@ func setBundleErr(msg string) {
 	}
 }
 
-// currentBundleEdit is the bundle editor parked over the Windows tab, or
+// currentBundleEdit is the bundle editor parked over the Sessions tab, or
 // nil. Background saves put their editor back through it, so the field is
 // never touched off the Gio loop without the mutex.
 func currentBundleEdit() *bundleEditState {
@@ -290,7 +287,6 @@ func gioMain() {
 		relaysEd            widget.Editor
 		fetchBtn            widget.Clickable
 		tabHomeBtn          widget.Clickable
-		tabNappsBtn         widget.Clickable
 		tabDiscoBtn         widget.Clickable
 		tabDevBtn           widget.Clickable
 		tabWindowsBtn       widget.Clickable
@@ -466,9 +462,6 @@ func gioMain() {
 						if tabWindowsBtn.Clicked(gtx) {
 							setTab(tabWindows)
 						}
-						if tabNappsBtn.Clicked(gtx) {
-							setTab(tabInstalled)
-						}
 						if tabDiscoBtn.Clicked(gtx) {
 							setTab(tabDiscovery)
 						}
@@ -567,9 +560,7 @@ func gioMain() {
 						}
 						vis := discoveryFilter(st)
 						instVis := installedFilter(st)
-						if tab == tabHome {
-							// the home grid takes its own pointer events (see home.go)
-						} else if tab == 0 {
+						if tab == 0 {
 							for i, w := range st.ManagedWindows {
 								if w.Open {
 									if closeBtns[i].Clicked(gtx) {
@@ -637,7 +628,9 @@ func gioMain() {
 									}
 								}
 							}
-						} else if tab == tabInstalled {
+						} else if tab == tabHome {
+							// the installed list below the home grid (the grid
+							// takes its own pointer events, see home.go)
 							// buttons on top of the card's own click area go
 							// first: a click that hit a button must not also
 							// count as opening the napp page. The author row
@@ -875,7 +868,6 @@ func gioMain() {
 							th,
 							&tabHomeBtn,
 							&tabWindowsBtn,
-							&tabNappsBtn,
 							&tabDiscoBtn,
 							devBtn,
 							&themeBtn,

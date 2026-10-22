@@ -163,7 +163,7 @@ func pillUser(pubkey string) (string, string) {
 	return pubkey[:8] + "…", ""
 }
 
-// historyPills is a window's action log for the Windows tab: one pill per
+// historyPills is a window's action log for the Sessions tab: one pill per
 // action it was sent, oldest first, so a row says where the window has been
 // and not only where it is.
 func historyPills(th *material.Theme, actions []backend.ShortcutAction) []layout.Widget {

@@ -9,6 +9,7 @@ import (
 	"fiatjaf.com/verdana/desktop/tooltip"
 
 	"gioui.org/f32"
+	"gioui.org/font"
 	"gioui.org/io/event"
 	"gioui.org/io/pointer"
 	"gioui.org/layout"
@@ -22,7 +23,8 @@ import (
 )
 
 // The home tab: the pinned napps and bundles as a grid of icons with their
-// names below, like a phone's home screen. A click opens a napp (or all the
+// names below, like a phone's home screen, and under it the list of every
+// installed napp (layoutInstalledList). A click opens a napp (or all the
 // windows of a bundle); holding the press on it opens its tab (a bundle's
 // editor) instead; dragging one puts it somewhere else in the grid.
 //
@@ -222,7 +224,7 @@ func (g *homeGrid) cellOrigin(idx int) f32.Point {
 func (g *homeGrid) Layout(gtx layout.Context, th *material.Theme, st backend.State) layout.Dimensions {
 	if len(st.Home) == 0 {
 		g.reset()
-		l := material.Body2(th, "Nothing pinned yet. Pin napps from the Installed tab, or bundles from the Windows tab, to have them here.")
+		l := material.Body2(th, "Nothing pinned yet. Pin napps from the list below, or bundles from the Sessions tab, to have them here.")
 		l.Color = currentTheme().muted
 		return l.Layout(gtx)
 	}
@@ -236,7 +238,11 @@ func (g *homeGrid) Layout(gtx layout.Context, th *material.Theme, st backend.Sta
 	g.cols = max(1, gtx.Constraints.Max.X/g.cellW)
 	g.n = len(st.Home)
 
+	// the grid is only as tall as its rows, so the installed list below it
+	// starts right after them
 	size := gtx.Constraints.Max
+	size.Y = min(size.Y, (g.n+g.cols-1)/g.cols*g.rowH)
+	gtx.Constraints.Max.Y = size.Y
 	defer clip.Rect{Max: size}.Push(gtx.Ops).Pop()
 	event.Op(gtx.Ops, g)
 	if g.dragging {
@@ -269,7 +275,7 @@ func (g *homeGrid) Layout(gtx layout.Context, th *material.Theme, st backend.Sta
 	}
 
 	rows := (len(order) + g.cols - 1) / g.cols
-	dims := material.List(th, &g.list).Layout(gtx, rows, func(gtx layout.Context, r int) layout.Dimensions {
+	material.List(th, &g.list).Layout(gtx, rows, func(gtx layout.Context, r int) layout.Dimensions {
 		children := make([]layout.FlexChild, 0, g.cols)
 		for c := 0; c < g.cols; c++ {
 			i := r*g.cols + c
@@ -304,7 +310,50 @@ func (g *homeGrid) Layout(gtx layout.Context, th *material.Theme, st backend.Sta
 		}
 	}
 
-	return dims
+	return layout.Dimensions{Size: size}
+}
+
+// layoutHomeTab is the pinned grid, taking at most half the height, and the
+// installed napps under it.
+func layoutHomeTab(
+	gtx layout.Context,
+	th *material.Theme,
+	list *widget.List,
+	filterEd *widget.Editor,
+	cardBtns,
+	uninstBtns,
+	updateBtns,
+	openBtns,
+	authorBtns,
+	pinBtns []widget.Clickable,
+	checkUpdBtn,
+	updateAllBtn *widget.Clickable,
+	vis []int,
+	st backend.State,
+) layout.Dimensions {
+	heading := func(gtx layout.Context, title string) layout.Dimensions {
+		t := material.Body1(th, title)
+		t.Font.Weight = font.Bold
+		t.TextSize = unit.Sp(14)
+		t.Color = currentTheme().muted
+		return layout.Inset{Bottom: unit.Dp(8)}.Layout(gtx, t.Layout)
+	}
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return heading(gtx, "Pinned")
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			gtx.Constraints.Max.Y /= 2
+			return home.Layout(gtx, th, st)
+		}),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return heading(gtx, "Installed")
+		}),
+		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			return layoutInstalledList(gtx, th, list, filterEd, cardBtns, uninstBtns, updateBtns, openBtns, authorBtns, pinBtns, checkUpdBtn, updateAllBtn, vis, st)
+		}),
+	)
 }
 
 // cell draws one item: its icon with its name under it, on bg (transparent

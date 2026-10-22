@@ -21,7 +21,6 @@ import (
 // moment any other tab is picked.
 const (
 	tabWindows   = 0
-	tabInstalled = 1
 	tabDiscovery = 2
 	tabDev       = 3
 	tabExtra     = 4
