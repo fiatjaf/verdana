@@ -2,7 +2,6 @@ package backend
 
 import (
 	"context"
-	"sort"
 	"time"
 
 	"fiatjaf.com/nostr"
@@ -50,60 +49,24 @@ func FetchProfileDetail(pubkeyHex string) ProfileDetail {
 	}
 }
 
-// FetchAuthorNapps lists the kind:35130/35131 napps an author published: from the
-// author's own write relays plus the launcher's discovery relays. Newest
-// version wins per d-tag, so an author that republished the same napp shows
-// up once. It blocks (with its own timeout), so call it off the render loop.
+// FetchAuthorNapps lists the kind:35130/35131 napps an author published: it
+// asks the author's own write relays plus the launcher's discovery relays,
+// saves what they have in the store and answers from the store. Newest
+// version wins per napp, so an author that republished the same napp shows
+// up once. A contact's scan counts for the contacts sync too (see
+// contacts.go). It blocks (with its own timeout), so call it off the render
+// loop.
 func FetchAuthorNapps(pubkeyHex string) []Napp {
 	pk, err := nostr.PubKeyFromHex(pubkeyHex)
 	if err != nil || sys == nil {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-
-	urls := sys.FetchWriteRelays(ctx, pk)
-	for _, r := range Relays() {
-		urls = nostr.AppendUnique(urls, r)
-	}
-	if len(urls) == 0 {
-		return nil
+	scanAuthorNapps(context.Background(), pk)
+	if contactsHas(pk) {
+		RefreshContacts()
 	}
 
-	byD := make(map[string]Napp)
-	collect := func(evt nostr.Event) {
-		n := nappFromEvent(evt)
-		if prev, ok := byD[n.D]; !ok || n.CreatedAt > prev.CreatedAt {
-			byD[n.D] = n
-		}
-	}
-
-	// whatever is already local renders instantly
-	for evt := range sys.Store.QueryEvents(nostr.Filter{
-		Kinds:   []nostr.Kind{KindWeb, KindWasm},
-		Authors: []nostr.PubKey{pk},
-	}, 200) {
-		collect(evt)
-	}
-
-	for re := range sys.Pool.FetchMany(ctx, urls, nostr.Filter{
-		Kinds:   []nostr.Kind{KindWeb, KindWasm},
-		Authors: []nostr.PubKey{pk},
-	}, nostr.SubscriptionOptions{Label: "verdana-author-napps"}) {
-		collect(re.Event)
-	}
-
-	out := make([]Napp, 0, len(byD))
-	for _, n := range byD {
-		out = append(out, n)
-	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].CreatedAt != out[j].CreatedAt {
-			return out[i].CreatedAt > out[j].CreatedAt
-		}
-		return out[i].Name < out[j].Name
-	})
-
+	out := storedNapps([]nostr.PubKey{pk})
 	// author names resolve in the background and are stamped here too
 	for i := range out {
 		if out[i].AuthorName == "" {

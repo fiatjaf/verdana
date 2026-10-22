@@ -86,12 +86,19 @@ var (
 	filterEd          widget.Editor
 	installedFilterEd widget.Editor
 
-	// the napps tab shows either what the discovery relays have or what the
-	// people the user follows published (contactsMode), switched by these.
-	contactsMode       bool
-	modeDiscoBtn       widget.Clickable
-	modeContactsBtn    widget.Clickable
-	contactsRefreshBtn widget.Clickable
+	// the napps tab shows what the discovery relays have, what the people
+	// the user follows published or what the user published (nappsMode),
+	// switched by these. Its dev sub-tab is tabDev.
+	nappsMode       = modeDiscovery
+	modeDiscoBtn    widget.Clickable
+	modeContactsBtn widget.Clickable
+	modeMineBtn     widget.Clickable
+)
+
+const (
+	modeDiscovery = iota
+	modeContacts
+	modeMine
 )
 
 const APP_TITLE = "Verdana"
@@ -221,13 +228,25 @@ func setBundleEdit(edit *bundleEditState) {
 	}
 }
 
-// discoNapps is the list the napps tab is showing: the discovery relays' or
-// the contacts'.
+// discoNapps is the list the napps tab is showing: the discovery relays',
+// the contacts' or the user's own.
 func discoNapps(st backend.State) []backend.Napp {
-	if contactsMode {
+	switch currentNappsMode(st) {
+	case modeContacts:
 		return st.Contacts
+	case modeMine:
+		return st.Mine
 	}
 	return st.Discovery
+}
+
+// currentNappsMode is nappsMode, except that the mine mode is only there
+// while the user has napps stored.
+func currentNappsMode(st backend.State) int {
+	if nappsMode == modeMine && len(st.Mine) == 0 {
+		return modeDiscovery
+	}
+	return nappsMode
 }
 
 // discoveryFilter returns the indices of discoNapps that pass the filter
@@ -476,17 +495,19 @@ func gioMain() {
 							go backend.Discover()
 						}
 						if modeDiscoBtn.Clicked(gtx) {
-							contactsMode = false
+							nappsMode = modeDiscovery
+							setTab(tabDiscovery)
 						}
 						if modeContactsBtn.Clicked(gtx) {
-							contactsMode = true
+							nappsMode = modeContacts
+							setTab(tabDiscovery)
+							// what the background sync stored so far
+							go backend.RefreshContacts()
 						}
-						if contactsMode && tab == tabDiscovery {
-							// fetched the first time the mode is looked at
-							backend.EnsureContacts()
-						}
-						if contactsRefreshBtn.Clicked(gtx) && !st.ContactsFetching {
-							go backend.DiscoverContacts()
+						if modeMineBtn.Clicked(gtx) {
+							nappsMode = modeMine
+							setTab(tabDiscovery)
+							go backend.RefreshContacts()
 						}
 						disco := discoNapps(st)
 						for len(cardBtns) < len(st.Installed) {

@@ -283,12 +283,13 @@ func Logout() { backend.Logout() }
 // Fetch looks for napps on the discovery relays.
 func Fetch() { go backend.Discover() }
 
-// FetchContacts looks for napps published by the people the user follows,
-// on their write relays, unless that was done already this session.
-func FetchContacts() { backend.EnsureContacts() }
+// FetchContacts reads the napps published by the people the user follows
+// (and by the user) from the local store again.
+func FetchContacts() { backend.RefreshContacts() }
 
-// RefetchContacts does it again regardless.
-func RefetchContacts() { go backend.DiscoverContacts() }
+// RefetchContacts does the same: the contacts' napps are fetched by a sync
+// that runs in the background on its own.
+func RefetchContacts() { backend.RefreshContacts() }
 
 // SetRelays replaces the discovery relay list, one relay per line.
 func SetRelays(text string) {

@@ -74,6 +74,7 @@ func Start(opts Options) (func(), error) {
 	}
 
 	loadState()
+	loadContactScans()
 	if opts.PersistWindows {
 		loadWindowRecords()
 	}

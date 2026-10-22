@@ -64,10 +64,12 @@ type State struct {
 	Installed []Napp `json:"installed"`
 	Discovery []Napp `json:"discovery"`
 
-	// Contacts are the napps published by the people the user follows,
-	// fetched from each one's write relays (see contacts.go), sorted like
-	// Discovery. ContactsFetching is true while that is running.
+	// Contacts are the napps published by the people the user follows and
+	// Mine the ones the user published, as the local store has them (see
+	// contacts.go), sorted like Discovery. ContactsFetching is true while
+	// the background sync is asking some contact's relays.
 	Contacts         []Napp `json:"contacts"`
+	Mine             []Napp `json:"mine"`
 	ContactsFetching bool   `json:"contactsFetching"`
 
 	// Previews are the napps opened without installing them (see
@@ -157,8 +159,10 @@ type launcherState struct {
 	devLoading bool
 	busy       map[string]bool
 
-	// contacts is the contacts mode's list, fetched for contactsFor.
+	// contacts and mine are the contacts and mine modes' lists, read for
+	// contactsFor.
 	contacts         []Napp
+	mine             []Napp
 	contactsFor      nostr.PubKey
 	contactsFetching bool
 
@@ -213,6 +217,7 @@ func Snapshot() State {
 		Installed:        append([]Napp(nil), ls.installed...),
 		Discovery:        append([]Napp(nil), ls.discovery...),
 		Contacts:         append([]Napp(nil), ls.contacts...),
+		Mine:             append([]Napp(nil), ls.mine...),
 		ContactsFetching: ls.contactsFetching,
 		Dev:              append([]Napp(nil), ls.dev...),
 		DevErr:           ls.devErr,
@@ -293,6 +298,11 @@ func Snapshot() State {
 	for i := range s.Contacts {
 		if s.Contacts[i].AuthorName == "" {
 			s.Contacts[i].AuthorName = s.Contacts[i].AuthorShortName()
+		}
+	}
+	for i := range s.Mine {
+		if s.Mine[i].AuthorName == "" {
+			s.Mine[i].AuthorName = s.Mine[i].AuthorShortName()
 		}
 	}
 	for i := range s.Dev {
@@ -426,7 +436,7 @@ func setDiscovery(list []Napp) {
 }
 
 // sortDiscovery floats the napps the user hasn't installed to the top of the
-// discovery list (and of the contacts one): that tab exists to show what's missing, and the ones already
+// discovery list (and of the contacts and mine ones): that tab exists to show what's missing, and the ones already
 // on disk are the ones they came here without. The ones on disk sink to the
 // bottom, where their buttons offer uninstall and update instead of install.
 // Within each group the order the relays delivered is kept.
@@ -435,7 +445,7 @@ func setDiscovery(list []Napp) {
 // or uninstalled after discovery ran moves between the groups immediately.
 func (l *launcherState) sortDiscovery() {
 	installed := installedIDs()
-	for _, list := range [][]Napp{l.discovery, l.contacts} {
+	for _, list := range [][]Napp{l.discovery, l.contacts, l.mine} {
 		sort.SliceStable(list, func(i, j int) bool {
 			_, iIn := installed[list[i].ID]
 			_, jIn := installed[list[j].ID]
@@ -462,8 +472,8 @@ func IsBusy(id string) bool {
 	return ls.busy[id]
 }
 
-// DiscoveredNapp looks a napp up among what discovery (or the contacts mode)
-// last found, so a UI can act on an id alone.
+// DiscoveredNapp looks a napp up among what discovery (or the contacts and
+// mine modes) last found, so a UI can act on an id alone.
 func DiscoveredNapp(id string) (Napp, bool) {
 	ls.mu.Lock()
 	defer ls.mu.Unlock()
@@ -472,9 +482,11 @@ func DiscoveredNapp(id string) (Napp, bool) {
 			return n, true
 		}
 	}
-	for _, n := range ls.contacts {
-		if n.ID == id {
-			return n, true
+	for _, list := range [][]Napp{ls.contacts, ls.mine} {
+		for _, n := range list {
+			if n.ID == id {
+				return n, true
+			}
 		}
 	}
 	return Napp{}, false

@@ -394,7 +394,7 @@ func layoutMain(
 		}),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layoutTabs(gtx, th, tabHomeBtn, tabWindowsBtn, tabNappsBtn, tabDiscoBtn, tabDevBtn, tab, len(st.Installed), len(st.Discovery), extra, extraBtn)
+			return layoutTabs(gtx, th, tabHomeBtn, tabWindowsBtn, tabNappsBtn, tabDiscoBtn, tab, len(st.Installed), len(st.Discovery), extra, extraBtn)
 		}),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
@@ -412,7 +412,7 @@ func layoutMain(
 				return layoutNappsTab(gtx, th, installedList, installedFilterEd, cardBtns, uninstBtns, installedUpdateBtns, installedOpenBtns, installedAuthorBtns, pinBtns, checkUpdBtn, updateAllBtn, instVis, st)
 			}
 			if tab == 2 {
-				return layoutDiscoveryTab(gtx, th, discoveryList, relaysEd, filterEd, fetchBtn, actionBtns,
+				return layoutDiscoveryTab(gtx, th, tabDevBtn, discoveryList, relaysEd, filterEd, fetchBtn, actionBtns,
 					updateBtns, discoCardBtns, discoOpenBtns, discoAuthorBtns, vis, st, installedSet, busy)
 			}
 			if tab == 4 && extra != nil {
@@ -421,7 +421,7 @@ func layoutMain(
 				}
 				return layoutProfileDetail(gtx, th, extra, profileList, profileCardBtns, profileOpenBtns, profileActionBtns, profileUpdateBtns, installedSet, busy, readAuthBtn, st)
 			}
-			return layoutDevTab(gtx, th, devList, devURLed, devPathEd, loadURLBtn, browseBtn, loadFolderBtn,
+			return layoutDevTab(gtx, th, tabDevBtn, devList, devURLed, devPathEd, loadURLBtn, browseBtn, loadFolderBtn,
 				devOpenBtns, devUnloadBtns, devPublishBtns, st)
 		}),
 	)
@@ -442,8 +442,7 @@ func layoutTabs(
 	homeBtn,
 	windowsBtn,
 	nappsBtn,
-	discoBtn,
-	devBtn *widget.Clickable,
+	discoBtn *widget.Clickable,
 	tab,
 	nInstalled,
 	nDiscovery int,
@@ -475,17 +474,8 @@ func layoutTabs(
 		}),
 		layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return tabBtn(gtx, discoBtn, "Napps", "Find napps published on the relays or by the people you follow, and install them", tab == 2)
+			return tabBtn(gtx, discoBtn, "Napps", "Find napps published on the relays or by the people you follow, and install them", tab == tabDiscovery || tab == tabDev)
 		}),
-	}
-	// devBtn is nil outside dev builds: no dev tab there
-	if devBtn != nil {
-		children = append(children,
-			layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return tabBtn(gtx, devBtn, "Dev", "Load a napp you are working on from a folder or a dev server", tab == 3)
-			}),
-		)
 	}
 	// the ephemeral detail tab lives at the end and vanishes the moment
 	// any other tab is picked
@@ -936,6 +926,7 @@ func layoutNappsTab(
 func layoutDiscoveryTab(
 	gtx layout.Context,
 	th *material.Theme,
+	devBtn *widget.Clickable,
 	list *widget.List,
 	relaysEd,
 	filterEd *widget.Editor,
@@ -951,35 +942,17 @@ func layoutDiscoveryTab(
 	busy map[string]bool,
 ) layout.Dimensions {
 	discovery := discoNapps(st)
+	mode := currentNappsMode(st)
+	// the contacts and mine modes only read the local store, which a sync
+	// fills in the background (see backend/contacts.go)
+	stored := mode != modeDiscovery
 	fetchErr, fetching := st.FetchErr, st.Fetching
-	if contactsMode {
+	if stored {
 		fetchErr, fetching = "", st.ContactsFetching
 	}
-	modeBtn := func(gtx layout.Context, btn *widget.Clickable, label, tip string, active bool) layout.Dimensions {
-		pointer.CursorPointer.Add(gtx.Ops)
-		b := material.Button(th, btn, label)
-		b.TextSize = unit.Sp(13)
-		b.Inset = layout.Inset{Top: unit.Dp(6), Bottom: unit.Dp(6), Left: unit.Dp(12), Right: unit.Dp(12)}
-		if active {
-			b.Background = th.Palette.ContrastBg
-		} else {
-			b.Background = currentTheme().chipBg
-			b.Color = currentTheme().chipFg
-		}
-		return withTooltip(gtx, btn, tip, b.Layout)
-	}
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-		// discovery relays or contacts
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return modeBtn(gtx, &modeDiscoBtn, "Discovery", "Napps published on the relays below", !contactsMode)
-				}),
-				layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return modeBtn(gtx, &modeContactsBtn, "Contacts", "Napps published by the people you follow, from their own relays", contactsMode)
-				}),
-			)
+			return layoutNappsModes(gtx, th, devBtn, tabDiscovery, st)
 		}),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
 		// the filter box, narrowing the entries below by name, author,
@@ -988,22 +961,18 @@ func layoutDiscoveryTab(
 			return editorBox(gtx, th, filterEd, "filter by name, author or description")
 		}),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
-		// contacts mode only gets a refresh button
+		// the stored modes only say whether the sync is at it
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			if !contactsMode {
+			if mode != modeContacts || !fetching {
 				return layout.Dimensions{}
 			}
-			pointer.CursorPointer.Add(gtx.Ops)
-			label := "Refresh"
-			if fetching {
-				label = "Fetching\u2026"
-			}
-			return withTooltip(gtx, &contactsRefreshBtn, "Ask your contacts' relays again for the napps they published",
-				material.Button(th, &contactsRefreshBtn, label).Layout)
+			l := material.Body2(th, "Looking for more napps on your contacts' relays\u2026")
+			l.Color = currentTheme().muted
+			return l.Layout(gtx)
 		}),
 		// discovery mode gets the relays editor
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			if contactsMode {
+			if stored {
 				return layout.Dimensions{}
 			}
 			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
@@ -1019,13 +988,13 @@ func layoutDiscoveryTab(
 			)
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			if contactsMode {
+			if stored {
 				return layout.Dimensions{}
 			}
 			return layout.Spacer{Height: unit.Dp(8)}.Layout(gtx)
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			if contactsMode {
+			if stored {
 				return layout.Dimensions{}
 			}
 			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
@@ -1052,12 +1021,12 @@ func layoutDiscoveryTab(
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			if len(vis) == 0 {
 				msg := "No napps yet. Pick some good relays and click \"Fetch napps\"."
-				if contactsMode {
-					msg = "None of the people you follow published a napp."
-				}
 				if fetching {
 					msg = "Searching relays\u2026"
-					if contactsMode {
+				}
+				if mode == modeContacts {
+					msg = "None of the people you follow published a napp yet."
+					if fetching {
 						msg = "Searching your contacts' relays\u2026"
 					}
 				}
@@ -1095,6 +1064,52 @@ func layoutDiscoveryTab(
 	)
 }
 
+// layoutNappsModes is the row of sub-tabs on top of the napps tab: the
+// discovery relays, the contacts, the user's own napps (only while there
+// are any) and, in dev builds (devBtn not nil), the dev one.
+func layoutNappsModes(gtx layout.Context, th *material.Theme, devBtn *widget.Clickable, tab int, st backend.State) layout.Dimensions {
+	mode := currentNappsMode(st)
+	modeBtn := func(gtx layout.Context, btn *widget.Clickable, label, tip string, active bool) layout.Dimensions {
+		pointer.CursorPointer.Add(gtx.Ops)
+		b := material.Button(th, btn, label)
+		b.TextSize = unit.Sp(13)
+		b.Inset = layout.Inset{Top: unit.Dp(6), Bottom: unit.Dp(6), Left: unit.Dp(12), Right: unit.Dp(12)}
+		if active {
+			b.Background = th.Palette.ContrastBg
+		} else {
+			b.Background = currentTheme().chipBg
+			b.Color = currentTheme().chipFg
+		}
+		return withTooltip(gtx, btn, tip, b.Layout)
+	}
+	children := []layout.FlexChild{
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return modeBtn(gtx, &modeDiscoBtn, "Discovery", "Napps published on the relays below", tab == tabDiscovery && mode == modeDiscovery)
+		}),
+		layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return modeBtn(gtx, &modeContactsBtn, "Contacts", "Napps published by the people you follow, fetched from their own relays in the background", tab == tabDiscovery && mode == modeContacts)
+		}),
+	}
+	if len(st.Mine) > 0 {
+		children = append(children,
+			layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return modeBtn(gtx, &modeMineBtn, "Mine", "The napps you published", tab == tabDiscovery && mode == modeMine)
+			}),
+		)
+	}
+	if devBtn != nil {
+		children = append(children,
+			layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return modeBtn(gtx, devBtn, "Dev", "Load a napp you are working on from a folder or a dev server", tab == tabDev)
+			}),
+		)
+	}
+	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx, children...)
+}
+
 // layoutDevTab is the dev-build tab for loading ephemeral napps: either a
 // dev-server url (used directly) or a local folder (served from disk by the
 // throwaway server). The cards open on tap, like the
@@ -1102,6 +1117,7 @@ func layoutDiscoveryTab(
 func layoutDevTab(
 	gtx layout.Context,
 	th *material.Theme,
+	devBtn *widget.Clickable,
 	list *widget.List,
 	urlEd,
 	pathEd *widget.Editor,
@@ -1121,6 +1137,10 @@ func layoutDevTab(
 		return withTooltip(gtx, btn, tip, b.Layout)
 	}
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layoutNappsModes(gtx, th, devBtn, tabDev, st)
+		}),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
 		// a dev-server url, e.g. http://localhost:5173
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			l := emph(material.Body2(th, "Dev server URL"))

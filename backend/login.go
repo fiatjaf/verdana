@@ -167,6 +167,7 @@ func setProfileFromUser(ctx context.Context, pk nostr.PubKey) {
 
 	log.Info().Str("pubkey", pk.Hex()).Str("name", name).Msg("login successful")
 	go Discover()
+	startContactsSync(pk)
 }
 
 // Logout forgets the signer and the stored login, and sends the launcher back
