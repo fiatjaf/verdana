@@ -481,7 +481,7 @@ func layoutProfileDetail(
 	cardBtns, openBtns, actionBtns, updateBtns []widget.Clickable,
 	installedSet map[string]bool,
 	busy map[string]bool,
-	themeBtn, readAuthBtn *widget.Clickable,
+	readAuthBtn *widget.Clickable,
 	st backend.State,
 ) layout.Dimensions {
 	pubkey := ""
@@ -546,15 +546,7 @@ func layoutProfileDetail(
 			}),
 			layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return themeButton(gtx, th, themeBtn)
-					}),
-					layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return readAuthButton(gtx, th, readAuthBtn, st.ReadAuth)
-					}),
-				)
+				return readAuthButton(gtx, th, readAuthBtn, st.ReadAuth)
 			}),
 		)
 	}

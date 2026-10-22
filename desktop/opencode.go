@@ -14,11 +14,11 @@ import (
 	"gioui.org/widget/material"
 )
 
-// The box at the end of the tab row takes a pasted npub, nprofile, note,
+// The box in the header, before the theme toggle and "Log out", takes a pasted npub, nprofile, note,
 // nevent or naddr (bare or as a nostr: link): a user opens their page, a
 // napp its page, and any other event goes to a napp with view:<kind> (see
 // backend.OpenCode). It sits small until focused, then takes the whole
-// rest of the row.
+// rest of the header.
 
 var (
 	openEd = widget.Editor{SingleLine: true, Submit: true}
@@ -135,7 +135,8 @@ func layoutOpenBox(gtx layout.Context, th *material.Theme) layout.Dimensions {
 		hint = errMsg
 	}
 
-	gtx.Constraints.Min.X = 0
+	// fill the whole slot so what comes after stays pinned to the right
+	gtx.Constraints.Min.X = gtx.Constraints.Max.X
 	return layout.E.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		gtx.Constraints.Min.X = width
 		gtx.Constraints.Max.X = width

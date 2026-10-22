@@ -390,7 +390,7 @@ func layoutMain(
 ) layout.Dimensions {
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layoutProfile(gtx, th, logoutBtn, st.ProfileName, st.ProfilePicture)
+			return layoutProfile(gtx, th, themeBtn, logoutBtn, st.ProfileName, st.ProfilePicture)
 		}),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -419,7 +419,7 @@ func layoutMain(
 				if extra.kind == "napp" {
 					return layoutNappDetail(gtx, th, extra, detailOpenBtn, detailPrimaryBtn, detailUpdateBtn, detailAuthorBtn, detailPinBtn, installedSet, busy, st)
 				}
-				return layoutProfileDetail(gtx, th, extra, profileList, profileCardBtns, profileOpenBtns, profileActionBtns, profileUpdateBtns, installedSet, busy, themeBtn, readAuthBtn, st)
+				return layoutProfileDetail(gtx, th, extra, profileList, profileCardBtns, profileOpenBtns, profileActionBtns, profileUpdateBtns, installedSet, busy, readAuthBtn, st)
 			}
 			return layoutDevTab(gtx, th, devList, devURLed, devPathEd, loadURLBtn, browseBtn, loadFolderBtn,
 				devOpenBtns, devUnloadBtns, devPublishBtns, st)
@@ -497,13 +497,6 @@ func layoutTabs(
 			}),
 		)
 	}
-	// the box for nostr codes takes up whatever the tabs leave
-	children = append(children,
-		layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
-		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			return layoutOpenBox(gtx, th)
-		}),
-	)
 	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx, children...)
 }
 
@@ -1273,12 +1266,13 @@ func layoutConfirmLogout(
 func layoutProfile(
 	gtx layout.Context,
 	th *material.Theme,
+	themeBtn,
 	logoutBtn *widget.Clickable,
 	name,
 	pic string,
 ) layout.Dimensions {
 	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			// the avatar and name lead to the user's own profile tab, where
 			// the settings are
 			pointer.CursorPointer.Add(gtx.Ops)
@@ -1299,6 +1293,16 @@ func layoutProfile(
 				})
 			})
 		}),
+		// the box for nostr codes takes up whatever the header leaves
+		layout.Rigid(layout.Spacer{Width: unit.Dp(16)}.Layout),
+		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			return layoutOpenBox(gtx, th)
+		}),
+		layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return themeButton(gtx, th, themeBtn)
+		}),
+		layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			if logoutBtn == nil {
 				return layout.Dimensions{}
