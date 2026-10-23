@@ -441,8 +441,8 @@ func setDiscovery(list []Napp) {
 // bottom, where their buttons offer uninstall and update instead of install.
 // Within each group the order the relays delivered is kept.
 //
-// The installed set is read here rather than remembered, so a napp installed
-// or uninstalled after discovery ran moves between the groups immediately.
+// It runs when the lists are filled, not on every install or uninstall, so
+// cards stay put under the user's clicks.
 func (l *launcherState) sortDiscovery() {
 	installed := installedIDs()
 	for _, list := range [][]Napp{l.discovery, l.contacts, l.mine} {
