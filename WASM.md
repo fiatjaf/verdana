@@ -200,6 +200,7 @@ window until it is answered, exactly like a web napp's overlay.
 | `napp.signWithKey`                         | `{event, sk}`                               | signed event                            | `napp.utils.signWithKey`       |
 | `napp.saveFile`                            | `{name, data, type}`, data **base64**       | `{name, size}`                          | `napp.utils.saveFile`          |
 | `napp.copyText`                            | `{text}`                                    | `{length}`                              | `napp.utils.copyText`          |
+| `napp.dev.installLocal`                    | `{files: [{path, data, type?}]}`, data **base64** | `{nappId}` or null              | `napp.dev.installLocal`        |
 | `napp.publish`                             | `{event, relays?}`                          | `{relays, published, failed}`           | `napp.utils.publish`           |
 | `napp.subscribe`                           | `{relays, filter, label?, maxEoseTimeout?}` | null, then subscription messages        | `napp.utils.subscribe`         |
 | `napp.unsubscribe`                         | `{callbackId}`                              | null                                    | the closer `subscribe` returns |

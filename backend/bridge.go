@@ -738,6 +738,16 @@ func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 			}
 			return copyTextForNapp(p.Text)
 
+		// ─── dev ─────────────────────────────────────────────────
+		case "napp.dev.installLocal":
+			var p struct {
+				Files []installLocalFile `json:"files"`
+			}
+			if err := json.Unmarshal([]byte(params), &p); err != nil {
+				return nil, err
+			}
+			return installLocalForNapp(ci, p.Files)
+
 		// ─── localStorage ────────────────────────────────────
 		// The webviews can't use their native localStorage: on desktop
 		// every window is a fresh origin (127.0.0.1 with a random port),

@@ -753,7 +753,7 @@
     else if (data instanceof ArrayBuffer) bytes = new Uint8Array(data)
     else if (ArrayBuffer.isView(data)) bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
     else if (typeof data === "string") bytes = new TextEncoder().encode(data)
-    else throw new Error("saveFile: data must be a Blob, ArrayBuffer or view")
+    else throw new Error("data must be a Blob, ArrayBuffer, view or string")
 
     let binary = ""
     const chunk = 0x8000
@@ -878,6 +878,23 @@
 
       // ── publishing ───────────────────────────────
       publish: (event, relays) => rpc("napp.publish", { event, relays })
+    },
+
+    // ── dev, with `requires: ["dev"]` ────────────────
+    dev: {
+      // Install (or replace) a local app from files: [{ path, data, type? }],
+      // data a Blob, ArrayBuffer, typed array or string, metadata.json among
+      // them. Resolves to { nappId }, or null if the user said no.
+      installLocal: async files =>
+        rpc("napp.dev.installLocal", {
+          files: await Promise.all(
+            Array.from(files || [], async f => ({
+              path: String(f.path),
+              data: await toBase64(f.data),
+              type: f.type
+            }))
+          )
+        })
     }
   })
 })()

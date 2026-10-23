@@ -49,19 +49,33 @@ func DevPublishDefaults() (servers, relays []string) {
 	return servers, relays
 }
 
-// DevPublishInfoFor reads current metadata and file sizes for a folder dev napp.
-func DevPublishInfoFor(id string) (DevPublishInfo, error) {
-	d := devLookup(id)
-	if d == nil || d.source != "folder" {
-		return DevPublishInfo{}, errors.New("dev napp is not a local folder")
+// publishFolder is where the files of a napp that can be published are: a
+// folder dev napp's folder, or a local napp's install dir (which holds its
+// metadata.json too).
+func publishFolder(id string) (string, error) {
+	if d := devLookup(id); d != nil && d.source == "folder" {
+		return d.dir, nil
 	}
-	napp, err := readDevFolder(d.dir)
+	if n, ok := InstalledNapp(id); ok && n.IsLocal() {
+		return nappBaseDir(id), nil
+	}
+	return "", errors.New("napp is neither a local napp nor a dev folder")
+}
+
+// DevPublishInfoFor reads current metadata and file sizes for a folder dev
+// napp or a local napp.
+func DevPublishInfoFor(id string) (DevPublishInfo, error) {
+	dir, err := publishFolder(id)
+	if err != nil {
+		return DevPublishInfo{}, err
+	}
+	napp, err := readDevFolder(dir)
 	if err != nil {
 		return DevPublishInfo{}, err
 	}
 	files := make([]DevPublishFile, 0, len(napp.Paths))
 	for _, p := range napp.Paths {
-		info, err := os.Stat(filepath.Join(d.dir, filepath.FromSlash(strings.TrimPrefix(p.Path, "/"))))
+		info, err := os.Stat(filepath.Join(dir, filepath.FromSlash(strings.TrimPrefix(p.Path, "/"))))
 		if err != nil {
 			return DevPublishInfo{}, err
 		}
@@ -70,7 +84,7 @@ func DevPublishInfoFor(id string) (DevPublishInfo, error) {
 	return DevPublishInfo{Napp: napp, Files: files}, nil
 }
 
-// PublishDev uploads a folder dev napp, signs its kind-35130/35131 manifest, and
+// PublishDev uploads a folder dev napp or a local napp, signs its kind-35130/35131 manifest, and
 // publishes it to selected relays. Every file must reach at least one server.
 // Progress is reported line-by-line through onStep (may be nil).
 func PublishDev(ctx context.Context, id string, servers, relays []string, protected bool, onStep func(string)) (int, int, error) {
@@ -85,9 +99,9 @@ func PublishDev(ctx context.Context, id string, servers, relays []string, protec
 	if sys == nil {
 		return 0, 0, errors.New("system not ready")
 	}
-	d := devLookup(id)
-	if d == nil || d.source != "folder" {
-		return 0, 0, errors.New("dev napp is not a local folder")
+	dir, err := publishFolder(id)
+	if err != nil {
+		return 0, 0, err
 	}
 	if len(servers) == 0 {
 		return 0, 0, errors.New("no Blossom servers selected")
@@ -95,7 +109,7 @@ func PublishDev(ctx context.Context, id string, servers, relays []string, protec
 	if len(relays) == 0 {
 		return 0, 0, errors.New("no relays selected")
 	}
-	napp, err := readDevFolder(d.dir)
+	napp, err := readDevFolder(dir)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -103,7 +117,7 @@ func PublishDev(ctx context.Context, id string, servers, relays []string, protec
 	okServers := make(map[string]bool)
 	step("uploading %d file(s) to %d blossom server(s)...", len(napp.Paths), len(servers))
 	for _, file := range napp.Paths {
-		path := filepath.Join(d.dir, filepath.FromSlash(strings.TrimPrefix(file.Path, "/")))
+		path := filepath.Join(dir, filepath.FromSlash(strings.TrimPrefix(file.Path, "/")))
 		st, statErr := os.Stat(path)
 		size := int64(-1)
 		if statErr == nil {

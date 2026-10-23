@@ -126,6 +126,14 @@ const maxParallelAssets = 6
 // way leaves whatever was installed there untouched (and a fresh install
 // leaves nothing behind).
 func replaceNappFiles(ctx context.Context, n Napp, base string, servers []string) error {
+	return replaceDir(base, func(tmp string) error {
+		return fetchNappAssets(ctx, n, tmp, servers)
+	})
+}
+
+// replaceDir has fill write a fresh directory next to base and only then puts
+// it in base's place: a fill that fails leaves base as it was.
+func replaceDir(base string, fill func(dir string) error) error {
 	parent := filepath.Dir(base)
 	if err := os.MkdirAll(parent, 0755); err != nil {
 		return err
@@ -134,7 +142,7 @@ func replaceNappFiles(ctx context.Context, n Napp, base string, servers []string
 	if err != nil {
 		return err
 	}
-	if err := fetchNappAssets(ctx, n, tmp, servers); err != nil {
+	if err := fill(tmp); err != nil {
 		os.RemoveAll(tmp)
 		return err
 	}

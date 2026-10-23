@@ -2,6 +2,7 @@ package backend
 
 import (
 	"context"
+	"slices"
 	"sync"
 	"time"
 
@@ -74,6 +75,12 @@ func CheckForUpdate(id string) {
 // relay set, so the outbox queries stay separate from the discovery query),
 // then refreshes the update cache. Returns whether every relay answered.
 func checkAllUpdates(napps []Napp) map[string]Napp {
+	// local napps came from no event: there is nothing to be newer than
+	napps = slices.DeleteFunc(slices.Clone(napps), func(n Napp) bool { return !n.HasAuthor() })
+	if len(napps) == 0 {
+		return nil
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer cancel()
 

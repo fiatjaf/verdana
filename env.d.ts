@@ -347,6 +347,21 @@ type Napp = {
   // Calls back like utils.subscribe. Every event is also saved to the store.
   outbox(filter: NostrFilter, opts?: SubscribeOpts): { close(): void }
   utils: NappUtils
+  // With `requires: ["dev"]`: install (or replace) a local app from files,
+  // metadata.json among them, as if the user had installed a folder holding
+  // them. It becomes the local napp `local~<metadata id>` — installed, with
+  // no author until it is published from its page — and opens (or its open
+  // windows reload). The first install asks the user, and so does replacing
+  // one another napp installed; null if they said no.
+  dev: {
+    installLocal(
+      files: Array<{
+        path: string
+        data: Blob | ArrayBuffer | ArrayBufferView | string
+        type?: string
+      }>
+    ): Promise<{ nappId: string } | null>
+  }
   /** Sync bech32/nip19 helpers. */
   nip19: NappNip19
   /** Sync misc helpers (hex / coordinates / bolt11). */

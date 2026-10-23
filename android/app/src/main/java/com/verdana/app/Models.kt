@@ -307,7 +307,9 @@ fun parseNapp(n: JSONObject): Napp {
         name = n.optString("name"),
         description = n.optString("description"),
         icon = n.optString("icon"),
-        author = n.optString("author").trim('"'),
+        // a local napp (installed from files, "local~…") has no author: the
+        // backend sends the zero key, which is no one to show or open
+        author = n.optString("author").trim('"').takeUnless { it.all { c -> c == '0' } } ?: "",
         authorName = n.optString("authorName"),
         actions = n.strings("actions"),
         requires = n.strings("requires"),

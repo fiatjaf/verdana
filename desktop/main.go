@@ -304,6 +304,7 @@ func gioMain() {
 		loadURLBtn          widget.Clickable
 		browseBtn           widget.Clickable
 		loadFolderBtn       widget.Clickable
+		installFolderBtn    widget.Clickable
 		devOpenBtns         []widget.Clickable
 		devUnloadBtns       []widget.Clickable
 		devPublishBtns      []widget.Clickable
@@ -743,10 +744,12 @@ func gioMain() {
 							}
 							if extraTabState.kind == "napp" {
 								n := detailNapp(extraTabState)
-								if detailAuthorBtn.Clicked(gtx) && n.Author.Hex() != "" {
+								if detailAuthorBtn.Clicked(gtx) && n.HasAuthor() {
 									openProfileTab(n.Author.Hex())
 								} else if detailBtns.nappEvent.Clicked(gtx) {
 									backend.ViewNappEvent(n)
+								} else if detailBtns.nappPublish.Clicked(gtx) && n.IsLocal() {
+									openDevPublishWindow(n.ID)
 								} else if detailBtns.nappRemove.Clicked(gtx) && previewSet[n.ID] && !installedSet[n.ID] && !busy[n.ID] {
 									go backend.Uninstall(n.ID)
 								} else if detailOpenBtn.Clicked(gtx) {
@@ -838,6 +841,11 @@ func gioMain() {
 									go backend.DevLoadFolder(p)
 								}
 							}
+							if installFolderBtn.Clicked(gtx) {
+								if p := strings.TrimSpace(devPathEd.Text()); p != "" {
+									go backend.InstallLocalFolder(p)
+								}
+							}
 							if browseBtn.Clicked(gtx) {
 								go pickAndLoadFolder(&devPathEd)
 							}
@@ -891,6 +899,7 @@ func gioMain() {
 							&loadURLBtn,
 							&browseBtn,
 							&loadFolderBtn,
+							&installFolderBtn,
 
 							closeBtns,
 							reopenBtns,

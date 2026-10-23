@@ -31,6 +31,10 @@ const (
 	PermSaveFile Permission = "save_file"
 	PermCopyText Permission = "copy_text"
 
+	// PermDevInstall is napp.dev.installLocal installing a napp's files as a
+	// local napp, for napps that declare `requires: ["dev"]`.
+	PermDevInstall Permission = "dev_install"
+
 	// PermDispatch is the one permission no napp asks for out loud: it is
 	// which napp should handle an action, a question only a rule can settle
 	// (a user who said "always open these with that one", or an installed

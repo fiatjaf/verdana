@@ -119,6 +119,10 @@ type Napp struct {
 	// written before kinds split carries.
 	Kind nostr.Kind `json:"kind,omitempty"`
 
+	// InstalledBy is, for a local napp put in by napp.dev.installLocal, the
+	// napp that did it: it may replace this one again without asking.
+	InstalledBy string `json:"installedBy,omitempty"`
+
 	// UpdateAvailable is stamped by Snapshot(): a newer version of this napp
 	// was seen on the relays (same kind, same author+d-tag, newer
 	// created_at). It is not part of the wire model.
@@ -132,6 +136,19 @@ func (n Napp) Label() string {
 	}
 	return n.ID
 }
+
+// LocalPrefix starts the id of a local napp: one installed from files on this
+// device (a folder, or what a dev napp handed over with napp.dev.installLocal)
+// instead of from an event. It is "local~" + its metadata.json id.
+const LocalPrefix = "local~"
+
+// IsLocal says whether this is a local napp: installed from files, with no
+// event, no author and no updates, until it is published.
+func (n Napp) IsLocal() bool { return strings.HasPrefix(n.ID, LocalPrefix) }
+
+// HasAuthor says whether the napp came from someone's event: local and dev
+// napps have no author.
+func (n Napp) HasAuthor() bool { return n.Author != nostr.ZeroPK }
 
 // KindOf is the event kind that described the napp, with the past folded in:
 // records written before the kinds split carry zero and were all pages.

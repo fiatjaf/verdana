@@ -45,6 +45,7 @@ var detailBtns struct {
 	profileView widget.Clickable // a profile tab's avatar and name
 	nappEvent   widget.Clickable // a napp tab's "Event" button
 	nappRemove  widget.Clickable // a napp tab's "Remove" button (previews)
+	nappPublish widget.Clickable // a napp tab's "Publish" button (local napps)
 }
 
 // installedNow and previewSet hold the ids of the installed and of the
@@ -103,7 +104,7 @@ func cardSecondClicked(n backend.Napp, installedSet, busy map[string]bool) {
 
 func openNappTab(n backend.Napp) {
 	pubkey := ""
-	if n.Author.Hex() != "" {
+	if n.HasAuthor() {
 		pubkey = n.Author.Hex()
 	}
 	extraTabState = &extraTab{kind: "napp", title: truncate(n.Label(), 18), nappID: n.ID, napp: n, pubkey: pubkey}
@@ -287,7 +288,9 @@ func layoutNappDetail(
 	pinned := slices.ContainsFunc(st.Pinned, func(p backend.Napp) bool { return p.ID == n.ID })
 
 	authorName, authorPic := "", ""
-	if n.Author.Hex() != "" {
+	if n.IsLocal() {
+		authorName = "installed from local files"
+	} else if n.HasAuthor() {
 		if p := cachedProfile(n.Author.Hex()); p != nil && p.ShortName != "" {
 			authorName, authorPic = p.ShortName, p.Picture
 		} else {
@@ -342,7 +345,7 @@ func layoutNappDetail(
 					}),
 				)
 			}
-			if authorBtn == nil || n.Author.Hex() == "" {
+			if authorBtn == nil || !n.HasAuthor() {
 				return inner(gtx)
 			}
 			pointer.CursorPointer.Add(gtx.Ops)
@@ -426,6 +429,21 @@ func layoutNappDetail(
 					return layout.Spacer{Width: unit.Dp(8)}.Layout(gtx)
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					// a local napp has no event yet: publishing makes one
+					if !n.IsLocal() {
+						return layout.Dimensions{}
+					}
+					pointer.CursorPointer.Add(gtx.Ops)
+					btn := &detailBtns.nappPublish
+					b := material.Button(th, btn, "Publish")
+					b.Background = currentTheme().chipBg
+					b.Color = currentTheme().chipFg
+					return withTooltip(gtx, btn, "Upload "+n.Label()+"'s files and publish it as a napp signed by you", b.Layout)
+				}),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					if n.IsLocal() {
+						return layout.Dimensions{}
+					}
 					pointer.CursorPointer.Add(gtx.Ops)
 					btn := &detailBtns.nappEvent
 					b := material.Button(th, btn, "Event")
@@ -448,7 +466,7 @@ func layoutNappDetail(
 	children = append(children,
 		detailRow(th, "ID", n.ID),
 		detailRow(th, "d", n.D),
-		detailRow(th, "Author", n.Author.Hex()),
+		detailRow(th, "Author", authorHex(n)),
 		detailRow(th, "Created", n.CreatedAt.Time().Format(time.RFC3339)),
 		detailRow(th, "Actions", strings.Join(n.Actions, ", ")),
 		detailRow(th, "Requires", strings.Join(n.Requires, ", ")),
@@ -605,4 +623,13 @@ func layoutProfileDetail(
 		// no nested author button
 		return renderNappCard(gtx, th, cardBtn, nil, openBtn, actBtn, updBtn, label, updLabel, nil, false, n)
 	})
+}
+
+// authorHex is the napp's author for the detail rows, nothing for a napp that
+// has none (a local one).
+func authorHex(n backend.Napp) string {
+	if !n.HasAuthor() {
+		return ""
+	}
+	return n.Author.Hex()
 }

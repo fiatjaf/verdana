@@ -345,7 +345,8 @@ func layoutMain(
 	updateAllBtn,
 	loadURLBtn,
 	browseBtn,
-	loadFolderBtn *widget.Clickable,
+	loadFolderBtn,
+	installFolderBtn *widget.Clickable,
 	closeBtns,
 	reopenBtns,
 	cardBtns,
@@ -418,7 +419,7 @@ func layoutMain(
 				return layoutProfileDetail(gtx, th, extra, profileList, profileCardBtns, profileOpenBtns, profileActionBtns, profileUpdateBtns, installedSet, busy, readAuthBtn, st)
 			}
 			return layoutDevTab(gtx, th, tabDevBtn, devList, devURLed, devPathEd, loadURLBtn, browseBtn, loadFolderBtn,
-				devOpenBtns, devUnloadBtns, devPublishBtns, st)
+				installFolderBtn, devOpenBtns, devUnloadBtns, devPublishBtns, st)
 		}),
 	)
 }
@@ -1116,7 +1117,8 @@ func layoutDevTab(
 	pathEd *widget.Editor,
 	loadURLBtn,
 	browseBtn,
-	loadFolderBtn *widget.Clickable,
+	loadFolderBtn,
+	installFolderBtn *widget.Clickable,
 	openBtns,
 	unloadBtns,
 	publishBtns []widget.Clickable,
@@ -1172,6 +1174,10 @@ func layoutDevTab(
 				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					return smallBtn(gtx, loadFolderBtn, "Load folder", "Run the napp in this folder, straight from its files")
+				}),
+				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return smallBtn(gtx, installFolderBtn, "Install folder", "Install a copy of this folder as a local napp, kept across restarts")
 				}),
 			)
 		}),
@@ -1453,7 +1459,10 @@ func renderNappCard(
 	napp backend.Napp,
 ) layout.Dimensions {
 	authorName, authorPic := "", ""
-	if napp.Author.Hex() != "" {
+	if napp.IsLocal() {
+		// no author to show or open: say where it came from instead
+		authorName, authorBtn = "installed from local files", nil
+	} else if napp.HasAuthor() {
 		if p := cachedProfile(napp.Author.Hex()); p != nil && p.ShortName != "" {
 			authorName, authorPic = p.ShortName, p.Picture
 		} else {
