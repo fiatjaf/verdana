@@ -306,7 +306,9 @@ does:
    arrives as an action message: `id` is the dispatch, and the bytes carry
    the action's `name`, its `payload` and that `idx`. A napp declaring
    `view` gets every `view:<kind>` action, named just `view`; only a napp
-   declaring `view:<kind>` itself sees the kind in the name.
+   declaring `view:<kind>` itself sees the kind in the name. A raw `view`
+   dispatched with an event reference goes out as `view:<kind>` once the
+   launcher knows the event's kind.
 3. The napp answers with `napp.dispatchResult`, `{"id": <the dispatch id>,
    "result": ...}` or `{"id", "error": "..."}`, and whoever dispatched it gets
    the result. An id of `-1` means nobody is waiting, so there is nothing to

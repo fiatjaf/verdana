@@ -12,12 +12,14 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"fiatjaf.com/nostr"
+	"fiatjaf.com/nostr/nip19"
 	"fiatjaf.com/nostr/sdk"
 
 	"github.com/puzpuzpuz/xsync/v3"
@@ -772,8 +774,43 @@ func runNappAction(
 
 	req := &actionRequest{name: name, payload: payload}
 
+	// a raw "view" says nothing of the kind of event it is about: once that
+	// is known it goes out as view:<kind>, reaching the napps viewing that
+	// kind as well as those declaring "view". Finding out may mean fetching
+	// the event, so a picker asks among the "view" napps meanwhile and takes
+	// in the others when the kind turns up.
+	var viewing *viewLookup
+	if name == "view" {
+		lookupCtx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		viewing = lookupView(lookupCtx, payload)
+	}
+	var candidates []Napp
+	var open []*Instance
+	// takeView switches to view:<kind> if the kind is known, waiting for it
+	// to be found out when wait says so.
+	takeView := func(wait bool) {
+		if viewing == nil {
+			return
+		}
+		if wait {
+			<-viewing.done
+		}
+		select {
+		case <-viewing.done:
+		default:
+			return
+		}
+		if r := viewing.res; r != nil {
+			req = &actionRequest{name: r.name, payload: r.payload}
+			candidates, open = r.candidates, r.open
+		}
+		viewing = nil
+	}
+
 	// an explicit instance skips every choice: route it straight there
 	if opts.Instance != "" {
+		takeView(true)
 		ci := lookupInstance(opts.Instance)
 		if ci == nil {
 			return nil, fmt.Errorf("no open instance %q", opts.Instance)
@@ -783,13 +820,24 @@ func runNappAction(
 		return dispatchTo(ctx, callerID, name, ci, req)
 	}
 
-	candidates, open := findHandlersForAction(name)
+	candidates, open = findHandlersForAction(name)
+
+	// who asked matters to the rules: the same action from another napp is
+	// another question
+	key := RuleKey{Napp: callerID, Permission: PermDispatch, Subject: name}
+	rule, ruled := lookupRule(key)
+
+	// with no "view" napps to show yet, or a rule to settle it, there is
+	// nothing to ask meanwhile: wait for the kind
+	if ruled || len(candidates)+len(open) == 0 {
+		takeView(true)
+	}
 	if len(candidates) == 0 && len(open) == 0 {
 		return nil, fmt.Errorf("no installed napp handles %q", name)
 	}
 
 	// exactly one possibility: no need to bother the user
-	if len(candidates)+len(open) == 1 {
+	if len(candidates)+len(open) == 1 && viewing == nil {
 		if len(open) == 1 {
 			log.Info().Str("from", callerName).Str("action", name).
 				Str("instance", open[0].instance).Msg("dispatching action")
@@ -816,12 +864,8 @@ func runNappAction(
 		}
 	}()
 
-	// who asked matters to the rules: the same action from another napp is
-	// another question
-	key := RuleKey{Napp: callerID, Permission: PermDispatch, Subject: name}
-
 	var choice PromptOption
-	if rule, ok := lookupRule(key); ok {
+	if ruled {
 		// a rule that names a handler settles it without anyone choosing:
 		// an installed configuration saying which napp it expects to get
 		// its actions, or a user who said to stop asking. A rule that only
@@ -841,11 +885,13 @@ func runNappAction(
 	} else {
 		var picked PromptOption
 		var ok bool
-		picked, picker, ok = askActionHandler(caller, name, payload, candidates, open)
+		picked, picker, ok = askActionHandler(caller, name, payload, candidates, open, viewing)
 		if !ok {
 			return nil, errors.New("action handler selection cancelled")
 		}
 		choice = picked
+		// whatever the picker took in is what the choice was made among
+		takeView(false)
 	}
 
 	if choice.Instance != "" {
@@ -1061,6 +1107,74 @@ func (ci *Instance) settleDispatch(id int, result json.RawMessage, errMsg string
 	case ch <- WireMsg{Result: result, Error: errMsg}:
 	default:
 	}
+}
+
+// viewLookup is the search for the kind of event a raw "view" is about: res
+// is set, nil when it came to nothing, once done is closed.
+type viewLookup struct {
+	done chan struct{}
+	res  *viewResolution
+}
+
+// viewResolution is a raw "view" made into view:<kind>: the action under its
+// new name, the payload to dispatch and every napp and window handling it.
+type viewResolution struct {
+	name       string
+	payload    json.RawMessage
+	candidates []Napp
+	open       []*Instance
+}
+
+// lookupView starts finding out what kind of event a raw "view" is about.
+func lookupView(ctx context.Context, payload json.RawMessage) *viewLookup {
+	l := &viewLookup{done: make(chan struct{})}
+	go func() {
+		defer close(l.done)
+		kind, resolved, ok := viewKind(ctx, payload)
+		if !ok {
+			return
+		}
+		name := "view:" + strconv.Itoa(int(kind))
+		candidates, open := findHandlersForAction(name)
+		l.res = &viewResolution{name: name, payload: resolved, candidates: candidates, open: open}
+	}()
+	return l
+}
+
+// viewKind finds the kind of the event a raw "view" payload refers to: read
+// off the code when it says so, from the event itself otherwise, fetching it
+// if needed. The payload returned is what to dispatch: the code as given, or
+// the event once it had to be fetched.
+func viewKind(ctx context.Context, payload json.RawMessage) (nostr.Kind, json.RawMessage, bool) {
+	var code string
+	if err := json.Unmarshal(payload, &code); err == nil {
+		code = strings.TrimSpace(code)
+		if i := strings.Index(strings.ToLower(code), "nostr:"); i >= 0 {
+			code = code[i+len("nostr:"):]
+		}
+		if prefix, data, err := nip19.Decode(code); err == nil {
+			switch prefix {
+			case "naddr":
+				return data.(nostr.EntityPointer).Kind, payload, true
+			case "nevent":
+				if k := data.(nostr.EventPointer).Kind; k != 0 {
+					return k, payload, true
+				}
+			}
+		}
+	}
+
+	resolved, ok := resolveViewPayload(ctx, payload)
+	if !ok {
+		return 0, payload, false
+	}
+	var evt struct {
+		Kind *nostr.Kind `json:"kind"`
+	}
+	if err := json.Unmarshal(resolved, &evt); err != nil || evt.Kind == nil {
+		return 0, payload, false
+	}
+	return *evt.Kind, resolved, true
 }
 
 // resolveViewPayload turns a string payload for a view:<kind> action into the

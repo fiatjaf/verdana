@@ -234,14 +234,63 @@ func AnswerPrompt(id int, ans Answer) {
 }
 
 func (p *Prompt) wait() Answer {
-	select {
-	case a := <-p.resp:
-		return a
-	case <-time.After(promptTimeout):
-		// unanswered is a plain no: nothing is remembered for it
-		AnswerPrompt(p.ID, Answer{})
-		return Answer{}
+	return p.waitOr(nil, nil)
+}
+
+// waitOr is wait, also calling then (once) if more is closed while the
+// prompt is still up, to change the prompt meanwhile.
+func (p *Prompt) waitOr(more chan struct{}, then func()) Answer {
+	timeout := time.NewTimer(promptTimeout)
+	defer timeout.Stop()
+	for {
+		select {
+		case a := <-p.resp:
+			return a
+		case <-more:
+			more = nil
+			then()
+		case <-timeout.C:
+			// unanswered is a plain no: nothing is remembered for it
+			AnswerPrompt(p.ID, Answer{})
+			return Answer{}
+		}
 	}
+}
+
+// updatePrompt changes a prompt that is still waiting and shows it again.
+// The prompt is replaced by an edited copy rather than changed in place, as
+// GUIs read the one they were handed without a lock.
+func updatePrompt(id int, edit func(*Prompt)) {
+	promptMu.Lock()
+	var slot **Prompt
+	if promptActive != nil && promptActive.ID == id {
+		slot = &promptActive
+	} else {
+		for i := range promptQueue {
+			if promptQueue[i].ID == id {
+				slot = &promptQueue[i]
+				break
+			}
+		}
+	}
+	if slot == nil || (*slot).done {
+		promptMu.Unlock()
+		return
+	}
+	edited := **slot
+	edit(&edited)
+	*slot = &edited
+	instance := edited.Instance
+	promptMu.Unlock()
+
+	// same id, so the overlay has to be told it changed
+	if instance != "" {
+		promptOverlays.Delete(instance)
+	}
+	if host != nil {
+		host.PromptsChanged()
+	}
+	syncPromptOverlays()
 }
 
 func newPrompt(napp, title string, body PromptBody, options []PromptOption) *Prompt {
@@ -307,7 +356,12 @@ func askApprovalFor(ci *Instance, perm Permission, title string, body func() Pro
 // back with the answer: whoever routes the action either opens the napp that
 // was picked in it or closes it. A platform with no picker windows has no way
 // to ask, so the action goes nowhere.
-func askActionHandler(caller *Instance, action string, payload json.RawMessage, candidates []Napp, open []*Instance) (PromptOption, *Instance, bool) {
+//
+// For a raw "view", viewing is the search for the event's kind: the picker
+// starts with the "view" napps and, when the kind turns up, also lists the
+// napps viewing that kind, after the options already shown so that what the
+// user may be about to click stays where it is.
+func askActionHandler(caller *Instance, action string, payload json.RawMessage, candidates []Napp, open []*Instance, viewing *viewLookup) (PromptOption, *Instance, bool) {
 	callerName := "launcher"
 	callerID := ""
 	if caller != nil {
@@ -320,6 +374,64 @@ func askActionHandler(caller *Instance, action string, payload json.RawMessage, 
 		return PromptOption{}, nil, false
 	}
 
+	options := handlerOptions(candidates, open)
+
+	// the napps the user keeps sending this action to come first, so the
+	// habitual answer is the one under their finger; everything else is left
+	// in the order it arrived in
+	sortHandlerOptions(options, callerID, action)
+
+	code := ""
+	if len(payload) != 0 && string(payload) != "null" {
+		code = preview(string(payload), 500)
+	}
+
+	p := newPrompt(callerName, "Open “"+action+"” with…", PromptBody{Code: code}, options)
+	p.Instance = picker.instance
+	// closing the picker is saying no
+	go func() {
+		<-picker.gone
+		AnswerPrompt(p.ID, Answer{})
+	}()
+	log.Info().Str("action", action).Int("options", len(options)).
+		Msg("asking the user to pick a handler")
+	enqueuePrompt(p)
+
+	var more chan struct{}
+	if viewing != nil {
+		more = viewing.done
+	}
+	answer := p.waitOr(more, func() {
+		r := viewing.res
+		if r == nil {
+			return
+		}
+		added := handlerOptions(r.candidates, r.open)
+		added = slices.DeleteFunc(added, func(o PromptOption) bool {
+			return slices.ContainsFunc(options, func(have PromptOption) bool {
+				return have.NappID == o.NappID && have.Instance == o.Instance
+			})
+		})
+		sortHandlerOptions(added, callerID, action)
+		options = append(options, added...)
+		log.Info().Str("action", action).Str("as", r.name).Int("added", len(added)).
+			Msg("the picker takes in the napps viewing the event's kind")
+		all := slices.Clone(options)
+		updatePrompt(p.ID, func(p *Prompt) {
+			p.Options = all
+			p.Code = preview(string(r.payload), 500)
+		})
+	})
+	if !answer.OK || answer.Index < 0 || answer.Index >= len(options) {
+		return PromptOption{}, picker, false
+	}
+	return options[answer.Index], picker, true
+}
+
+// handlerOptions are the picker's options for these handlers: open windows
+// first — routing into one keeps the user's state — and dev napps before the
+// rest in each.
+func handlerOptions(candidates []Napp, open []*Instance) []PromptOption {
 	options := make([]PromptOption, 0, len(candidates)+len(open))
 	for _, dev := range []bool{true, false} {
 		for _, ci := range open {
@@ -349,32 +461,7 @@ func askActionHandler(caller *Instance, action string, payload json.RawMessage, 
 			})
 		}
 	}
-
-	// the napps the user keeps sending this action to come first, so the
-	// habitual answer is the one under their finger; everything else is left
-	// in the order it arrived in
-	sortHandlerOptions(options, callerID, action)
-
-	code := ""
-	if len(payload) != 0 && string(payload) != "null" {
-		code = preview(string(payload), 500)
-	}
-
-	p := newPrompt(callerName, "Open “"+action+"” with…", PromptBody{Code: code}, options)
-	p.Instance = picker.instance
-	// closing the picker is saying no
-	go func() {
-		<-picker.gone
-		AnswerPrompt(p.ID, Answer{})
-	}()
-	log.Info().Str("action", action).Int("options", len(options)).
-		Msg("asking the user to pick a handler")
-	enqueuePrompt(p)
-	answer := p.wait()
-	if !answer.OK || answer.Index < 0 || answer.Index >= len(options) {
-		return PromptOption{}, picker, false
-	}
-	return options[answer.Index], picker, true
+	return options
 }
 
 // ─── showing prompts over the window that asked ──────────────────
