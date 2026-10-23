@@ -1068,7 +1068,7 @@ func layoutDiscoveryTab(
 
 // layoutNappsModes is the row of sub-tabs on top of the napps tab: the
 // discovery relays, the contacts, the user's own napps (only while there
-// are any) and, in dev builds (devBtn not nil), the dev one.
+// are any) and the dev one.
 func layoutNappsModes(gtx layout.Context, th *material.Theme, devBtn *widget.Clickable, tab int, st backend.State) layout.Dimensions {
 	mode := currentNappsMode(st)
 	modeBtn := func(gtx layout.Context, btn *widget.Clickable, label, tip string, active bool) layout.Dimensions {
@@ -1101,18 +1101,16 @@ func layoutNappsModes(gtx layout.Context, th *material.Theme, devBtn *widget.Cli
 			}),
 		)
 	}
-	if devBtn != nil {
-		children = append(children,
-			layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return modeBtn(gtx, devBtn, "Dev", "Load a napp you are working on from a folder or a dev server", tab == tabDev)
-			}),
-		)
-	}
+	children = append(children,
+		layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return modeBtn(gtx, devBtn, "Dev", "Load a napp you are working on from a folder or a dev server", tab == tabDev)
+		}),
+	)
 	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx, children...)
 }
 
-// layoutDevTab is the dev-build tab for loading ephemeral napps: either a
+// layoutDevTab is the dev tab for loading ephemeral napps: either a
 // dev-server url (used directly) or a local folder (served from disk by the
 // throwaway server). The cards open on tap, like the
 // installed tab's.

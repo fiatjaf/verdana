@@ -473,7 +473,7 @@ func gioMain() {
 						if tabDiscoBtn.Clicked(gtx) {
 							setTab(tabDiscovery)
 						}
-						if devEnabled && tabDevBtn.Clicked(gtx) {
+						if tabDevBtn.Clicked(gtx) {
 							setTab(tabDev)
 						}
 						if extraTabState != nil && tabExtraBtn.Clicked(gtx) {
@@ -834,9 +834,9 @@ func gioMain() {
 								}
 							}
 						} else {
-							// the dev tab (only reachable in dev builds): load a
-							// napp from a folder or a dev-server url, open and
-							// unload the ephemeral ones below
+							// the dev tab: load a napp from a folder or a
+							// dev-server url, open and unload the ephemeral
+							// ones below
 							if loadURLBtn.Clicked(gtx) {
 								if u := strings.TrimSpace(devURLed.Text()); u != "" {
 									go backend.DevLoadURL(u)
@@ -874,17 +874,13 @@ func gioMain() {
 								}
 							}
 						}
-						var devBtn *widget.Clickable
-						if devEnabled {
-							devBtn = &tabDevBtn
-						}
 						return layoutMain(gtx,
 							th,
 							&tabHomeBtn,
 							&tabCollectionBtn,
 							&tabWindowsBtn,
 							&tabDiscoBtn,
-							devBtn,
+							&tabDevBtn,
 							&themeBtn,
 							&readAuthBtn,
 							&logoutBtn,

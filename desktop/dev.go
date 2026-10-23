@@ -1,5 +1,3 @@
-//go:build dev
-
 package main
 
 import (
@@ -12,11 +10,7 @@ import (
 	"verdana/backend"
 )
 
-// This file is only compiled with the dev tag (see justfile run): it holds
-// the dev tab's enable flag and the native folder picker behind its Browse
-// button.
-
-const devEnabled = true
+// The native folder picker behind the dev tab's Browse button.
 
 // pickAndLoadFolder opens the platform's folder picker and loads whatever
 // folder the user picked as a dev napp.
