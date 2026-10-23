@@ -20,11 +20,12 @@ import (
 // tab ids: the ephemeral detail tab lives at the end and vanishes the
 // moment any other tab is picked.
 const (
-	tabWindows   = 0
-	tabDiscovery = 2
-	tabDev       = 3
-	tabExtra     = 4
-	tabHome      = 5
+	tabWindows    = 0
+	tabDiscovery  = 2
+	tabDev        = 3
+	tabExtra      = 4
+	tabHome       = 5
+	tabCollection = 6
 )
 
 // extraTab is the ephemeral tab: either a napp page or a profile page.

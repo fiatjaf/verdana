@@ -37,7 +37,6 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -231,10 +230,11 @@ fun LoginScreen(activity: MainActivity, st: LauncherState) {
 @Composable
 fun LauncherScreen(activity: MainActivity, st: LauncherState) {
     val theme = themeByName(st.theme)
-    // tabs: 0 home (pinned and installed), 1 sessions, 3 explore. Home is
-    // where the launcher opens as long as anything is pinned or installed.
+    // tabs: 0 home (pinned), 2 collection (installed), 1 sessions, 3
+    // explore. The launcher opens on Home when anything is pinned, else on
+    // the collection when anything is installed.
     var tab by remember {
-        mutableStateOf(if (st.home.isNotEmpty() || st.installed.isNotEmpty()) 0 else 3)
+        mutableStateOf(if (st.home.isNotEmpty()) 0 else if (st.installed.isNotEmpty()) 2 else 3)
     }
     // the bundle editor, over the Sessions tab while it is open: from
     // "Create bundle…" there, an Edit there, or holding a bundle on Home
@@ -293,6 +293,8 @@ fun LauncherScreen(activity: MainActivity, st: LauncherState) {
             Row(Modifier.horizontalScroll(rememberScrollState())) {
                 TabChip("Home", tab == 0 && detailNapp == null && detailProfile == null, theme) { pickTab(0) }
                 Spacer(Modifier.width(8.dp))
+                TabChip("Collection", tab == 2 && detailNapp == null && detailProfile == null, theme) { pickTab(2) }
+                Spacer(Modifier.width(8.dp))
                 TabChip("Sessions", tab == 1 && detailNapp == null && detailProfile == null, theme) { pickTab(1) }
                 Spacer(Modifier.width(8.dp))
                 TabChip("Explore", tab == 3 && detailNapp == null && detailProfile == null, theme) { pickTab(3) }
@@ -315,18 +317,13 @@ fun LauncherScreen(activity: MainActivity, st: LauncherState) {
                 detailProfile != null -> AuthorProfileDetailScreen(activity, st, theme, detailProfile!!,
                     onBack = { detailProfile = null },
                     onOpenNapp = { openNapp(it) })
-                tab == 0 -> Column(Modifier.fillMaxSize()) {
-                    SectionHeading("Pinned", theme)
-                    HomeTab(activity, st, theme, onDetail = { openNapp(it) }, onEditBundle = {
-                        bundleEdit = BundleEdit(it.name, activity.bundleDraft(it.name))
-                        pickTab(1)
-                    })
-                    Spacer(Modifier.height(16.dp))
-                    SectionHeading("Installed", theme)
-                    InstalledTab(activity, st, theme, installedFilter, { installedFilter = it },
-                        onDetail = { openNapp(it) }, onAuthor = { openProfile(it) },
-                        modifier = Modifier.weight(1f))
-                }
+                tab == 0 -> HomeTab(activity, st, theme, onDetail = { openNapp(it) }, onEditBundle = {
+                    bundleEdit = BundleEdit(it.name, activity.bundleDraft(it.name))
+                    pickTab(1)
+                })
+                tab == 2 -> InstalledTab(activity, st, theme, installedFilter, { installedFilter = it },
+                    onDetail = { openNapp(it) }, onAuthor = { openProfile(it) },
+                    modifier = Modifier.fillMaxSize())
                 tab == 1 -> WindowsTab(activity, st, theme, bundleEdit, { bundleEdit = it })
                 else -> DiscoveryTab(activity, st, theme, contactsMode, { contactsMode = it },
                     relaysEd, { relaysEd = it }, discoveryFilter, { discoveryFilter = it },
@@ -531,18 +528,6 @@ private fun LogoutConfirmDialog(theme: Theme, onConfirm: () -> Unit, onDismiss: 
             }
         }
     }
-}
-
-// SectionHeading titles a section of a tab.
-@Composable
-private fun SectionHeading(title: String, theme: Theme) {
-    Text(
-        title,
-        color = theme.muted,
-        fontSize = 14.sp,
-        fontWeight = FontWeight.Bold,
-        modifier = Modifier.padding(bottom = 8.dp),
-    )
 }
 
 @Composable
@@ -934,7 +919,7 @@ private fun HomeTab(
     onEditBundle: (BundleInfo) -> Unit,
 ) {
     if (st.home.isEmpty()) {
-        Text("Nothing pinned yet. Pin napps from the list below to have them here.", color = theme.muted)
+        Text("Nothing pinned yet. Pin napps from the Collection tab to have them here.", color = theme.muted)
         return
     }
     // the grid is drawn from a local copy that the drag reorders as it
@@ -945,13 +930,11 @@ private fun HomeTab(
     val reorderState = rememberReorderableLazyGridState(gridState) { from, to ->
         order = order.toMutableList().apply { add(to.index, removeAt(from.index)) }
     }
-    // at most half the screen: the installed list goes under it
-    val maxHeight = LocalConfiguration.current.screenHeightDp.dp / 2
     LazyVerticalGrid(
         columns = GridCells.Adaptive(84.dp),
         state = gridState,
         verticalArrangement = Arrangement.spacedBy(16.dp),
-        modifier = Modifier.fillMaxWidth().heightIn(max = maxHeight),
+        modifier = Modifier.fillMaxSize(),
     ) {
         gridItems(order, key = { it.key }) { item ->
             // where a long press picked it up, to tell a move from a drop

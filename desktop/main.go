@@ -80,7 +80,7 @@ var (
 	gioWin *app.Window
 	log    zerolog.Logger
 
-	// filterEd and installedFilterEd are the discovery and installed tabs'
+	// filterEd and installedFilterEd are the discovery and collection tabs'
 	// filter boxes (one window, so one of each is enough; relaysEd stays
 	// with the window's other widgets).
 	filterEd          widget.Editor
@@ -163,9 +163,12 @@ func main() {
 	// the palette the user last chose, and its CSS tokens for napps
 	applyStoredTheme()
 
-	// startup tab: home if anything is pinned or installed, else explore
-	if snap := backend.Snapshot(); len(snap.Pinned) > 0 || len(snap.Installed) > 0 {
+	// startup tab: home if anything is pinned, else the collection if
+	// anything is installed, else explore
+	if snap := backend.Snapshot(); len(snap.Home) > 0 {
 		ui.tab = tabHome
+	} else if len(snap.Installed) > 0 {
+		ui.tab = tabCollection
 	} else {
 		ui.tab = tabDiscovery
 	}
@@ -287,6 +290,7 @@ func gioMain() {
 		relaysEd            widget.Editor
 		fetchBtn            widget.Clickable
 		tabHomeBtn          widget.Clickable
+		tabCollectionBtn    widget.Clickable
 		tabDiscoBtn         widget.Clickable
 		tabDevBtn           widget.Clickable
 		tabWindowsBtn       widget.Clickable
@@ -460,6 +464,9 @@ func gioMain() {
 						if tabHomeBtn.Clicked(gtx) {
 							setTab(tabHome)
 						}
+						if tabCollectionBtn.Clicked(gtx) {
+							setTab(tabCollection)
+						}
 						if tabWindowsBtn.Clicked(gtx) {
 							setTab(tabWindows)
 						}
@@ -629,9 +636,8 @@ func gioMain() {
 									}
 								}
 							}
-						} else if tab == tabHome {
-							// the installed list below the home grid (the grid
-							// takes its own pointer events, see home.go)
+						} else if tab == tabCollection {
+							// the installed list
 							// buttons on top of the card's own click area go
 							// first: a click that hit a button must not also
 							// count as opening the napp page. The author row
@@ -875,6 +881,7 @@ func gioMain() {
 						return layoutMain(gtx,
 							th,
 							&tabHomeBtn,
+							&tabCollectionBtn,
 							&tabWindowsBtn,
 							&tabDiscoBtn,
 							devBtn,

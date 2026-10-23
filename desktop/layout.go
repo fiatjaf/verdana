@@ -324,6 +324,7 @@ func layoutMain(
 	gtx layout.Context,
 	th *material.Theme,
 	tabHomeBtn,
+	tabCollectionBtn,
 	tabWindowsBtn,
 	tabDiscoBtn,
 	tabDevBtn,
@@ -394,7 +395,7 @@ func layoutMain(
 		}),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layoutTabs(gtx, th, tabHomeBtn, tabWindowsBtn, tabDiscoBtn, tab, len(st.Installed), len(st.Discovery), extra, extraBtn)
+			return layoutTabs(gtx, th, tabHomeBtn, tabCollectionBtn, tabWindowsBtn, tabDiscoBtn, tab, len(st.Installed), len(st.Discovery), extra, extraBtn)
 		}),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
@@ -402,7 +403,10 @@ func layoutMain(
 				return layoutBundleEditor(gtx, th, saveBundleBtn, cancelBundleBtn, editing)
 			}
 			if tab == tabHome {
-				return layoutHomeTab(gtx, th, installedList, installedFilterEd, cardBtns, uninstBtns, installedUpdateBtns, installedOpenBtns, installedAuthorBtns, pinBtns, checkUpdBtn, updateAllBtn, instVis, st)
+				return home.Layout(gtx, th, st)
+			}
+			if tab == tabCollection {
+				return layoutInstalledList(gtx, th, installedList, installedFilterEd, cardBtns, uninstBtns, installedUpdateBtns, installedOpenBtns, installedAuthorBtns, pinBtns, checkUpdBtn, updateAllBtn, instVis, st)
 			}
 			if tab == 0 {
 				return layoutWindowsTab(gtx, th, windowsList,
@@ -437,6 +441,7 @@ func layoutTabs(
 	gtx layout.Context,
 	th *material.Theme,
 	homeBtn,
+	collectionBtn,
 	windowsBtn,
 	discoBtn *widget.Clickable,
 	tab,
@@ -458,7 +463,11 @@ func layoutTabs(
 	}
 	children := []layout.FlexChild{
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return tabBtn(gtx, homeBtn, "Home", "The napps and bundles you pinned, and every napp on this computer", tab == tabHome)
+			return tabBtn(gtx, homeBtn, "Home", "The napps and bundles you pinned", tab == tabHome)
+		}),
+		layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return tabBtn(gtx, collectionBtn, "Collection", "Every napp installed on this computer", tab == tabCollection)
 		}),
 		layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -800,8 +809,7 @@ func layoutBundleEditor(
 	)
 }
 
-// layoutInstalledList is the installed napps, under the pinned grid on the
-// home tab.
+// layoutInstalledList is the installed napps, on the collection tab.
 func layoutInstalledList(
 	gtx layout.Context,
 	th *material.Theme,
