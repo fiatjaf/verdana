@@ -46,8 +46,7 @@ type Instance struct {
 
 	// subs maps a subscription's callbackId (a relay one or a store one) to
 	// its canceller.
-	subs  map[int]context.CancelFunc
-	subMu sync.Mutex
+	subs *xsync.MapOf[int, context.CancelFunc]
 
 	// actions maps a registerAction() pattern to its handler index (-1 when
 	// the napp registered no handler and only listens on popstate).
@@ -64,9 +63,8 @@ type Instance struct {
 
 	// dispatches maps a dispatch id to the channel waiting for the napp's
 	// answer (bridge.js replies with the napp.dispatchResult rpc).
-	dispMu     sync.Mutex
-	dispSerial int
-	dispatches map[int]chan WireMsg
+	dispSerial atomic.Int64
+	dispatches *xsync.MapOf[int, chan WireMsg]
 
 	// auxiliary is true when the window was opened as a temporary helper
 	// (napp.action with auxiliary:true): it closes as soon as its handler
@@ -350,12 +348,10 @@ func WindowClosed(instance string) {
 		return
 	}
 
-	ci.subMu.Lock()
-	for _, cancel := range ci.subs {
-		cancel()
-	}
-	ci.subs = make(map[int]context.CancelFunc)
-	ci.subMu.Unlock()
+	ci.subs.Range(func(callbackID int, _ context.CancelFunc) bool {
+		ci.untrackSub(callbackID)
+		return true
+	})
 
 	ci.goneOnce.Do(func() { close(ci.gone) })
 
@@ -548,10 +544,10 @@ func launchWithInstance(ctx context.Context, napp Napp, requestedInstance string
 	ci = &Instance{
 		instance:   instance,
 		napp:       napp,
-		subs:       make(map[int]context.CancelFunc),
+		subs:       xsync.NewMapOf[int, context.CancelFunc](),
 		actions:    make(map[string]int),
 		changed:    make(chan struct{}),
-		dispatches: make(map[int]chan WireMsg),
+		dispatches: xsync.NewMapOf[int, chan WireMsg](),
 		gone:       make(chan struct{}),
 	}
 
@@ -1039,21 +1035,10 @@ func dispatchToInstance(ctx context.Context, ci *Instance, req *actionRequest) (
 		return nil, nil
 	}
 
-	ci.dispMu.Lock()
-	if ci.dispatches == nil {
-		ci.dispatches = make(map[int]chan WireMsg)
-	}
-	ci.dispSerial++
-	id := ci.dispSerial
+	id := int(ci.dispSerial.Add(1))
 	ch := make(chan WireMsg, 1)
-	ci.dispatches[id] = ch
-	ci.dispMu.Unlock()
-
-	defer func() {
-		ci.dispMu.Lock()
-		delete(ci.dispatches, id)
-		ci.dispMu.Unlock()
-	}()
+	ci.dispatches.Store(id, ch)
+	defer ci.dispatches.Delete(id)
 
 	ci.sendAction(id, name, payload, &idx)
 
@@ -1097,10 +1082,8 @@ func (ci *Instance) sendAction(id int, name string, payload json.RawMessage, idx
 
 // settleDispatch resolves the waiter for a dispatch the napp just answered.
 func (ci *Instance) settleDispatch(id int, result json.RawMessage, errMsg string) {
-	ci.dispMu.Lock()
-	ch := ci.dispatches[id]
-	ci.dispMu.Unlock()
-	if ch == nil {
+	ch, ok := ci.dispatches.Load(id)
+	if !ok {
 		return
 	}
 	select {
@@ -1230,21 +1213,15 @@ func resolveViewPayload(ctx context.Context, payload json.RawMessage) (json.RawM
 // in, ending whatever held that id before.
 func (ci *Instance) trackSub(callbackID int) context.Context {
 	ctx, cancel := context.WithCancel(context.Background())
-	ci.subMu.Lock()
-	if old, ok := ci.subs[callbackID]; ok {
+	if old, loaded := ci.subs.LoadAndStore(callbackID, cancel); loaded {
 		old()
 	}
-	ci.subs[callbackID] = cancel
-	ci.subMu.Unlock()
 	return ctx
 }
 
 // untrackSub ends the subscription with this callbackId.
 func (ci *Instance) untrackSub(callbackID int) {
-	ci.subMu.Lock()
-	if cancel, ok := ci.subs[callbackID]; ok {
+	if cancel, ok := ci.subs.LoadAndDelete(callbackID); ok {
 		cancel()
-		delete(ci.subs, callbackID)
 	}
-	ci.subMu.Unlock()
 }

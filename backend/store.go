@@ -4,10 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"sync"
 
 	"fiatjaf.com/nostr"
 	"fiatjaf.com/nostr/eventstore"
+	"github.com/puzpuzpuz/xsync/v3"
 )
 
 // Everything that goes into the store goes through saveEvent (the sdk's own
@@ -76,38 +76,30 @@ type storeSub struct {
 	filters    []nostr.Filter
 }
 
-var (
-	storeSubsMu sync.Mutex
-	storeSubs   = make(map[*storeSub]struct{})
-)
+var storeSubs = xsync.NewMapOf[*storeSub, struct{}]()
 
 func startStoreSub(ctx context.Context, ci *Instance, callbackID int, filters []nostr.Filter) {
 	sub := &storeSub{ci: ci, callbackID: callbackID, filters: filters}
-	storeSubsMu.Lock()
-	storeSubs[sub] = struct{}{}
-	storeSubsMu.Unlock()
+	storeSubs.Store(sub, struct{}{})
 	go func() {
 		<-ctx.Done()
-		storeSubsMu.Lock()
-		delete(storeSubs, sub)
-		storeSubsMu.Unlock()
+		storeSubs.Delete(sub)
 	}()
 }
 
 // notifyStoreSubs hands a newly saved event to every store subscription it
 // matches.
 func notifyStoreSubs(evt nostr.Event) {
-	storeSubsMu.Lock()
 	var matching []*storeSub
-	for sub := range storeSubs {
+	storeSubs.Range(func(sub *storeSub, _ struct{}) bool {
 		for _, f := range sub.filters {
 			if f.Matches(evt) {
 				matching = append(matching, sub)
 				break
 			}
 		}
-	}
-	storeSubsMu.Unlock()
+		return true
+	})
 	if len(matching) == 0 {
 		return
 	}
@@ -123,9 +115,7 @@ func notifyStoreSubs(evt nostr.Event) {
 
 func (s *storeSub) deliver(event string) {
 	ci := s.ci
-	ci.subMu.Lock()
-	_, open := ci.subs[s.callbackID]
-	ci.subMu.Unlock()
+	_, open := ci.subs.Load(s.callbackID)
 	if !open {
 		return
 	}

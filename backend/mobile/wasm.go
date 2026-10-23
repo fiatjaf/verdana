@@ -8,6 +8,8 @@ import (
 	"verdana/backend"
 	"verdana/backend/wasm"
 	"verdana/backend/wasmhost"
+
+	"github.com/puzpuzpuz/xsync/v3"
 )
 
 // The ABI's input events and the masks they carry, for the View to build
@@ -69,15 +71,11 @@ type wasmWindow struct {
 	last    time.Time
 }
 
-var (
-	wasmWindowsMu sync.Mutex
-	wasmWindows   = make(map[string]*wasmWindow)
-)
+var wasmWindows = xsync.NewMapOf[string, *wasmWindow]()
 
 func lookupWasm(instance string) *wasmWindow {
-	wasmWindowsMu.Lock()
-	defer wasmWindowsMu.Unlock()
-	return wasmWindows[instance]
+	w, _ := wasmWindows.Load(instance)
+	return w
 }
 
 // openWasm starts the module for a wasm napp's window. It returns before the
@@ -98,9 +96,7 @@ func openWasm(ui UI, spec backend.WindowSpec) *wasmWindow {
 		},
 	})
 
-	wasmWindowsMu.Lock()
-	wasmWindows[spec.Instance] = w
-	wasmWindowsMu.Unlock()
+	wasmWindows.Store(spec.Instance, w)
 
 	go func() {
 		n, err := wasmhost.Load(spec.Wasm, w.nowMS, w.br.Call)
@@ -134,11 +130,9 @@ func (w *wasmWindow) invalidate() { w.ui.WasmInvalidate(w.instance) }
 // it as the window goes away: a napp stuck in a loop keeps its own thread,
 // and its memory, but does not take the launcher with it.
 func (w *wasmWindow) close() {
-	wasmWindowsMu.Lock()
-	if wasmWindows[w.instance] == w {
-		delete(wasmWindows, w.instance)
-	}
-	wasmWindowsMu.Unlock()
+	wasmWindows.Compute(w.instance, func(cur *wasmWindow, loaded bool) (*wasmWindow, bool) {
+		return cur, !loaded || cur == w
+	})
 
 	go func() {
 		w.mu.Lock()

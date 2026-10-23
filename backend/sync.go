@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"fiatjaf.com/nostr"
+	"github.com/puzpuzpuz/xsync/v3"
 )
 
 // napp.sync: bring an (author, kind) range into the store from the author's
@@ -98,10 +99,7 @@ func extendBound(author nostr.PubKey, kind nostr.Kind, lo, hi nostr.Timestamp) s
 
 // Calls for the same (author, kind) run one after the other, so the second
 // sees what the first brought and asks only for what is still missing.
-var (
-	pairLocksMu sync.Mutex
-	pairLocks   = make(map[string]*pairLock)
-)
+var pairLocks = xsync.NewMapOf[string, *pairLock]()
 
 type pairLock struct {
 	sync.Mutex
@@ -110,24 +108,21 @@ type pairLock struct {
 
 func lockPair(author nostr.PubKey, kind nostr.Kind) func() {
 	key := fmt.Sprintf("%x:%d", author[:], kind)
-	pairLocksMu.Lock()
-	l := pairLocks[key]
-	if l == nil {
-		l = &pairLock{}
-		pairLocks[key] = l
-	}
-	l.users++
-	pairLocksMu.Unlock()
+	l, _ := pairLocks.Compute(key, func(l *pairLock, loaded bool) (*pairLock, bool) {
+		if !loaded {
+			l = &pairLock{}
+		}
+		l.users++
+		return l, false
+	})
 
 	l.Lock()
 	return func() {
 		l.Unlock()
-		pairLocksMu.Lock()
-		l.users--
-		if l.users == 0 {
-			delete(pairLocks, key)
-		}
-		pairLocksMu.Unlock()
+		pairLocks.Compute(key, func(l *pairLock, _ bool) (*pairLock, bool) {
+			l.users--
+			return l, l.users == 0
+		})
 	}
 }
 
@@ -487,14 +482,9 @@ func fetchLatest(
 // collector saves what a fetch brings, once per event however many relays
 // send it.
 func collector(onEvent func(nostr.Event)) func(nostr.Event) {
-	var mu sync.Mutex
-	seen := make(map[nostr.ID]struct{}, 64)
+	seen := xsync.NewMapOf[nostr.ID, struct{}]()
 	return func(evt nostr.Event) {
-		mu.Lock()
-		_, dup := seen[evt.ID]
-		seen[evt.ID] = struct{}{}
-		mu.Unlock()
-		if !dup {
+		if _, dup := seen.LoadOrStore(evt.ID, struct{}{}); !dup {
 			onEvent(evt)
 		}
 	}

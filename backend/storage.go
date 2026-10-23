@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"github.com/puzpuzpuz/xsync/v3"
 )
 
 // localStorageQuota caps one napp's localStorage, like browsers do (~5MB).
@@ -22,10 +24,7 @@ type nappStorage struct {
 	size int // sum of len(key)+len(value) in bytes, utf-8
 }
 
-var (
-	storagesMu sync.Mutex
-	storages   = make(map[string]*nappStorage)
-)
+var storages = xsync.NewMapOf[string, *nappStorage]()
 
 // storageFileFor maps a napp id to its storage file. Napp ids are
 // "<16hex>~<d-tag>" or "dev~<id>": the d-tag is author-controlled and may
@@ -54,11 +53,11 @@ func storageFileFor(nappID string) string {
 func StorageFile(nappID string) string { return storageFileFor(nappID) }
 
 func storageFor(nappID string) *nappStorage {
-	storagesMu.Lock()
-	defer storagesMu.Unlock()
-	if s, ok := storages[nappID]; ok {
-		return s
-	}
+	s, _ := storages.LoadOrCompute(nappID, func() *nappStorage { return loadStorage(nappID) })
+	return s
+}
+
+func loadStorage(nappID string) *nappStorage {
 	s := &nappStorage{data: make(map[string]string)}
 	// read the JSON file into memory on first access; missing/corrupt
 	// means start empty rather than fail the window
@@ -74,7 +73,6 @@ func storageFor(nappID string) *nappStorage {
 			}
 		}
 	}
-	storages[nappID] = s
 	return s
 }
 

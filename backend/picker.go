@@ -8,6 +8,7 @@ import (
 
 	"fiatjaf.com/nostr"
 	"fiatjaf.com/nostr/nip19"
+	"github.com/puzpuzpuz/xsync/v3"
 )
 
 // A picker is the window the user picks an action's handler in, when more
@@ -31,10 +32,10 @@ func openPicker() *Instance {
 	ci := &Instance{
 		instance:   newInstanceID(),
 		picker:     true,
-		subs:       make(map[int]context.CancelFunc),
+		subs:       xsync.NewMapOf[int, context.CancelFunc](),
 		actions:    make(map[string]int),
 		changed:    make(chan struct{}),
-		dispatches: make(map[int]chan WireMsg),
+		dispatches: xsync.NewMapOf[int, chan WireMsg](),
 		gone:       make(chan struct{}),
 	}
 	registerInstance(ci)

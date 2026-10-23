@@ -305,12 +305,7 @@ func (s *subscription) relayEnded(url, reason string) {
 		s.deliver(subscriptionMsg{Type: "closed", Reasons: reasons})
 
 		// nothing more can come: forget it
-		s.ci.subMu.Lock()
-		if cancel, ok := s.ci.subs[s.callbackID]; ok {
-			cancel()
-			delete(s.ci.subs, s.callbackID)
-		}
-		s.ci.subMu.Unlock()
+		s.ci.untrackSub(s.callbackID)
 	}
 }
 
@@ -324,9 +319,7 @@ type subscriptionMsg struct {
 
 func (s *subscription) deliver(m subscriptionMsg) {
 	ci := s.ci
-	ci.subMu.Lock()
-	_, open := ci.subs[s.callbackID]
-	ci.subMu.Unlock()
+	_, open := ci.subs.Load(s.callbackID)
 	if !open {
 		return
 	}
