@@ -32,6 +32,7 @@ func TestConfigFromEvent(t *testing.T) {
 			{"sign", "allow"},
 			{"publish", "maybe"},
 			{"auth-on-reads", "no"},
+			{"open-links", "non-image"},
 		},
 	}
 	c := configFromEvent(evt)
@@ -52,8 +53,9 @@ func TestConfigFromEvent(t *testing.T) {
 	if h := c.Handlers[1]; h.Action != "edit" || h.Mode != HandlerSuggested || h.Singleton {
 		t.Fatalf("second handler: %+v", h)
 	}
-	if c.Sign != DecisionAllow || c.Publish != "" || c.ReadAuth == nil || *c.ReadAuth {
-		t.Fatalf("permissions: sign %q publish %q readAuth %v", c.Sign, c.Publish, c.ReadAuth)
+	if c.Sign != DecisionAllow || c.Publish != "" || c.ReadAuth == nil || *c.ReadAuth ||
+		c.OpenLinks != LinksNonImage {
+		t.Fatalf("permissions: sign %q publish %q readAuth %v openLinks %v", c.Sign, c.Publish, c.ReadAuth, c.OpenLinks)
 	}
 	if len(c.Bundles) != 1 {
 		t.Fatalf("bundles: %+v", c.Bundles)

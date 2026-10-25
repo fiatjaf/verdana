@@ -93,6 +93,31 @@ data class Prompt(
     val countdown: Long = 0,
 )
 
+// DefaultHandler is the napp an action goes to unless the user picks another
+// (see backend/config.go): mode is "timed", "suggested" or "forced", and a
+// singleton one goes into the napp's open window, when it has one.
+data class DefaultHandler(
+    val action: String,
+    val target: String,
+    val targetName: String,
+    val mode: String,
+    val singleton: Boolean,
+)
+
+// ConfigurationInfo is a napp configuration the launcher has loaded, as the
+// settings list it (see backend/config.go): summary is its one line, lines
+// what it sets, and applied whether this very version was applied.
+data class ConfigurationInfo(
+    val key: String,
+    val name: String,
+    val author: String,
+    val authorName: String,
+    val createdAt: Long,
+    val summary: String,
+    val lines: List<String>,
+    val applied: Boolean,
+)
+
 // a bundle (see backend/bundles.go): napps opened together, each with the
 // actions it gets. payload is the action's payload as raw JSON, "" for none.
 data class BundleAction(val type: String, val payload: String)
@@ -140,6 +165,14 @@ data class LauncherState(
     val fetching: Boolean,
     val theme: String,
     val readAuth: Boolean = true,
+    // what napps get when they ask to sign or publish and the user has not
+    // answered for them: "ask", "allow" or "deny"
+    val signPolicy: String = "ask",
+    val publishPolicy: String = "ask",
+    // which links napps open without asking: "yes" (all), "non-image" or "no"
+    val openLinks: String = "no",
+    val defaultHandlers: List<DefaultHandler> = listOf(),
+    val configurations: List<ConfigurationInfo> = listOf(),
     val relays: List<String>,
     val installed: List<Napp>,
     // napps opened without installing them: on disk, but not on the installed list
@@ -178,6 +211,33 @@ fun parseState(json: String): LauncherState {
         fetching = o.optBoolean("fetching"),
         theme = o.optString("theme", "light"),
         readAuth = o.optBoolean("readAuth", true),
+        signPolicy = o.optString("signPolicy", "ask"),
+        publishPolicy = o.optString("publishPolicy", "ask"),
+        openLinks = o.optString("openLinks", "no"),
+        defaultHandlers = (0 until (o.optJSONArray("defaultHandlers")?.length() ?: 0)).map { i ->
+            val h = o.getJSONArray("defaultHandlers").getJSONObject(i)
+            DefaultHandler(
+                action = h.optString("action"),
+                target = h.optString("target"),
+                targetName = h.optString("targetName"),
+                mode = h.optString("mode"),
+                singleton = h.optBoolean("singleton"),
+            )
+        },
+        configurations = (0 until (o.optJSONArray("configurations")?.length() ?: 0)).map { i ->
+            val c = o.getJSONArray("configurations").getJSONObject(i)
+            val lines = c.optJSONArray("lines")
+            ConfigurationInfo(
+                key = c.optString("key"),
+                name = c.optString("name"),
+                author = c.optString("author"),
+                authorName = c.optString("authorName"),
+                createdAt = c.optLong("createdAt"),
+                summary = c.optString("summary"),
+                lines = (0 until (lines?.length() ?: 0)).map { lines!!.getString(it) },
+                applied = c.optBoolean("applied"),
+            )
+        },
         relays = (0 until relaysArr.length()).map { relaysArr.getString(it) },
         installed = napps("installed"),
         previews = napps("previews"),

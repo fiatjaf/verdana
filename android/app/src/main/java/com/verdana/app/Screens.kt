@@ -5,6 +5,9 @@ import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.Icon
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -405,8 +408,8 @@ private fun OpenCodeDialog(activity: MainActivity, theme: Theme, onDismiss: () -
 }
 
 // ProfileScreen holds everything about the current user that used to live
-// on top of the launcher: picture, name, pubkey, theme switch, relay auth and
-// logout. Leaving it is the system back gesture.
+// on top of the launcher: picture, name, pubkey, theme switch and logout. The
+// rest of the settings are on their own screen (see SettingsScreen). Leaving it is the system back gesture.
 @Composable
 fun ProfileScreen(activity: MainActivity, st: LauncherState) {
     val theme = themeByName(st.theme)
@@ -446,19 +449,6 @@ fun ProfileScreen(activity: MainActivity, st: LauncherState) {
             TextButton(onClick = { activity.toggleTheme() }) {
                 Text(if (theme.name == "dark") "Light" else "Dark", color = theme.chipFg, fontSize = 13.sp)
             }
-        }
-        Spacer(Modifier.height(8.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("Authenticate when reading", color = theme.fg, fontWeight = FontWeight.Bold)
-                Text(
-                    "Tell relays that ask for it who you are. Publishing always does.",
-                    color = theme.muted,
-                    fontSize = 12.sp,
-                )
-            }
-            Spacer(Modifier.width(12.dp))
-            Switch(checked = st.readAuth, onCheckedChange = { activity.setReadAuth(it) })
         }
         Spacer(Modifier.height(8.dp))
         TextButton(
@@ -1582,6 +1572,7 @@ fun AppHeader(
     onActivate: (String) -> Unit,
     onClose: (String) -> Unit,
     onProfile: () -> Unit,
+    onSettings: () -> Unit,
 ) {
     var showList by remember { mutableStateOf(false) }
 
@@ -1615,6 +1606,18 @@ fun AppHeader(
             // the app name in the middle
             Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
                 Text("Verdana", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = theme.fg)
+            }
+
+            Spacer(Modifier.width(8.dp))
+
+            // the gear, for the settings screen
+            Box(
+                Modifier
+                    .clip(RoundedCornerShape(14.dp))
+                    .clickable { showList = false; onSettings() }
+                    .padding(4.dp),
+            ) {
+                Icon(Icons.Filled.Settings, contentDescription = "Settings", tint = theme.chipFg)
             }
 
             Spacer(Modifier.width(8.dp))

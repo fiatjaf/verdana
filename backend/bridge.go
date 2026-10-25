@@ -396,6 +396,13 @@ func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 				url = p.URL
 			}
 			if isImageURL(url) {
+				// opening every link without asking takes images too, past
+				// the napp's own window
+				if OpenLinks() == LinksAll {
+					if rule, ok := lookupRule(RuleKey{Napp: ci.napp.ID, Permission: PermOpenLink}); ok && rule.Decision.granted() {
+						return nil, openExternalLink(url)
+					}
+				}
 				return nil, showImage(ci, url)
 			}
 			if !askApproval(ci, PermOpenLink, "open a link in your browser", PromptBody{Code: preview(url, 200)}) {

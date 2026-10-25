@@ -61,9 +61,25 @@ type AppState struct {
 	ActionUsage map[string]int `json:"action_usage"`
 
 	// Configurations are the napp configurations (kind:35133, see
-	// config.go) the user applied, oldest first: where default handlers
-	// come from.
+	// config.go) the user applied, oldest first, as they were applied.
+	// What they set lives in the fields below, where the settings edit it.
 	Configurations []NappConfiguration `json:"configurations,omitempty"`
+
+	// DefaultHandlers are the actions' default handlers, by action. Only a
+	// napp configuration adds one; the settings change or remove them.
+	DefaultHandlers map[string]DefaultHandler `json:"default_handlers,omitempty"`
+
+	// SignPolicy and PublishPolicy are what every napp asking to sign or to
+	// publish gets when the user has not answered for that napp: empty (or
+	// "ask") asks. Set by a napp configuration or in the settings.
+	SignPolicy    Decision `json:"sign_policy,omitempty"`
+	PublishPolicy Decision `json:"publish_policy,omitempty"`
+
+	// LinkPolicy is which links napps open in the browser without asking,
+	// unless the user said no to that napp: LinksNone (empty), LinksNonImage
+	// or LinksAll (see config.go). Set by a napp configuration or in the
+	// settings.
+	LinkPolicy LinkPolicy `json:"link_policy,omitempty"`
 
 	// Theme is "light" or "dark": what the launcher draws with and what
 	// every napp window is told to track.
@@ -133,6 +149,14 @@ func loadState() {
 	}
 	if state.ActionUsage == nil {
 		state.ActionUsage = make(map[string]int)
+	}
+	// configurations applied before their settings were kept apart from
+	// them set those settings over again, in the order they were applied
+	if state.DefaultHandlers == nil {
+		state.DefaultHandlers = make(map[string]DefaultHandler)
+		for _, c := range state.Configurations {
+			takeConfigSettingsLocked(c)
+		}
 	}
 	if state.Theme != "light" && state.Theme != "dark" {
 		state.Theme = "light"

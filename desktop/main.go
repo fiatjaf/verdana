@@ -295,7 +295,6 @@ func gioMain() {
 		tabDevBtn           widget.Clickable
 		tabWindowsBtn       widget.Clickable
 		themeBtn            widget.Clickable
-		readAuthBtn         widget.Clickable
 		logoutBtn           widget.Clickable
 		confirmYesBtn       widget.Clickable
 		confirmNoBtn        widget.Clickable
@@ -482,8 +481,8 @@ func gioMain() {
 						if themeBtn.Clicked(gtx) {
 							toggleTheme()
 						}
-						if readAuthBtn.Clicked(gtx) {
-							backend.SetReadAuth(!backend.ReadAuth())
+						if detailBtns.settings.Clicked(gtx) {
+							openSettingsTab()
 						}
 						if detailBtns.selfProfile.Clicked(gtx) && st.Pubkey != "" {
 							openProfileTab(st.Pubkey)
@@ -882,7 +881,6 @@ func gioMain() {
 							&tabDiscoBtn,
 							&tabDevBtn,
 							&themeBtn,
-							&readAuthBtn,
 							&logoutBtn,
 							tab,
 

@@ -440,6 +440,24 @@ func SetTheme(name string, varsJSON string) { backend.SetTheme(name, varsJSON) }
 // or off. Publishing authenticates regardless.
 func SetReadAuth(on bool) { backend.SetReadAuth(on) }
 
+// SetNappPolicy sets what every napp asking for permission ("sign" or
+// "publish") gets when the user has not answered for it: "ask", "allow" or
+// "deny".
+func SetNappPolicy(permission, decision string) error {
+	return backend.SetNappPolicy(backend.Permission(permission), backend.Decision(decision))
+}
+
+// SetOpenLinks sets which links napps open in the browser without asking:
+// "yes" (all of them), "non-image" or "no".
+func SetOpenLinks(policy string) error { return backend.SetOpenLinks(backend.LinkPolicy(policy)) }
+
+// ApplyConfiguration applies one of the napp configurations the state lists,
+// by its key, without asking.
+func ApplyConfiguration(key string) error { return backend.ApplyConfiguration(key) }
+
+// RemoveDefaultHandler makes an action ask the user again.
+func RemoveDefaultHandler(action string) { backend.RemoveDefaultHandler(action) }
+
 // Profile returns what the launcher knows about a pubkey as JSON:
 // pubkey, npub, name, displayName, shortName, about, picture, nip05,
 // website. Blocks with its own timeout; call it off the main thread.

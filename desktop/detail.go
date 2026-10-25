@@ -30,7 +30,7 @@ const (
 
 // extraTab is the ephemeral tab: either a napp page or a profile page.
 type extraTab struct {
-	kind   string // "napp" or "profile"
+	kind   string // "napp", "profile" or "settings"
 	title  string
 	nappID string
 	napp   backend.Napp // fallback copy for napps not in installed/discovery
@@ -47,6 +47,7 @@ var detailBtns struct {
 	nappEvent   widget.Clickable // a napp tab's "Event" button
 	nappRemove  widget.Clickable // a napp tab's "Remove" button (previews)
 	nappPublish widget.Clickable // a napp tab's "Publish" button (local napps)
+	settings    widget.Clickable // the header's gear, opening the settings tab
 }
 
 // installedNow and previewSet hold the ids of the installed and of the
@@ -129,6 +130,12 @@ func openProfileTab(pubkeyHex string) {
 	extraTabState = &extraTab{kind: "profile", title: name, pubkey: pubkeyHex}
 	ensureProfile(pubkeyHex)
 	ensureAuthorNapps(pubkeyHex)
+	setTab(tabExtra)
+}
+
+// openSettingsTab shows the settings in the ephemeral tab.
+func openSettingsTab() {
+	extraTabState = &extraTab{kind: "settings", title: "Settings"}
 	setTab(tabExtra)
 }
 
@@ -499,7 +506,6 @@ func layoutProfileDetail(
 	cardBtns, openBtns, actionBtns, updateBtns []widget.Clickable,
 	installedSet map[string]bool,
 	busy map[string]bool,
-	readAuthBtn *widget.Clickable,
 	st backend.State,
 ) layout.Dimensions {
 	pubkey := ""
@@ -511,8 +517,6 @@ func layoutProfileDetail(
 		p = *cp
 	}
 	napps, fetching, fetchErr := cachedAuthorNapps(pubkey)
-
-	self := pubkey != "" && pubkey == st.Pubkey
 
 	children := []layout.FlexChild{
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -554,20 +558,6 @@ func layoutProfileDetail(
 		detailRow(th, "npub", p.Npub),
 		detailRow(th, "Pubkey", p.Pubkey),
 	)
-	if self {
-		children = append(children,
-			layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				t := emph(material.Body2(th, "Settings"))
-				t.Color = currentTheme().subtle
-				return t.Layout(gtx)
-			}),
-			layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return readAuthButton(gtx, th, readAuthBtn, st.ReadAuth)
-			}),
-		)
-	}
 	children = append(children,
 		layout.Rigid(layout.Spacer{Height: unit.Dp(24)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {

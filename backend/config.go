@@ -2,12 +2,14 @@ package backend
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"fiatjaf.com/nostr"
@@ -26,15 +28,17 @@ import (
 //	["sign", "ask"|"deny"|"allow"]
 //	["publish", "ask"|"deny"|"allow"]
 //	["auth-on-reads", "yes"|"no"]
+//	["open-links", "yes"|"non-image"|"no"]
 //
 // Each "napp …" item of a bundle tag is one napp of the bundle with the
 // actions it gets, each action followed by its payload as JSON (null for
 // none). An item can also carry more napps, each starting at another "napp".
 //
-// "sign" and "publish" answer every napp's signing and publishing for which
-// the user has not answered themselves (see configuredPermission), and
-// "auth-on-reads" sets whether the launcher authenticates to relays when
-// reading, once, when the configuration is applied.
+// Applying a configuration writes its default handlers, its "sign",
+// "publish" and "open-links" (what napps get when the user has not answered
+// for them, see NappPolicy) and its "auth-on-reads" into the launcher's
+// settings, where
+// the user can change them afterwards like anything else.
 
 // KindConfig is a napp configuration.
 const KindConfig = nostr.Kind(35133)
@@ -96,11 +100,13 @@ type NappConfiguration struct {
 	Bundles   []ConfigBundle   `json:"bundles"`
 
 	// Sign and Publish are what napps asking to sign or to publish get,
-	// empty when the configuration says nothing about it. ReadAuth is nil
-	// when it says nothing about authenticating on reads.
-	Sign     Decision `json:"sign,omitempty"`
-	Publish  Decision `json:"publish,omitempty"`
-	ReadAuth *bool    `json:"readAuth,omitempty"`
+	// empty when the configuration says nothing about it. ReadAuth and
+	// OpenLinks is nil and empty when it says nothing about authenticating
+	// on reads or about napps opening links without asking.
+	Sign      Decision   `json:"sign,omitempty"`
+	Publish   Decision   `json:"publish,omitempty"`
+	ReadAuth  *bool      `json:"readAuth,omitempty"`
+	OpenLinks LinkPolicy `json:"openLinks,omitempty"`
 }
 
 // key is what a configuration is replaced by: the same author and d-tag.
@@ -184,6 +190,13 @@ func configFromEvent(evt nostr.Event) NappConfiguration {
 				c.ReadAuth = &on
 			default:
 				log.Warn().Str("value", tag[1]).Msg("skipping an unknown auth-on-reads of a configuration")
+			}
+		case "open-links":
+			switch p := LinkPolicy(tag[1]); p {
+			case LinksAll, LinksNonImage, LinksNone:
+				c.OpenLinks = p
+			default:
+				log.Warn().Str("value", tag[1]).Msg("skipping an unknown open-links of a configuration")
 			}
 		case "bundle":
 			b, err := parseBundleTag(tag)
@@ -317,41 +330,92 @@ func parseBundleItem(item string) ([]ShortcutEntry, error) {
 
 // ─── applying a configuration ────────────────────────────────────
 
+// lines are what a configuration sets, a line each, the way the settings
+// list it and the prompt asking to apply it says it.
+func (c NappConfiguration) lines() []string {
+	var lines []string
+	for _, ref := range c.Napps {
+		lines = append(lines, "install "+ref.label())
+	}
+	for _, h := range c.Handlers {
+		line := "send “" + h.Action + "” to " + nappName(h.Target) + " (" + string(h.Mode)
+		if h.Singleton {
+			line += ", in its open window"
+		}
+		lines = append(lines, line+")")
+	}
+	for _, b := range c.Bundles {
+		lines = append(lines, "add the bundle “"+b.Name+"” to the home tab, with "+plural(len(b.Entries), "napp", "napps"))
+	}
+	for _, p := range []struct {
+		what string
+		d    Decision
+	}{{"sign", c.Sign}, {"publish", c.Publish}} {
+		switch p.d {
+		case DecisionAllow:
+			lines = append(lines, "let napps "+p.what+" without asking")
+		case DecisionDeny:
+			lines = append(lines, "never let napps "+p.what)
+		case DecisionAsk:
+			lines = append(lines, "ask before napps "+p.what)
+		}
+	}
+	if c.ReadAuth != nil {
+		if *c.ReadAuth {
+			lines = append(lines, "authenticate to relays when reading")
+		} else {
+			lines = append(lines, "not authenticate to relays when reading")
+		}
+	}
+	switch c.OpenLinks {
+	case LinksAll:
+		lines = append(lines, "let napps open links, images too, without asking")
+	case LinksNonImage:
+		lines = append(lines, "let napps open links without asking, showing images over the napp")
+	case LinksNone:
+		lines = append(lines, "ask before napps open links")
+	}
+	return lines
+}
+
+// label is a napp reference as a line can say it: the napp's name when the
+// launcher has seen it, its address or event id otherwise.
+func (ref NappRef) label() string {
+	if ref.Addr != "" {
+		if id, err := nappIDFromAddr(ref.Addr); err == nil {
+			if name := nappName(id); name != id {
+				return name
+			}
+		}
+		if ptr, err := nostr.ParseAddrString(ref.Addr); err == nil {
+			return "“" + ptr.Identifier + "”"
+		}
+		return ref.Addr
+	}
+	return "the napp " + ref.ID.Hex()[:12] + "…"
+}
+
+// nappName is a napp's name when the launcher knows it, its id otherwise.
+func nappName(id string) string {
+	if n, ok := InstalledNapp(id); ok {
+		return n.Label()
+	}
+	if n, ok := DiscoveredNapp(id); ok {
+		return n.Label()
+	}
+	if n, ok := seenNapp(id); ok {
+		return n.Label()
+	}
+	return id
+}
+
 // offerConfiguration asks the user whether to apply a configuration and, if
 // they agree, applies it. It returns right away.
 func offerConfiguration(evt nostr.Event) {
 	c := configFromEvent(evt)
+	reloadKnownConfigs()
 	go func() {
-		var lines []string
-		if len(c.Napps) > 0 {
-			lines = append(lines, "install "+plural(len(c.Napps), "napp", "napps"))
-		}
-		for _, h := range c.Handlers {
-			lines = append(lines, "send “"+h.Action+"” to "+h.Target+" ("+string(h.Mode)+")")
-		}
-		for _, b := range c.Bundles {
-			lines = append(lines, "add the bundle “"+b.Name+"” to the home tab")
-		}
-		for _, p := range []struct {
-			what string
-			d    Decision
-		}{{"sign", c.Sign}, {"publish", c.Publish}} {
-			switch p.d {
-			case DecisionAllow:
-				lines = append(lines, "let napps "+p.what+" without asking")
-			case DecisionDeny:
-				lines = append(lines, "never let napps "+p.what)
-			case DecisionAsk:
-				lines = append(lines, "ask before napps "+p.what)
-			}
-		}
-		if c.ReadAuth != nil {
-			if *c.ReadAuth {
-				lines = append(lines, "authenticate to relays when reading")
-			} else {
-				lines = append(lines, "not authenticate to relays when reading")
-			}
-		}
+		lines := c.lines()
 		if len(lines) == 0 {
 			SetFetchErr(c.Label() + ": this configuration has nothing in it")
 			return
@@ -367,18 +431,20 @@ func offerConfiguration(evt nostr.Event) {
 	}()
 }
 
-// applyConfiguration stores a configuration — replacing an older one from
-// the same author and d-tag — and then installs its napps and puts its
-// bundles on the home tab. Blocking.
+// applyConfiguration keeps a configuration — replacing an older one from the
+// same author and d-tag — and sets what it says: its default handlers and
+// permissions over the ones there were, its bundles on the home tab and its
+// napps installed. Blocking.
 func applyConfiguration(c NappConfiguration) {
 	stateMu.Lock()
 	state.Configurations = slices.DeleteFunc(state.Configurations, func(o NappConfiguration) bool {
 		return o.key() == c.key()
 	})
-	// the newest one applied comes last, and has the last word
 	state.Configurations = append(state.Configurations, c)
+	takeConfigSettingsLocked(c)
 	saveState()
 	stateMu.Unlock()
+	reloadKnownConfigs()
 	log.Info().Str("config", c.key()).Int("napps", len(c.Napps)).Int("handlers", len(c.Handlers)).
 		Int("bundles", len(c.Bundles)).Msg("napp configuration applied")
 
@@ -401,6 +467,150 @@ func applyConfiguration(c NappConfiguration) {
 			continue
 		}
 		Install(n)
+	}
+}
+
+// ─── the configurations the launcher knows ───────────────────────
+
+// ConfigurationInfo is a configuration as the settings list it: one line
+// saying what it is, the lines of what it sets, and whether it was applied
+// in this very version.
+type ConfigurationInfo struct {
+	Key        string          `json:"key"`
+	Name       string          `json:"name"`
+	Author     string          `json:"author"`
+	AuthorName string          `json:"authorName,omitempty"`
+	CreatedAt  nostr.Timestamp `json:"createdAt"`
+	Summary    string          `json:"summary"`
+	Lines      []string        `json:"lines"`
+	Applied    bool            `json:"applied"`
+}
+
+// knownConfigs caches knownConfigurations, which reads the store: a
+// snapshot asks for it every frame. Thrown away whenever a configuration is
+// loaded or applied.
+var knownConfigs atomic.Pointer[[]ConfigurationInfo]
+
+func reloadKnownConfigs() {
+	knownConfigs.Store(nil)
+	notifyState()
+}
+
+// knownConfigurations is every configuration the launcher ever loaded — the
+// newest version of each, from the local store — and the applied ones the
+// store doesn't have any more, newest first.
+func knownConfigurations() []ConfigurationInfo {
+	if c := knownConfigs.Load(); c != nil {
+		return *c
+	}
+	byKey := make(map[string]NappConfiguration)
+	if sys != nil {
+		for evt := range sys.Store.QueryEvents(nostr.Filter{Kinds: []nostr.Kind{KindConfig}}, 1000) {
+			c := configFromEvent(evt)
+			if prev, ok := byKey[c.key()]; ok && prev.CreatedAt >= c.CreatedAt {
+				continue
+			}
+			byKey[c.key()] = c
+		}
+	}
+	stateMu.Lock()
+	applied := make(map[string]nostr.Timestamp, len(state.Configurations))
+	for _, c := range state.Configurations {
+		applied[c.key()] = c.CreatedAt
+		if prev, ok := byKey[c.key()]; !ok || prev.CreatedAt < c.CreatedAt {
+			byKey[c.key()] = c
+		}
+	}
+	stateMu.Unlock()
+
+	list := make([]ConfigurationInfo, 0, len(byKey))
+	for key, c := range byKey {
+		var parts []string
+		if n := len(c.Napps); n > 0 {
+			parts = append(parts, plural(n, "napp", "napps"))
+		}
+		if n := len(c.Handlers); n > 0 {
+			parts = append(parts, plural(n, "default handler", "default handlers"))
+		}
+		if n := len(c.Bundles); n > 0 {
+			parts = append(parts, plural(n, "bundle", "bundles"))
+		}
+		if c.Sign != "" || c.Publish != "" || c.ReadAuth != nil || c.OpenLinks != "" {
+			parts = append(parts, "permissions")
+		}
+		if len(parts) == 0 {
+			parts = append(parts, "nothing")
+		}
+		at, ok := applied[key]
+		info := ConfigurationInfo{
+			Key:       key,
+			Name:      c.Label(),
+			Author:    c.Author.Hex(),
+			CreatedAt: c.CreatedAt,
+			Summary:   and(parts),
+			Lines:     c.lines(),
+			Applied:   ok && at == c.CreatedAt,
+		}
+		if sys != nil {
+			if pm, ok := sys.MetadataCache.Get(c.Author); ok {
+				info.AuthorName = pm.ShortName()
+			}
+		}
+		list = append(list, info)
+	}
+	slices.SortFunc(list, func(a, b ConfigurationInfo) int { return cmp.Compare(b.CreatedAt, a.CreatedAt) })
+	if sys != nil {
+		// before the store is up there is only half the list to keep
+		knownConfigs.Store(&list)
+	}
+	return list
+}
+
+// ApplyConfiguration applies one of the configurations the launcher knows,
+// by its key (see ConfigurationInfo), without asking: the user picked it
+// from the list that shows what it sets. It returns right away.
+func ApplyConfiguration(key string) error {
+	var found *NappConfiguration
+	if sys != nil {
+		for evt := range sys.Store.QueryEvents(nostr.Filter{Kinds: []nostr.Kind{KindConfig}}, 1000) {
+			if c := configFromEvent(evt); c.key() == key && (found == nil || found.CreatedAt < c.CreatedAt) {
+				found = &c
+			}
+		}
+	}
+	if found == nil {
+		stateMu.Lock()
+		for _, c := range state.Configurations {
+			if c.key() == key {
+				found = &c
+			}
+		}
+		stateMu.Unlock()
+	}
+	if found == nil {
+		return fmt.Errorf("no configuration %s", key)
+	}
+	go applyConfiguration(*found)
+	return nil
+}
+
+// takeConfigSettingsLocked writes a configuration's default handlers and
+// permissions over the settings'. Must be called with stateMu held.
+func takeConfigSettingsLocked(c NappConfiguration) {
+	if state.DefaultHandlers == nil {
+		state.DefaultHandlers = make(map[string]DefaultHandler)
+	}
+	for _, h := range c.Handlers {
+		state.DefaultHandlers[h.Action] = h
+	}
+	if c.Sign != "" {
+		state.SignPolicy = c.Sign
+	}
+	if c.Publish != "" {
+		state.PublishPolicy = c.Publish
+	}
+	if c.OpenLinks != "" {
+		state.LinkPolicy = c.OpenLinks
 	}
 }
 
@@ -463,19 +673,12 @@ func fetchNappRef(ref NappRef) (Napp, error) {
 
 // ─── default handlers ────────────────────────────────────────────
 
-// defaultHandler is the default handler the applied configurations give an
-// action: the one applied last has the last word.
+// defaultHandler is an action's default handler.
 func defaultHandler(action string) (DefaultHandler, bool) {
 	stateMu.Lock()
 	defer stateMu.Unlock()
-	for _, c := range slices.Backward(state.Configurations) {
-		for _, h := range c.Handlers {
-			if h.Action == action {
-				return h, true
-			}
-		}
-	}
-	return DefaultHandler{}, false
+	h, ok := state.DefaultHandlers[action]
+	return h, ok
 }
 
 // hasViewDefaults says whether any view:<kind> has a default handler, which
@@ -483,14 +686,48 @@ func defaultHandler(action string) (DefaultHandler, bool) {
 func hasViewDefaults() bool {
 	stateMu.Lock()
 	defer stateMu.Unlock()
-	for _, c := range state.Configurations {
-		for _, h := range c.Handlers {
-			if strings.HasPrefix(h.Action, "view:") {
-				return true
-			}
+	for action := range state.DefaultHandlers {
+		if strings.HasPrefix(action, "view:") {
+			return true
 		}
 	}
 	return false
+}
+
+// DefaultHandlerInfo is a default handler as the settings show it.
+type DefaultHandlerInfo struct {
+	DefaultHandler
+	TargetName string `json:"targetName"`
+}
+
+// defaultHandlers lists the default handlers by action.
+func defaultHandlers() []DefaultHandlerInfo {
+	stateMu.Lock()
+	list := make([]DefaultHandlerInfo, 0, len(state.DefaultHandlers))
+	for _, h := range state.DefaultHandlers {
+		name := h.Target
+		if n, ok := localNappLocked(h.Target); ok {
+			name = n.Label()
+		}
+		list = append(list, DefaultHandlerInfo{DefaultHandler: h, TargetName: name})
+	}
+	stateMu.Unlock()
+	slices.SortFunc(list, func(a, b DefaultHandlerInfo) int { return strings.Compare(a.Action, b.Action) })
+	return list
+}
+
+// RemoveDefaultHandler makes an action ask the user again, like it did
+// before a configuration gave it a default.
+func RemoveDefaultHandler(action string) {
+	stateMu.Lock()
+	if _, ok := state.DefaultHandlers[action]; !ok {
+		stateMu.Unlock()
+		return
+	}
+	delete(state.DefaultHandlers, action)
+	saveState()
+	stateMu.Unlock()
+	notifyState()
 }
 
 // handlerDefault is an action's default handler made into the option it is
@@ -526,26 +763,93 @@ func configuredHandler(action string, candidates []Napp, open []*Instance) (*han
 
 // ─── permissions ─────────────────────────────────────────────────
 
-// configuredPermission is what the applied configurations say about every
-// napp's signing or publishing: the one applied last that says anything has
-// the last word, and an "ask" there means asking even when an older one
-// allowed or denied it.
-func configuredPermission(perm Permission) (Decision, bool) {
+// NappPolicy is what every napp asking for perm gets when the user has not
+// answered for that napp: only signing, publishing and opening links have
+// one, and "ask" is no policy at all.
+func NappPolicy(perm Permission) Decision {
 	stateMu.Lock()
 	defer stateMu.Unlock()
-	for _, c := range slices.Backward(state.Configurations) {
-		var d Decision
-		switch perm {
-		case PermSign:
-			d = c.Sign
-		case PermPublish:
-			d = c.Publish
-		default:
-			return "", false
-		}
-		if d != "" {
-			return d, true
+	var d Decision
+	switch perm {
+	case PermSign:
+		d = state.SignPolicy
+	case PermPublish:
+		d = state.PublishPolicy
+	case PermOpenLink:
+		if state.LinkPolicy == LinksAll || state.LinkPolicy == LinksNonImage {
+			d = DecisionAllow
 		}
 	}
-	return "", false
+	if d == "" {
+		return DecisionAsk
+	}
+	return d
+}
+
+// SetNappPolicy sets what every napp asking to sign or to publish gets when
+// the user has not answered for that napp.
+func SetNappPolicy(perm Permission, d Decision) error {
+	switch d {
+	case DecisionAsk, DecisionAllow, DecisionDeny:
+	default:
+		return fmt.Errorf("unknown decision %q", d)
+	}
+	stateMu.Lock()
+	switch perm {
+	case PermSign:
+		state.SignPolicy = d
+	case PermPublish:
+		state.PublishPolicy = d
+	default:
+		stateMu.Unlock()
+		return fmt.Errorf("%s has no policy", perm)
+	}
+	saveState()
+	stateMu.Unlock()
+	log.Info().Str("permission", string(perm)).Str("decision", string(d)).Msg("napp policy changed")
+	notifyState()
+	return nil
+}
+
+// LinkPolicy is which links napps open in the browser without asking.
+// Whatever they don't open that way, they ask for, except an image, which is
+// shown over the napp with a button to open it.
+type LinkPolicy string
+
+const (
+	LinksAll      LinkPolicy = "yes"       // every link, images too
+	LinksNonImage LinkPolicy = "non-image" // the links that aren't images
+	LinksNone     LinkPolicy = "no"        // none
+)
+
+// OpenLinks is which links napps open in the browser without asking.
+func OpenLinks() LinkPolicy {
+	stateMu.Lock()
+	defer stateMu.Unlock()
+	if state.LinkPolicy == "" {
+		return LinksNone
+	}
+	return state.LinkPolicy
+}
+
+// SetOpenLinks sets which links napps open in the browser without asking,
+// for the napps the user has not answered for.
+func SetOpenLinks(p LinkPolicy) error {
+	switch p {
+	case LinksAll, LinksNonImage, LinksNone:
+	default:
+		return fmt.Errorf("unknown link policy %q", p)
+	}
+	stateMu.Lock()
+	changed := state.LinkPolicy != p
+	state.LinkPolicy = p
+	if changed {
+		saveState()
+	}
+	stateMu.Unlock()
+	if changed {
+		log.Info().Str("links", string(p)).Msg("opening links without asking changed")
+		notifyState()
+	}
+	return nil
 }

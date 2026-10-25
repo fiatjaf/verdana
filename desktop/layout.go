@@ -329,7 +329,6 @@ func layoutMain(
 	tabDiscoBtn,
 	tabDevBtn,
 	themeBtn,
-	readAuthBtn,
 	logoutBtn *widget.Clickable,
 	tab int,
 	windowsList,
@@ -417,10 +416,13 @@ func layoutMain(
 					updateBtns, discoCardBtns, discoOpenBtns, discoAuthorBtns, vis, st, installedSet, busy)
 			}
 			if tab == 4 && extra != nil {
+				if extra.kind == "settings" {
+					return layoutSettings(gtx, th, st)
+				}
 				if extra.kind == "napp" {
 					return layoutNappDetail(gtx, th, extra, detailOpenBtn, detailPrimaryBtn, detailUpdateBtn, detailAuthorBtn, detailPinBtn, installedSet, busy, st)
 				}
-				return layoutProfileDetail(gtx, th, extra, profileList, profileCardBtns, profileOpenBtns, profileActionBtns, profileUpdateBtns, installedSet, busy, readAuthBtn, st)
+				return layoutProfileDetail(gtx, th, extra, profileList, profileCardBtns, profileOpenBtns, profileActionBtns, profileUpdateBtns, installedSet, busy, st)
 			}
 			return layoutDevTab(gtx, th, tabDevBtn, devList, devURLed, devPathEd, loadURLBtn, browseBtn, loadFolderBtn,
 				installFolderBtn, devOpenBtns, devUnloadBtns, devPublishBtns, st)
@@ -484,7 +486,11 @@ func layoutTabs(
 		children = append(children,
 			layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return tabBtn(gtx, extraBtn, extra.title, "Details of "+extra.title, tab == 4)
+				tip := "Details of " + extra.title
+				if extra.kind == "settings" {
+					tip = "The launcher's settings"
+				}
+				return tabBtn(gtx, extraBtn, extra.title, tip, tab == 4)
 			}),
 		)
 	}
@@ -1325,6 +1331,10 @@ func layoutProfile(
 		}),
 		layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return settingsButton(gtx, &detailBtns.settings)
+		}),
+		layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return themeButton(gtx, th, themeBtn)
 		}),
 		layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
@@ -1353,24 +1363,6 @@ func themeButton(gtx layout.Context, th *material.Theme, btn *widget.Clickable) 
 	if p.name == "dark" {
 		label = "Light"
 		tip = "Switch the launcher and every napp window to the light theme"
-	}
-	b := material.Button(th, btn, label)
-	b.Background = p.chipBg
-	b.Color = p.chipFg
-	b.TextSize = unit.Sp(13)
-	b.Inset = layout.UniformInset(unit.Dp(8))
-	return withTooltip(gtx, btn, tip, b.Layout)
-}
-
-// readAuthButton turns authenticating to relays when reading on and off.
-func readAuthButton(gtx layout.Context, th *material.Theme, btn *widget.Clickable, on bool) layout.Dimensions {
-	pointer.CursorPointer.Add(gtx.Ops)
-	p := currentTheme()
-	label := "Auth on reads: off"
-	tip := "Relays that ask for it are not told who you are when reading; turn on to authenticate to them (publishing always does)"
-	if on {
-		label = "Auth on reads: on"
-		tip = "Relays that ask for it are told who you are (NIP-42) when reading; turn off to stop that (publishing always authenticates)"
 	}
 	b := material.Button(th, btn, label)
 	b.Background = p.chipBg

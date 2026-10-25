@@ -55,6 +55,22 @@ type State struct {
 	// reading.
 	ReadAuth bool `json:"readAuth"`
 
+	// SignPolicy and PublishPolicy are "ask", "allow" or "deny": what napps
+	// get when the user has not answered for them (see NappPolicy).
+	SignPolicy    Decision `json:"signPolicy"`
+	PublishPolicy Decision `json:"publishPolicy"`
+
+	// OpenLinks is which links napps open without asking: "yes",
+	// "non-image" or "no".
+	OpenLinks LinkPolicy `json:"openLinks"`
+
+	// DefaultHandlers are the actions' default handlers, by action.
+	DefaultHandlers []DefaultHandlerInfo `json:"defaultHandlers"`
+
+	// Configurations are every napp configuration the launcher has loaded,
+	// newest first (see knownConfigurations).
+	Configurations []ConfigurationInfo `json:"configurations"`
+
 	// Relays are the discovery relays.
 	Relays []string `json:"relays"`
 
@@ -214,6 +230,11 @@ func Snapshot() State {
 		Fetching:         ls.fetching,
 		Theme:            name,
 		ReadAuth:         ReadAuth(),
+		SignPolicy:       NappPolicy(PermSign),
+		PublishPolicy:    NappPolicy(PermPublish),
+		OpenLinks:        OpenLinks(),
+		DefaultHandlers:  defaultHandlers(),
+		Configurations:   knownConfigurations(),
 		Installed:        append([]Napp(nil), ls.installed...),
 		Discovery:        append([]Napp(nil), ls.discovery...),
 		Contacts:         append([]Napp(nil), ls.contacts...),

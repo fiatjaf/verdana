@@ -37,6 +37,7 @@ import mobile.Mobile
 class MainActivity : ComponentActivity() {
 
     private var showProfile by mutableStateOf(false)
+    private var showSettings by mutableStateOf(false)
 
     // a page an opened nostr code asks for (see openCode), for the
     // launcher screen to show and clear
@@ -205,6 +206,22 @@ class MainActivity : ComponentActivity() {
     fun checkForUpdate(id: String) = Mobile.checkForUpdate(id)
     fun toggleTheme() = VerdanaHost.toggleTheme()
     fun setReadAuth(on: Boolean) = Mobile.setReadAuth(on)
+    fun setNappPolicy(permission: String, decision: String) = try {
+        Mobile.setNappPolicy(permission, decision)
+    } catch (e: Exception) {
+        toast(e.message ?: "couldn't change that")
+    }
+    fun setOpenLinks(policy: String) = try {
+        Mobile.setOpenLinks(policy)
+    } catch (e: Exception) {
+        toast(e.message ?: "couldn't change that")
+    }
+    fun removeDefaultHandler(action: String) = Mobile.removeDefaultHandler(action)
+    fun applyConfiguration(key: String) = try {
+        Mobile.applyConfiguration(key)
+    } catch (e: Exception) {
+        toast(e.message ?: "couldn't apply that")
+    }
 
     // bringWindow puts an open napp's task in front — the launcher cannot
     // draw it itself any more, it is a window like any other
@@ -293,8 +310,9 @@ class MainActivity : ComponentActivity() {
                         openCode(link) { err -> if (err != null) toast(err) }
                     }
                 }
-                BackHandler(enabled = showProfile && state.phase == "main" && prompt == null) {
+                BackHandler(enabled = (showProfile || showSettings) && state.phase == "main" && prompt == null) {
                     showProfile = false
+                    showSettings = false
                 }
                 // edge-to-edge: the surface paints behind the system bars, but
                 // the content keeps clear of the navigation bar, cutouts and the
@@ -314,13 +332,15 @@ class MainActivity : ComponentActivity() {
                             theme = theme,
                             onActivate = { bringWindow(it) },
                             onClose = { closeWindow(it) },
-                            onProfile = { showProfile = true },
+                            onProfile = { showProfile = true; showSettings = false },
+                            onSettings = { showSettings = true; showProfile = false },
                         )
                     }
                     Box(Modifier.weight(1f).then(if (hasHeader) Modifier else Modifier.statusBarsPadding())) {
                         when {
                             state.phase == "login" -> LoginScreen(this@MainActivity, state)
                             showProfile && state.phase == "main" -> ProfileScreen(this@MainActivity, state)
+                            showSettings && state.phase == "main" -> SettingsScreen(this@MainActivity, state)
                             state.phase == "main" -> LauncherScreen(this@MainActivity, state)
                             else -> LoadingScreen()
                         }
