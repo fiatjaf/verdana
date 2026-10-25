@@ -261,6 +261,7 @@ func runWindow(picking bool, became <-chan struct{}) {
 	// Whatever the launcher sends wakes the window, so a napp parked on an
 	// idle canvas still hears its answers on the frame right after.
 	br.SetWake(w.Invalidate)
+	prompt.wake = w.Invalidate
 
 	for {
 		ev := w.Event()

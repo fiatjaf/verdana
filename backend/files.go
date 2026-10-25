@@ -4,6 +4,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	neturl "net/url"
+	"path"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -108,4 +111,39 @@ func openExternalLink(url string) error {
 	}
 	log.Info().Str("url", url).Msg("opening external link")
 	return host.OpenLink(url)
+}
+
+// imageExts are the extensions napp.link takes for an image.
+var imageExts = []string{".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".bmp", ".svg"}
+
+// isImageURL says, by its extension, whether an http(s) url is an image.
+func isImageURL(raw string) bool {
+	u, err := neturl.Parse(strings.TrimSpace(raw))
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return false
+	}
+	return slices.Contains(imageExts, strings.ToLower(path.Ext(u.Path)))
+}
+
+// showImage is napp.link for an image: rather than going straight out to
+// the browser it is shown over the napp's window, with a button beside it to
+// open it in the browser after all. Looking at it asks nothing — napps load
+// images off the web anyway — so it is never remembered, and only a rule
+// that refuses the napp its links keeps it from coming up.
+func showImage(ci *Instance, url string) error {
+	if rule, ok := lookupRule(RuleKey{Napp: ci.napp.ID, Permission: PermOpenLink}); ok && !rule.Decision.granted() {
+		return errors.New("denied by the rules")
+	}
+	name := "A napp"
+	if ci.napp.Label() != "" {
+		name = ci.napp.Label()
+	}
+	p := newPrompt(name, name+" shows an image", PromptBody{Code: preview(url, 200), Image: url}, nil)
+	p.Instance = ci.instance
+	log.Info().Str("napp", name).Str("url", url).Msg("showing an image")
+	enqueuePrompt(p)
+	if !p.wait().OK {
+		return nil
+	}
+	return openExternalLink(url)
 }

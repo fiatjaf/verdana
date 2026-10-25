@@ -111,6 +111,11 @@ type PromptBody struct {
 	// a Summary it starts folded under that one line ("kind-1 · 3 tags").
 	Code    string `json:"code"`
 	Summary string `json:"summary,omitempty"`
+
+	// Image is the url of an image the prompt is about: a GUI shows it as
+	// big as it fits, with the answers to one side of it, and calls them
+	// "Open in browser" and "Close" (see showImage in files.go).
+	Image string `json:"image,omitempty"`
 }
 
 // Prompt is a question the user has to answer before a napp can continue.

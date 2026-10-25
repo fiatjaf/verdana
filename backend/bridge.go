@@ -395,6 +395,9 @@ func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 				}
 				url = p.URL
 			}
+			if isImageURL(url) {
+				return nil, showImage(ci, url)
+			}
 			if !askApproval(ci, PermOpenLink, "open a link in your browser", PromptBody{Code: preview(url, 200)}) {
 				return nil, errors.New("denied by the user")
 			}

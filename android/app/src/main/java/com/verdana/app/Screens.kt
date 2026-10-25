@@ -1717,6 +1717,10 @@ fun PromptWindow(p: Prompt, onAnswer: (Boolean, String, List<Int>) -> Unit) {
     val answer = { ok: Boolean, scope: String ->
         onAnswer(ok, scope, ticked.indices.filter { !ticked[it] })
     }
+    if (p.image.isNotBlank()) {
+        ImagePrompt(p, theme) { ok -> answer(ok, "once") }
+        return
+    }
     Column(
         Modifier
             .fillMaxSize()
@@ -1812,6 +1816,68 @@ fun PromptWindow(p: Prompt, onAnswer: (Boolean, String, List<Int>) -> Unit) {
                     onClick = { answer(false, "once") },
                     colors = ButtonDefaults.buttonColors(containerColor = theme.chipBg, contentColor = theme.chipFg),
                 ) { Text("Deny") }
+            }
+        }
+    }
+}
+
+// ImagePrompt is a prompt about an image (a napp's napp.link to one): the
+// image as big as it fits, and what to do about it beside it, or under it on
+// a narrow screen.
+@Composable
+private fun ImagePrompt(p: Prompt, theme: Theme, onAnswer: (Boolean) -> Unit) {
+    var img by remember(p.image) { mutableStateOf<ImageBitmap?>(null) }
+    var failed by remember(p.image) { mutableStateOf(false) }
+    // back is the close button here, not a no-op as on other prompts
+    androidx.activity.compose.BackHandler { onAnswer(false) }
+    LaunchedEffect(p.image) {
+        img = withContext(kotlinx.coroutines.Dispatchers.IO) { fetchImageBitmap(p.image) }
+        failed = img == null
+    }
+    BoxWithConstraints(Modifier.fillMaxSize().background(theme.bg).padding(20.dp)) {
+        val wide = maxWidth >= 600.dp
+        val picture: @Composable (Modifier) -> Unit = { m ->
+            Box(m, contentAlignment = Alignment.Center) {
+                when {
+                    img != null -> Image(
+                        bitmap = img!!,
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Fit,
+                    )
+                    failed -> Text("the image could not be loaded", color = theme.muted)
+                }
+            }
+        }
+        val side: @Composable (Modifier) -> Unit = { m ->
+            Column(m, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(p.title, fontWeight = FontWeight.Bold, color = theme.fg)
+                Text(
+                    p.code.ifBlank { p.image },
+                    color = theme.muted,
+                    fontSize = 12.sp,
+                    fontFamily = FontFamily.Monospace,
+                    maxLines = 3,
+                )
+                Button(onClick = { onAnswer(true) }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Open in browser")
+                }
+                Button(
+                    onClick = { onAnswer(false) },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = theme.chipBg, contentColor = theme.chipFg),
+                ) { Text("Close") }
+            }
+        }
+        if (wide) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+                picture(Modifier.weight(1f).fillMaxHeight())
+                side(Modifier.width(240.dp))
+            }
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
+                picture(Modifier.weight(1f).fillMaxWidth())
+                side(Modifier.fillMaxWidth())
             }
         }
     }

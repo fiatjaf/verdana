@@ -79,6 +79,9 @@ data class Prompt(
     val warning: String = "",
     val items: List<String> = listOf(),
     val summary: String = "",
+    // image is the url of an image the prompt is about: shown as big as it
+    // fits, with "Open in browser" and "Close" beside it (see ImagePrompt)
+    val image: String = "",
     // remember says the answer can stick: the launcher then offers this
     // prompt only, this session, and always, and files the wider answers away.
     val remember: Boolean = false,
@@ -212,6 +215,7 @@ fun parsePrompt(json: String): Prompt? {
         warning = o.optString("warning"),
         items = o.optJSONArray("items")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: listOf(),
         summary = o.optString("summary"),
+        image = o.optString("image"),
         napp = o.optString("napp"),
         remember = o.optBoolean("remember"),
         options = (0 until optsArr.length()).map { i ->

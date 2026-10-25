@@ -352,6 +352,7 @@ type promptView struct {
 	Items    []string `json:"items"`
 	Code     string   `json:"code"`
 	Summary  string   `json:"summary"`
+	Image    string   `json:"image"`
 	Remember bool     `json:"remember"`
 }
 
@@ -406,6 +407,42 @@ const promptLibScript = "(function(){" +
 	"z-index:2147483647;background:' + bg + ';color:' + fg" +
 	"+ ';font:14px sans-serif;overflow:auto;padding:24px;box-sizing:border-box;" +
 	"margin:0;border:0;display:flex;flex-direction:column;';" +
+	// an image is shown as big as it fits, with what to do about it to
+	// the side (under it, on a narrow window)
+	"if (p.image) {" +
+	"var narrow = window.innerWidth < 600;" +
+	"o.style.flexDirection = narrow ? 'column' : 'row';" +
+	"o.style.gap = '20px'; o.style.overflow = 'hidden';" +
+	"var im = document.createElement('img');" +
+	"im.src = p.image;" +
+	"im.style.cssText = 'flex:1;min-width:0;min-height:0;width:100%;height:100%;object-fit:contain;';" +
+	"im.onerror = function() { im.alt = 'the image could not be loaded'; im.style.color = muted };" +
+	"o.appendChild(im);" +
+	"var side = document.createElement('div');" +
+	"side.style.cssText = 'flex:none;display:flex;flex-direction:column;gap:8px;justify-content:center;'" +
+	"+ (narrow ? '' : 'width:240px;');" +
+	"var t = document.createElement('div');" +
+	"t.textContent = p.title;" +
+	"t.style.cssText = 'font-size:15px;font-weight:700;';" +
+	"side.appendChild(t);" +
+	"var u = document.createElement('div');" +
+	"u.textContent = p.code || p.image;" +
+	"u.style.cssText = 'color:' + muted + ';font:12px monospace;word-break:break-all;margin-bottom:6px;';" +
+	"side.appendChild(u);" +
+	"function act(label, ok, loud) {" +
+	"var b = document.createElement('button');" +
+	"b.textContent = label;" +
+	"b.style.cssText = 'padding:10px 14px;border:0;border-radius:8px;font-size:14px;cursor:pointer;" +
+	"background:' + (loud ? accent : card) + ';color:' + (loud ? accentText : fg) + ';';" +
+	"b.onclick = function() { window.__verdana_prompt_answer(p.id, ok, 'once', []) };" +
+	"side.appendChild(b);" +
+	"};" +
+	"act('Open in browser', true, true);" +
+	"act('Close', false, false);" +
+	"o.appendChild(side);" +
+	"document.documentElement.appendChild(o);" +
+	"return;" +
+	"}" +
 	"var box = document.createElement('div');" +
 	"box.style.cssText = 'margin:auto 0;width:100%;max-width:520px;';" +
 	"var h = document.createElement('div');" +

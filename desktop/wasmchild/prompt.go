@@ -1,8 +1,16 @@
 package main
 
 import (
+	"context"
 	"image"
 	"image/color"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
+	"io"
+	"net/http"
+	"sync/atomic"
+	"time"
 
 	"gioui.org/font"
 	"gioui.org/font/gofont"
@@ -13,6 +21,8 @@ import (
 	"gioui.org/unit"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
+	_ "golang.org/x/image/bmp"
+	_ "golang.org/x/image/webp"
 
 	"verdana/backend/wasmhost"
 
@@ -47,6 +57,56 @@ type promptOverlay struct {
 	foldOpen bool
 	// ticks are the boxes of the prompt's items, ticked to start with
 	ticks []widget.Bool
+	// img is the prompt's image, for a prompt that shows one
+	img *promptImage
+	// wake redraws the window, for when the image lands
+	wake func()
+}
+
+// promptImage is an image a prompt shows, fetched off the web once.
+type promptImage struct {
+	op     paint.ImageOp
+	ready  atomic.Bool
+	failed atomic.Bool
+}
+
+// maxPromptImage is the most of an image a prompt will download.
+const maxPromptImage = 32 << 20
+
+func loadPromptImage(url string, wake func()) *promptImage {
+	pi := &promptImage{}
+	go func() {
+		defer func() {
+			if wake != nil {
+				wake()
+			}
+		}()
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+		if err != nil {
+			pi.failed.Store(true)
+			return
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			pi.failed.Store(true)
+			return
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			pi.failed.Store(true)
+			return
+		}
+		img, _, err := image.Decode(io.LimitReader(resp.Body, maxPromptImage))
+		if err != nil {
+			pi.failed.Store(true)
+			return
+		}
+		pi.op = paint.NewImageOp(img)
+		pi.ready.Store(true)
+	}()
+	return pi
 }
 
 func newPromptOverlay() *promptOverlay {
@@ -76,6 +136,16 @@ func (p *promptOverlay) build(pv *wasmhost.Prompt) {
 	}
 	btn := func(label, tone string, ok bool, scope string) *promptButton {
 		return &promptButton{label: label, tone: tone, ok: ok, scope: scope, tip: promptTip(ok, scope)}
+	}
+
+	p.img = nil
+	if pv.Image != "" {
+		p.img = loadPromptImage(pv.Image, p.wake)
+		add(btn("Open in browser", "accent", true, "once"))
+		add(btn("Close", "chip", false, "once"))
+		p.buttons[0].tip = "Open the image in your browser"
+		p.buttons[1].tip = "Go back to the napp"
+		return
 	}
 
 	if pv.Remember {
@@ -166,6 +236,14 @@ func (p *promptOverlay) Layout(gtx layout.Context, pv *wasmhost.Prompt, theme st
 	th := p.th
 	th.Palette.Bg, th.Palette.Fg = pal.bg, pal.fg
 	paint.Fill(gtx.Ops, pal.bg)
+
+	if p.img != nil {
+		dims := p.tips.Track(gtx, func(gtx layout.Context) layout.Dimensions {
+			return p.layoutImage(gtx, pal, pv)
+		})
+		p.tips.Draw(gtx, th, pal.fg, pal.bg)
+		return dims
+	}
 
 	var children []layout.Widget
 	children = append(children, func(gtx layout.Context) layout.Dimensions {
@@ -273,6 +351,70 @@ func (p *promptOverlay) Layout(gtx layout.Context, pv *wasmhost.Prompt, theme st
 	})
 	p.tips.Draw(gtx, th, pal.fg, pal.bg)
 	return dims
+}
+
+// layoutImage is a prompt with an image: the image as big as it fits, and
+// the title, the url and the answers to its side (under it, on a narrow
+// window).
+func (p *promptOverlay) layoutImage(gtx layout.Context, pal palette, pv *wasmhost.Prompt) layout.Dimensions {
+	th := p.th
+	narrow := gtx.Constraints.Max.X < gtx.Dp(600)
+	img := func(gtx layout.Context) layout.Dimensions {
+		size := gtx.Constraints.Max
+		switch {
+		case p.img.ready.Load():
+			return widget.Image{Src: p.img.op, Fit: widget.Contain, Position: layout.Center}.Layout(gtx)
+		case p.img.failed.Load():
+			return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				l := material.Body1(th, "the image could not be loaded")
+				l.Color = pal.muted
+				return l.Layout(gtx)
+			})
+		}
+		return layout.Dimensions{Size: size}
+	}
+	side := func(gtx layout.Context) layout.Dimensions {
+		if !narrow {
+			gtx.Constraints.Min.X = gtx.Dp(240)
+			gtx.Constraints.Max.X = gtx.Dp(240)
+		}
+		rows := []layout.FlexChild{
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				l := material.Body1(th, pv.Title)
+				l.Font.Weight = font.Bold
+				return layout.Inset{Bottom: 6}.Layout(gtx, l.Layout)
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				url := pv.Code
+				if url == "" {
+					url = pv.Image
+				}
+				l := material.Caption(th, url)
+				l.Font.Typeface = "Go Mono"
+				l.Color = pal.muted
+				return layout.Inset{Bottom: 12}.Layout(gtx, l.Layout)
+			}),
+		}
+		for _, b := range p.buttons {
+			rows = append(rows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return layout.Inset{Bottom: 8}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return p.button(gtx, pal, b)
+				})
+			}))
+		}
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, rows...)
+	}
+	axis := layout.Horizontal
+	if narrow {
+		axis = layout.Vertical
+	}
+	return layout.UniformInset(24).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Axis: axis, Alignment: layout.Middle}.Layout(gtx,
+			layout.Flexed(1, img),
+			layout.Rigid(layout.Spacer{Width: 20, Height: 20}.Layout),
+			layout.Rigid(side),
+		)
+	})
 }
 
 func (p *promptOverlay) button(gtx layout.Context, pal palette, b *promptButton) layout.Dimensions {

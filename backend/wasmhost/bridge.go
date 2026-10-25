@@ -56,6 +56,7 @@ type Prompt struct {
 	Items    []string       `json:"items"`
 	Code     string         `json:"code"`
 	Summary  string         `json:"summary"`
+	Image    string         `json:"image"`
 	Options  []PromptOption `json:"options"`
 	Remember bool           `json:"remember"`
 
