@@ -156,13 +156,7 @@ func setProfileFromUser(ctx context.Context, pk nostr.PubKey) {
 	applyReadAuth()
 
 	pm := sys.FetchProfileMetadata(ctx, pk)
-	name := pm.Name
-	if name == "" {
-		name = pm.DisplayName
-	}
-	if name == "" {
-		name = pk.Hex()
-	}
+	name := pm.ShortName()
 	setProfile(pk.Hex(), name, pm.Picture)
 
 	log.Info().Str("pubkey", pk.Hex()).Str("name", name).Msg("login successful")
