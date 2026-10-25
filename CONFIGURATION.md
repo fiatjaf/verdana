@@ -2,8 +2,8 @@
 
 A **napp configuration** is a nostr event of kind `35133` describing how a
 launcher should be set up: which napps to install, which napp handles an
-action by default, which bundles go on the home tab, and what napps get when
-they ask to sign, to publish or to open a link. It is addressable: a newer
+action by default, which bundles to add, what goes on the home tab, and what
+napps get when they ask to sign, to publish or to open a link. It is addressable: a newer
 event from the same author with the same `d` tag replaces the older one.
 
 Verdana loads a configuration when you open its `naddr` or `nevent` (the
@@ -75,7 +75,7 @@ a configuration replaces the defaults of the actions it names.
 Default handlers can only come from configurations. The settings list them
 and can delete them, which makes the action ask again.
 
-### `bundle`: a bundle on the home tab
+### `bundle`: a bundle
 
 ```json
 ["bundle", "<name>", "<icon url>" | "", "<napp item>", "<napp item>", …]
@@ -93,9 +93,25 @@ Each action is followed by its payload as JSON, which may contain spaces
 the napp. An item may also hold several napps, each one starting at another
 `napp`.
 
-The bundle replaces any bundle of the same name and is pinned to the home
-tab. The icon, when given, is an image URL shown instead of the bundle's
-napps' icons.
+The bundle replaces any bundle of the same name. It only goes on the home tab
+when a `pin` tag names it. The icon, when given, is an image URL shown instead
+of the bundle's napps' icons.
+
+### `pin`: something on the home tab
+
+```json
+["pin", "<kind>:<pubkey>:<d>"]
+["pin", "<bundle name>"]
+```
+
+Puts a napp, by its address, or a bundle, by the name a `bundle` tag of the
+same configuration gives it, on the home tab. Pins go after whatever is
+already there, in the order of the `pin` tags; something already on the home
+tab stays where it is.
+
+A pinned napp has to be installed, by this configuration or before it; a pin
+of a napp that isn't is skipped. A value that is neither the name of one of
+the configuration's bundles nor a napp address is skipped too.
 
 ### `sign` and `publish`: what napps get when they ask
 
@@ -141,7 +157,7 @@ This sets the **Open links without asking** setting.
 This is the setup of the verdana on the computer this document was written
 on, as a configuration. The napps are the ones installed there (local napps,
 which have no event, can't be referenced and are left out), the bundles are
-its bundles and the permissions are its settings. It had no default handlers
+its bundles, the pins are its home tab and the permissions are its settings. It had no default handlers
 yet, so the `action` tags name the napps its picker counts say the user
 picks most for those actions.
 
@@ -150,8 +166,7 @@ picks most for those actions.
   "kind": 35133,
   "content": "",
   "tags": [
-    ["d","desktop"],
-    ["title","Desktop setup"],
+    ["d","bootstrap"],
     ["napp","35131:3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d:activity","wss://relay.nostrapps.com"],
     ["napp","35130:3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d:article-reader","wss://relay.nostrapps.com"],
     ["napp","35130:3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d:articles","wss://relay.nostrapps.com"],
@@ -211,9 +226,20 @@ picks most for those actions.
     ["action","edit-numl","35130:3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d:text-edit","forced",""],
     ["action","simple-group","35130:3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d:group-chat","timed","singleton"],
     ["bundle","Basic","","napp 35130:3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d:reactions-inbox profile \"3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d\"","napp 35130:3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d:following_feed profile \"3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d\"","napp 35130:3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d:inbox profile \"3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d\" inbox null"],
-    ["bundle","Groups","","napp 35130:3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d:groupstream profile \"3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d\"","napp 35130:3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d:simple-groups profile \"3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d\"","napp 35130:3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d:group-chat simple-group \"naddr1qvzqqqyctqpzp5lvnyffx52rpfkc8g4zf99y3m40c2fes6js70ww2vjw3xqwy8g9qyvhwumn8ghj7urewfsk66ty9enxjct5dfskvtnrdaksqyz5decnw7pjtf2xwujstft5vujrp3u84q\""],
-    ["bundle","Publish","","napp 35130:3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d:publish"],
     ["bundle","Basically Global","","napp 35130:3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d:relay_feed relay \"wss://pyramid.fiatjaf.com\"", "napp 35130:3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d:relay_feed relay \"wss://theforest.nostr1.com\"", "napp 35130:3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d:relay_feed relay \"wss://nostr.wine\""],
+    ["pin","Basic"],
+    ["pin","Basically Global"],
+    ["pin","35130:9ec7a778167afb1d30c4833de9322da0c08ba71a69e1911d5578d3144bb56437:feed"],
+    ["pin","35130:3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d:contacts"],
+    ["pin","35130:3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d:user-search"],
+    ["pin","35130:3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d:groupstream"],
+    ["pin","35130:3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d:favorite-relay-feeds"],
+    ["pin","35130:3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d:inbox"],
+    ["pin","35131:3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d:words"],
+    ["pin","35131:3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d:activity"],
+    ["pin","35130:3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d:publish"],
+    ["pin","35130:3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d:colored-feed"],
+    ["pin","35131:3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d:trending"],
     ["sign","allow"],
     ["publish","allow"],
     ["auth-on-reads","yes"],

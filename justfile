@@ -1,8 +1,11 @@
 # A napp window is its own process: child/ is the webview shell, wasmchild/
 # is the canvas shell a wasm napp paints into. Both are built before the
 # launcher, because a release build embeds them.
-run:
-    cd desktop && go build -o child/child ./child && go build -o wasmchild/wasmchild ./wasmchild && go build -o verdana -tags dev && WEBVIEW_DEBUG=true ./verdana
+run: build
+    cd desktop && WEBVIEW_DEBUG=true ./verdana
+
+build:
+    cd desktop && go build -o child/child ./child && go build -o wasmchild/wasmchild ./wasmchild && go build -o verdana -tags dev
 
 prod:
     cd desktop && go build -o child/child ./child && go build -o wasmchild/wasmchild ./wasmchild && go build -o verdana .

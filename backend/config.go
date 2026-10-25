@@ -17,14 +17,15 @@ import (
 )
 
 // A napp configuration is a kind:35133 event saying how a launcher should be
-// set up: which napps to install, which napp handles an action by default and
-// which bundles go on the home tab. Applying one is the only way a default
-// handler gets set.
+// set up: which napps to install, which napp handles an action by default,
+// which bundles to add and what goes on the home tab. Applying one is the only
+// way a default handler gets set.
 //
 //	["napp", "<kind>:<pubkey>:<d>", "<relay>"]
 //	["napp", "<event-id>", "<relay>", "<author>"]
 //	["action", "<action>", "<kind>:<pubkey>:<d>", "timed"|"suggested"|"forced", "singleton"|""]
 //	["bundle", "<name>", "<icon-url>"|"", "napp <kind>:<pubkey>:<d> <action> <payload>|null …", …]
+//	["pin", "<kind>:<pubkey>:<d>"|"<bundle name>"]
 //	["sign", "ask"|"deny"|"allow"]
 //	["publish", "ask"|"deny"|"allow"]
 //	["auth-on-reads", "yes"|"no"]
@@ -33,6 +34,8 @@ import (
 // Each "napp …" item of a bundle tag is one napp of the bundle with the
 // actions it gets, each action followed by its payload as JSON (null for
 // none). An item can also carry more napps, each starting at another "napp".
+// A "pin" names a napp by its address or a bundle of the same configuration
+// by its name, and puts it on the home tab, in the order of the pin tags.
 //
 // Applying a configuration writes its default handlers, its "sign",
 // "publish" and "open-links" (what napps get when the user has not answered
@@ -82,11 +85,19 @@ type NappRef struct {
 	Relay  string       `json:"relay,omitempty"`
 }
 
-// ConfigBundle is a bundle a configuration puts on the home tab.
+// ConfigBundle is a bundle a configuration adds.
 type ConfigBundle struct {
 	Name    string          `json:"name"`
 	Icon    string          `json:"icon,omitempty"`
 	Entries []ShortcutEntry `json:"entries"`
+}
+
+// ConfigPin is something a configuration puts on the home tab: a bundle of
+// its own, by name, or a napp, by id (Addr is where that id came from).
+type ConfigPin struct {
+	Bundle string `json:"bundle,omitempty"`
+	Napp   string `json:"napp,omitempty"`
+	Addr   string `json:"addr,omitempty"`
 }
 
 // NappConfiguration is a kind:35133 event as the launcher keeps it.
@@ -98,6 +109,7 @@ type NappConfiguration struct {
 	Napps     []NappRef        `json:"napps"`
 	Handlers  []DefaultHandler `json:"handlers"`
 	Bundles   []ConfigBundle   `json:"bundles"`
+	Pins      []ConfigPin      `json:"pins"`
 
 	// Sign and Publish are what napps asking to sign or to publish get,
 	// empty when the configuration says nothing about it. ReadAuth and
@@ -144,6 +156,7 @@ func configFromEvent(evt nostr.Event) NappConfiguration {
 		D:         evt.Tags.GetD(),
 		CreatedAt: evt.CreatedAt,
 	}
+	var pins []string
 	for _, tag := range evt.Tags {
 		if len(tag) < 2 {
 			continue
@@ -205,6 +218,24 @@ func configFromEvent(evt nostr.Event) NappConfiguration {
 				continue
 			}
 			c.Bundles = append(c.Bundles, b)
+		case "pin":
+			pins = append(pins, tag[1])
+		}
+	}
+
+	// a pin can name a bundle whose tag comes after it, so pins are read last
+	for _, value := range pins {
+		var pin ConfigPin
+		if slices.ContainsFunc(c.Bundles, func(b ConfigBundle) bool { return b.Name == value }) {
+			pin = ConfigPin{Bundle: value}
+		} else if id, err := nappIDFromAddr(value); err == nil {
+			pin = ConfigPin{Napp: id, Addr: value}
+		} else {
+			log.Warn().Str("pin", value).Msg("skipping a pin of a configuration that is neither a bundle of it nor a napp")
+			continue
+		}
+		if !slices.Contains(c.Pins, pin) {
+			c.Pins = append(c.Pins, pin)
 		}
 	}
 	return c
@@ -345,7 +376,10 @@ func (c NappConfiguration) lines() []string {
 		lines = append(lines, line+")")
 	}
 	for _, b := range c.Bundles {
-		lines = append(lines, "add the bundle “"+b.Name+"” to the home tab, with "+plural(len(b.Entries), "napp", "napps"))
+		lines = append(lines, "add the bundle “"+b.Name+"”, with "+plural(len(b.Entries), "napp", "napps"))
+	}
+	for _, pin := range c.Pins {
+		lines = append(lines, "pin "+pin.label()+" to the home tab")
 	}
 	return append(lines, c.permissionLines()...)
 }
@@ -380,7 +414,13 @@ func (c NappConfiguration) sections() []PromptSection {
 	for _, b := range c.Bundles {
 		bundles = append(bundles, "“"+b.Name+"”, with "+plural(len(b.Entries), "napp", "napps"))
 	}
-	add("Bundles on the home tab", bundles)
+	add("Bundles", bundles)
+
+	var pins []string
+	for _, pin := range c.Pins {
+		pins = append(pins, pin.label())
+	}
+	add("Pinned to the home tab", pins)
 
 	add("Permissions", c.permissionLines())
 	return sections
@@ -437,6 +477,14 @@ func (ref NappRef) label() string {
 	return "the napp " + ref.ID.Hex()[:12] + "…"
 }
 
+// label is a pin as a line can say it: the bundle's name, or the napp's.
+func (pin ConfigPin) label() string {
+	if pin.Bundle != "" {
+		return "the bundle “" + pin.Bundle + "”"
+	}
+	return NappRef{Addr: pin.Addr}.label()
+}
+
 // nappName is a napp's name when the launcher knows it, its id otherwise.
 func nappName(id string) string {
 	if n, ok := InstalledNapp(id); ok {
@@ -475,8 +523,8 @@ func offerConfiguration(evt nostr.Event) {
 
 // applyConfiguration keeps a configuration — replacing an older one from the
 // same author and d-tag — and sets what it says: its default handlers and
-// permissions over the ones there were, its bundles on the home tab and its
-// napps installed. Blocking.
+// permissions over the ones there were, its bundles added, its napps
+// installed and its pins on the home tab. Blocking.
 func applyConfiguration(c NappConfiguration) {
 	stateMu.Lock()
 	state.Configurations = slices.DeleteFunc(state.Configurations, func(o NappConfiguration) bool {
@@ -488,13 +536,21 @@ func applyConfiguration(c NappConfiguration) {
 	stateMu.Unlock()
 	reloadKnownConfigs()
 	log.Info().Str("config", c.key()).Int("napps", len(c.Napps)).Int("handlers", len(c.Handlers)).
-		Int("bundles", len(c.Bundles)).Msg("napp configuration applied")
+		Int("bundles", len(c.Bundles)).Int("pins", len(c.Pins)).Msg("napp configuration applied")
 
 	for _, b := range c.Bundles {
 		putConfigBundle(b)
 	}
 	if c.ReadAuth != nil {
 		SetReadAuth(*c.ReadAuth)
+	}
+	// what can be pinned already goes up now, up to the first napp that
+	// still has to be installed: the rest waits for the installs, so the
+	// home tab still gets the pins in their order
+	pins := c.Pins
+	for len(pins) > 0 && (pins[0].Bundle != "" || IsInstalled(pins[0].Napp)) {
+		pins[0].pin()
+		pins = pins[1:]
 	}
 	notifyState()
 
@@ -509,6 +565,19 @@ func applyConfiguration(c NappConfiguration) {
 			continue
 		}
 		Install(n)
+	}
+	for _, pin := range pins {
+		pin.pin()
+	}
+}
+
+// pin puts a configuration's pin on the home tab. A napp that isn't
+// installed is left out.
+func (pin ConfigPin) pin() {
+	if pin.Bundle != "" {
+		PinBundle(pin.Bundle)
+	} else {
+		Pin(pin.Napp)
 	}
 }
 
@@ -576,6 +645,9 @@ func knownConfigurations() []ConfigurationInfo {
 		}
 		if n := len(c.Bundles); n > 0 {
 			parts = append(parts, plural(n, "bundle", "bundles"))
+		}
+		if n := len(c.Pins); n > 0 {
+			parts = append(parts, plural(n, "pin", "pins"))
 		}
 		if c.Sign != "" || c.Publish != "" || c.ReadAuth != nil || c.OpenLinks != "" {
 			parts = append(parts, "permissions")
@@ -657,7 +729,8 @@ func takeConfigSettingsLocked(c NappConfiguration) {
 }
 
 // putConfigBundle stores a configuration's bundle under its name, over a
-// bundle of the same name, and pins it.
+// bundle of the same name. Whether it goes on the home tab is up to the
+// configuration's pins.
 func putConfigBundle(b ConfigBundle) {
 	stateMu.Lock()
 	bundle := Bundle{Name: b.Name, Icon: b.Icon, Entries: b.Entries}
@@ -665,9 +738,6 @@ func putConfigBundle(b ConfigBundle) {
 		state.Bundles[i] = bundle
 	} else {
 		state.Bundles = append(state.Bundles, bundle)
-	}
-	if key := BundlePinKey(b.Name); !slices.Contains(state.Pinned, key) {
-		state.Pinned = append(state.Pinned, key)
 	}
 	saveState()
 	stateMu.Unlock()

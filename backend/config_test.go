@@ -21,6 +21,11 @@ func TestConfigFromEvent(t *testing.T) {
 			{"napp", addr, "wss://relay.example.com"},
 			{"napp", "aa3c6e4fd4c2ea0ae6c69b14d0ef68a40ab3a7f78e6c55e2c4b6ab1e4ad4a2f3", "", pk.Hex()},
 			{"napp", "not-a-ref"},
+			{"pin", "Desk"},
+			{"pin", addr},
+			{"pin", "Broken"},
+			{"pin", "Nowhere"},
+			{"pin", "Desk"},
 			{"action", "view:1", addr, "timed", "singleton"},
 			{"action", "view:1", other, "forced"},
 			{"action", "share", other, "sometimes"},
@@ -74,5 +79,10 @@ func TestConfigFromEvent(t *testing.T) {
 	}
 	if e := b.Entries[2]; e.NappID != id || len(e.Actions) != 1 || e.Actions[0].Type != "view" {
 		t.Fatalf("third entry: %+v", e)
+	}
+	// "Desk" is pinned before its bundle tag comes, "Broken" and "Nowhere"
+	// are no bundles of it nor napps, and pinning "Desk" twice counts once
+	if len(c.Pins) != 2 || c.Pins[0] != (ConfigPin{Bundle: "Desk"}) || c.Pins[1] != (ConfigPin{Napp: id, Addr: addr}) {
+		t.Fatalf("pins: %+v", c.Pins)
 	}
 }
