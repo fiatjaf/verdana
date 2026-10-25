@@ -60,6 +60,11 @@ type AppState struct {
 	// "this session" ones are not here either.
 	ActionUsage map[string]int `json:"action_usage"`
 
+	// Configurations are the napp configurations (kind:35133, see
+	// config.go) the user applied, oldest first: where default handlers
+	// come from.
+	Configurations []NappConfiguration `json:"configurations,omitempty"`
+
 	// Theme is "light" or "dark": what the launcher draws with and what
 	// every napp window is told to track.
 	Theme string `json:"theme"`

@@ -48,12 +48,18 @@ type ShortcutEntry struct {
 type Bundle struct {
 	Name    string          `json:"name"`
 	Entries []ShortcutEntry `json:"entries"`
+
+	// Icon is the url of an image the home tab shows for the bundle instead
+	// of its napps' icons: only a napp configuration sets one (see
+	// config.go).
+	Icon string `json:"icon,omitempty"`
 }
 
 // BundleInfo is one bundle as shown: whether it sits on the home tab, and
 // whether it has an OS shortcut (File is that shortcut's file).
 type BundleInfo struct {
 	Name     string          `json:"name"`
+	Icon     string          `json:"icon,omitempty"`
 	Entries  []ShortcutEntry `json:"entries"`
 	Pinned   bool            `json:"pinned"`
 	Shortcut bool            `json:"shortcut"`
@@ -219,6 +225,7 @@ func bundles() []BundleInfo {
 	for _, b := range state.Bundles {
 		info := BundleInfo{
 			Name:    b.Name,
+			Icon:    b.Icon,
 			Entries: b.Entries,
 			Pinned:  slices.Contains(state.Pinned, BundlePinKey(b.Name)),
 		}
@@ -285,7 +292,7 @@ func SaveBundle(oldName, name, entries string) error {
 		return fmt.Errorf("there is a bundle called %q already", name)
 	}
 	if i := bundleIndexLocked(oldName); oldName != "" && i >= 0 {
-		state.Bundles[i] = Bundle{Name: name, Entries: parsed}
+		state.Bundles[i] = Bundle{Name: name, Entries: parsed, Icon: state.Bundles[i].Icon}
 		if j := slices.Index(state.Pinned, BundlePinKey(oldName)); j >= 0 {
 			state.Pinned[j] = BundlePinKey(name)
 		}

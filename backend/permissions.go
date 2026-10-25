@@ -12,10 +12,11 @@ import (
 // saving a file, copying to the clipboard — asks lookupRule first and only
 // becomes a prompt when nothing there has an opinion.
 //
-// There are three layers, read in this order: the installed configuration
+// There are four layers, read in this order: the installed configuration
 // (InstalledConfiguration, at the bottom of this file — nothing loads one
-// yet), the answers given for this session, and the ones saved in state.json.
-// A question none of them answers is a prompt.
+// yet), the answers given for this session, the ones saved in state.json,
+// and what the applied napp configurations (kind:35133, see config.go) say
+// about signing and publishing. A question none of them answers is a prompt.
 
 // Permission is one of the things a napp can be allowed to do. It is what a
 // remembered answer belongs to: "always allow" is about the napp and the
@@ -120,7 +121,9 @@ var sessionRules = xsync.NewMapOf[string, Rule]()
 // lookupRule is the one place a question is answered from: the installed
 // configuration first (it states what a napp needs, so it comes before
 // anything the user has said about it), then this session, then what was
-// saved. Not finding a rule is the normal case, and means "ask".
+// saved, and only then the napp configurations: a blanket "napps may sign"
+// is the default for what the user hasn't answered, not over what they have.
+// Not finding a rule is the normal case, and means "ask".
 func lookupRule(key RuleKey) (Rule, bool) {
 	if key == (RuleKey{}) {
 		return Rule{}, false
@@ -131,7 +134,13 @@ func lookupRule(key RuleKey) (Rule, bool) {
 	if r, ok := sessionRule(key); ok {
 		return r, true
 	}
-	return storedRule(key)
+	if r, ok := storedRule(key); ok {
+		return r, true
+	}
+	if d, ok := configuredPermission(key.Permission); ok && d != DecisionAsk {
+		return Rule{Decision: d}, true
+	}
+	return Rule{}, false
 }
 
 // remember files an answer under the scope the user chose it with: for this

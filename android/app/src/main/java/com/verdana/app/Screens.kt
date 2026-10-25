@@ -1014,9 +1014,25 @@ private fun Modifier.onHold(onHold: () -> Unit): Modifier = composed {
 }
 
 // BundleIcon is a bundle on the home tab: its napps' icons, up to four, two
-// by two on a tile, so it reads as a folder of the napps it opens.
+// by two on a tile, so it reads as a folder of the napps it opens — or the
+// icon a napp configuration gave it, once that has loaded.
 @Composable
 private fun BundleIcon(activity: MainActivity, st: LauncherState, bundle: BundleInfo, theme: Theme, size: Int) {
+    var custom by remember(bundle.icon) { mutableStateOf<ImageBitmap?>(null) }
+    LaunchedEffect(bundle.icon) {
+        if (bundle.icon.isNotBlank()) {
+            custom = withContext(kotlinx.coroutines.Dispatchers.IO) { fetchImageBitmap(bundle.icon) }
+        }
+    }
+    custom?.let {
+        Image(
+            bitmap = it,
+            contentDescription = null,
+            modifier = Modifier.size(size.dp).clip(RoundedCornerShape(10.dp)),
+            contentScale = ContentScale.Crop,
+        )
+        return
+    }
     val napps = bundle.entries
         .mapNotNull { e -> st.installed.firstOrNull { it.id == e.nappId } }
         .take(4)

@@ -1,6 +1,7 @@
 package com.verdana.app
 
 import android.graphics.BitmapFactory
+import android.os.SystemClock
 import android.util.Base64
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -20,9 +21,12 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -31,16 +35,26 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
 
 // A picker is a napp window before it runs any napp: the backend opened it to
 // ask which napp handles an action, and it shows the napps that could as a
-// grid of icons, like the home tab, the windows already open first. Once the
+// grid of icons, like the home tab, the windows already open first — and
+// before them the action's default handler, when a napp configuration gave it
+// one: a timed one is picked by itself once its countdown runs out, a
+// countdown that grows while the user's finger moves around in it. Once the
 // user picks, the backend either closes it or opens the napp picked in it,
 // which turns this same window into that napp's (see NappActivity.become).
 
 // pickerFilterOver is how many choices there have to be before the picker
 // offers a box to filter them by name.
 private const val pickerFilterOver = 4
+
+// pickerMoveDp is how far a touch (or the mouse) has to travel in the window
+// to put another pickerMoveDelayMs on a default handler's countdown: someone
+// moving around is about to pick something else.
+private const val pickerMoveDp = 48
+private const val pickerMoveDelayMs = 1000L
 
 // PickerWindow draws prompt p, or, with none, the window waiting: for the
 // question to arrive, or for the backend to act on the answer (opening is the
@@ -65,14 +79,51 @@ fun PickerWindow(p: Prompt?, opening: String?, onPick: (Int) -> Unit, onCancel: 
             opt.detail.lowercase().contains(q) ||
             opt.instance.startsWith(q)
     }
-    val open = visible.filter { it.value.instance.isNotBlank() }
-    val fresh = visible.filter { it.value.instance.isBlank() }
+    val default = visible.filter { it.value.default }
+    val open = visible.filter { !it.value.default && it.value.instance.isNotBlank() }
+    val fresh = visible.filter { !it.value.default && it.value.instance.isBlank() }
+
+    // a timed default: picked when deadline comes, which every pickerMoveDp
+    // of movement pushes back
+    val defaultIndex = p.options.indexOfFirst { it.default }
+    var deadline by remember(p.id) {
+        mutableLongStateOf(if (p.countdown > 0 && defaultIndex >= 0) SystemClock.uptimeMillis() + p.countdown else 0L)
+    }
+    var now by remember(p.id) { mutableLongStateOf(SystemClock.uptimeMillis()) }
+    LaunchedEffect(p.id) {
+        if (deadline == 0L) return@LaunchedEffect
+        // a deadline gone to 0 meanwhile is the countdown stopped
+        while (deadline != 0L) {
+            now = SystemClock.uptimeMillis()
+            if (now >= deadline) {
+                deadline = 0L
+                onPick(defaultIndex)
+                break
+            }
+            delay(minOf(100L, deadline - now))
+        }
+    }
+    val watch = if (deadline == 0L) Modifier else Modifier.pointerInput(p.id) {
+        val step = pickerMoveDp.dp.toPx()
+        var moved = 0f
+        awaitPointerEventScope {
+            while (true) {
+                // seen before the grid gets it, and left for the grid
+                val ev = awaitPointerEvent(PointerEventPass.Initial)
+                for (c in ev.changes) moved += (c.position - c.previousPosition).getDistance()
+                while (moved >= step && deadline != 0L) {
+                    moved -= step
+                    deadline += pickerMoveDelayMs
+                }
+            }
+        }
+    }
 
     LazyVerticalGrid(
         columns = GridCells.Adaptive(88.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
         contentPadding = PaddingValues(20.dp),
-        modifier = Modifier.fillMaxSize().background(theme.bg),
+        modifier = Modifier.fillMaxSize().background(theme.bg).then(watch),
     ) {
         item(span = { GridItemSpan(maxLineSpan) }) {
             Text(p.title, fontWeight = FontWeight.Bold, fontSize = 18.sp, color = theme.fg)
@@ -110,7 +161,10 @@ fun PickerWindow(p: Prompt?, opening: String?, onPick: (Int) -> Unit, onCancel: 
                 OutlinedTextField(
                     value = filter,
                     onValueChange = { filter = it },
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    // tapping in here is looking for something else: the
+                    // default's countdown stops for good
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                        .onFocusChanged { if (it.isFocused) deadline = 0L },
                     placeholder = { Text("filter by name", color = theme.inputHint) },
                     colors = outlinedColors(theme),
                     singleLine = true,
@@ -134,6 +188,12 @@ fun PickerWindow(p: Prompt?, opening: String?, onPick: (Int) -> Unit, onCancel: 
             }
             items(cells, key = { it.index }) { (i, opt) -> PickerCell(opt, theme) { onPick(i) } }
         }
+        if (deadline != 0L && default.isNotEmpty()) {
+            val left = ((deadline - now + 999) / 1000).coerceAtLeast(1)
+            section("Default · opening in $left second" + if (left == 1L) "" else "s", default)
+        } else {
+            section("Default", default)
+        }
         section("Already open", open)
         section("Open in a new window", fresh)
         if (visible.isEmpty()) {
@@ -153,11 +213,20 @@ fun PickerWindow(p: Prompt?, opening: String?, onPick: (Int) -> Unit, onCancel: 
 // for one already open.
 @Composable
 private fun PickerCell(opt: PromptOption, theme: Theme, onClick: () -> Unit) {
-    val ink = if (opt.dev) theme.devFg else theme.fg
+    val ink = when {
+        opt.default -> theme.suggestFg
+        opt.dev -> theme.devFg
+        else -> theme.fg
+    }
+    val bg = when {
+        opt.default -> theme.suggestBg
+        opt.dev -> theme.devBg
+        else -> Color.Transparent
+    }
     Column(
         Modifier
             .clip(RoundedCornerShape(10.dp))
-            .background(if (opt.dev) theme.devBg else Color.Transparent)
+            .background(bg)
             .clickable(onClick = onClick)
             .padding(6.dp),
         horizontalAlignment = Alignment.CenterHorizontally,

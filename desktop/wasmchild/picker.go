@@ -7,12 +7,16 @@ import (
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
+	"math"
+	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"gioui.org/f32"
 	"gioui.org/font"
 	"gioui.org/font/gofont"
+	"gioui.org/io/event"
 	"gioui.org/io/key"
 	"gioui.org/io/pointer"
 	"gioui.org/layout"
@@ -33,7 +37,10 @@ import (
 // ask which napp handles an action, and it shows the napps that could as a
 // grid of icons, the way the launcher's home tab shows the pinned ones. The
 // windows already open come first, as they do in the launcher's answer
-// order. Once the user picks, the launcher either closes this window or
+// order, and before them the action's default handler, when a napp
+// configuration gave it one: a timed one is picked by itself once its
+// countdown runs out, a countdown that grows while the user moves around in
+// the window. Once the user picks, the launcher either closes this window or
 // sends it the napp to become (see main.go).
 
 const (
@@ -44,6 +51,12 @@ const (
 	// pickerFilterOver is how many choices there have to be before the
 	// picker offers a box to filter them by name.
 	pickerFilterOver = 4
+
+	// pickerMoveDp is how far the pointer has to travel in the window to
+	// put another pickerMoveDelay on a default handler's countdown: someone
+	// moving around is about to pick something else.
+	pickerMoveDp    = 48
+	pickerMoveDelay = time.Second
 )
 
 // pickerCell is one napp, or one open window, to pick.
@@ -65,14 +78,27 @@ type pickerView struct {
 	list    widget.List
 	shownID int
 
-	open, fresh []*pickerCell
-	cancel      widget.Clickable
+	// def is the default handler, the only cell in there when there is one
+	def, open, fresh []*pickerCell
+	cancel           widget.Clickable
+
+	// deadline is when a timed default gets picked, zero when there is no
+	// countdown; moved is how far the pointer went since the countdown last
+	// grew, from where it was last seen (at)
+	countdown time.Duration
+	deadline  time.Time
+	motion    int
+	at        f32.Point
+	seen      bool
+	moved     float32
 
 	// filter narrows the cells down by name, when there are enough of
-	// them to need it
+	// them to need it; a click in it (filterTap) stops the countdown for
+	// good, as the user is looking for something else
 	filter     widget.Editor
 	filtering  bool
 	focusAsked bool
+	filterTap  int
 
 	fold     widget.Clickable
 	foldOpen bool
@@ -99,7 +125,8 @@ func (p *pickerView) build(pv *wasmhost.Prompt) {
 		return
 	}
 	p.shownID = pv.ID
-	p.open, p.fresh = nil, nil
+	p.def, p.open, p.fresh = nil, nil, nil
+	p.deadline, p.seen, p.moved = time.Time{}, false, 0
 	p.foldOpen = false
 	p.opening = ""
 	p.filter.SetText("")
@@ -118,16 +145,28 @@ func (p *pickerView) build(pv *wasmhost.Prompt) {
 				c.icon, c.iconOK = paint.NewImageOp(img), true
 			}
 		}
-		if c.window != "" {
+		switch {
+		case opt.Default:
+			c.tone = "suggest"
+			c.tip = "Send this to " + c.name + ", the default for this action"
+			if c.window != "" {
+				c.tip += ", in window " + c.window
+			}
+			p.def = append(p.def, c)
+		case c.window != "":
 			c.tip = "Send this to " + c.name + " in window " + c.window + ", already open"
 			p.open = append(p.open, c)
-		} else {
+		default:
 			c.tip = "Open " + c.name + " to handle this"
 			if opt.Detail != "" && opt.Detail != c.name {
 				c.tip += " (" + opt.Detail + ")"
 			}
 			p.fresh = append(p.fresh, c)
 		}
+	}
+	p.countdown = 0
+	if len(p.def) > 0 {
+		p.countdown = time.Duration(pv.Countdown) * time.Millisecond
 	}
 }
 
@@ -157,7 +196,58 @@ func (p *pickerView) Layout(gtx layout.Context, pv *wasmhost.Prompt, theme strin
 	p.build(pv)
 	pick := func(c *pickerCell) {
 		p.opening = c.name
+		p.countdown = 0
 		answer(pv.ID, true, c.index)
+	}
+
+	// a timed default: the countdown starts with the first frame, grows
+	// with every pickerMoveDp the pointer travels, and picks the default
+	// when it runs out
+	for p.countdown > 0 {
+		ev, ok := gtx.Event(pointer.Filter{Target: &p.filterTap, Kinds: pointer.Press})
+		if !ok {
+			break
+		}
+		if pe, ok := ev.(pointer.Event); ok && pe.Kind == pointer.Press {
+			p.countdown = 0
+		}
+	}
+	if p.countdown > 0 {
+		if p.deadline.IsZero() {
+			p.deadline = gtx.Now.Add(p.countdown)
+		}
+		step := float32(gtx.Dp(pickerMoveDp))
+		for {
+			ev, ok := gtx.Event(pointer.Filter{Target: &p.motion, Kinds: pointer.Move | pointer.Drag | pointer.Press | pointer.Leave | pointer.Cancel})
+			if !ok {
+				break
+			}
+			pe, ok := ev.(pointer.Event)
+			if !ok {
+				continue
+			}
+			if pe.Kind == pointer.Leave || pe.Kind == pointer.Cancel {
+				p.seen = false
+				continue
+			}
+			if p.seen {
+				d := pe.Position.Sub(p.at)
+				p.moved += float32(math.Hypot(float64(d.X), float64(d.Y)))
+			}
+			p.at, p.seen = pe.Position, true
+			for p.moved >= step {
+				p.moved -= step
+				p.deadline = p.deadline.Add(pickerMoveDelay)
+			}
+		}
+		if !gtx.Now.Before(p.deadline) {
+			pick(p.def[0])
+			return layout.Dimensions{Size: gtx.Constraints.Max}
+		}
+		// the next frame is when the seconds shown change, or the deadline
+		left := p.deadline.Sub(gtx.Now)
+		next := left - (left-1)/time.Second*time.Second
+		gtx.Execute(op.InvalidateCmd{At: gtx.Now.Add(next)})
 	}
 
 	// the filter has the keyboard from the start, so typing narrows the
@@ -180,9 +270,9 @@ func (p *pickerView) Layout(gtx layout.Context, pv *wasmhost.Prompt, theme strin
 			}
 		}
 	}
-	open, fresh := p.visible(p.open), p.visible(p.fresh)
+	def, open, fresh := p.visible(p.def), p.visible(p.open), p.visible(p.fresh)
 
-	for _, c := range append(append([]*pickerCell(nil), p.open...), p.fresh...) {
+	for _, c := range append(append(append([]*pickerCell(nil), p.def...), p.open...), p.fresh...) {
 		if c.click.Clicked(gtx) {
 			pick(c)
 			return layout.Dimensions{Size: gtx.Constraints.Max}
@@ -272,15 +362,28 @@ func (p *pickerView) Layout(gtx layout.Context, pv *wasmhost.Prompt, theme strin
 					return layout.UniformInset(8).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 						ed := material.Editor(th, &p.filter, "filter by name")
 						ed.HintColor = pal.muted
-						return ed.Layout(gtx)
+						dims := ed.Layout(gtx)
+						// over the editor, letting the click through to it
+						area := clip.Rect(image.Rectangle{Max: dims.Size}).Push(gtx.Ops)
+						pass := pointer.PassOp{}.Push(gtx.Ops)
+						event.Op(gtx.Ops, &p.filterTap)
+						pass.Pop()
+						area.Pop()
+						return dims
 					})
 				})
 			})
 		})
 	}
+	if p.countdown > 0 && len(def) > 0 {
+		left := (p.deadline.Sub(gtx.Now) + time.Second - 1) / time.Second
+		section("Default · opening in "+plural(int(left), "second"), def)
+	} else {
+		section("Default", def)
+	}
 	section("Already open", open)
 	section("Open in a new window", fresh)
-	if len(open)+len(fresh) == 0 {
+	if len(def)+len(open)+len(fresh) == 0 {
 		children = append(children, func(gtx layout.Context) layout.Dimensions {
 			return layout.Inset{Top: 18}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				l := material.Body2(th, "No napp matches “"+strings.TrimSpace(p.filter.Text())+"”")
@@ -317,6 +420,15 @@ func (p *pickerView) Layout(gtx layout.Context, pv *wasmhost.Prompt, theme strin
 			})
 		})
 	})
+	if p.countdown > 0 {
+		// the whole window watches the pointer for the countdown, letting
+		// everything through to the cells under it
+		area := clip.Rect(image.Rectangle{Max: gtx.Constraints.Max}).Push(gtx.Ops)
+		pass := pointer.PassOp{}.Push(gtx.Ops)
+		event.Op(gtx.Ops, &p.motion)
+		pass.Pop()
+		area.Pop()
+	}
 	p.tips.Draw(gtx, th, pal.fg, pal.bg)
 	return dims
 }
@@ -341,7 +453,7 @@ func (p *pickerView) visible(cells []*pickerCell) []*pickerCell {
 // the habitual handler when there is one.
 func (p *pickerView) first() *pickerCell {
 	var best *pickerCell
-	for _, c := range append(p.visible(p.open), p.visible(p.fresh)...) {
+	for _, c := range append(append(p.visible(p.def), p.visible(p.open)...), p.visible(p.fresh)...) {
 		if best == nil || c.index < best.index {
 			best = c
 		}
@@ -465,4 +577,12 @@ func (p *pickerView) icon(gtx layout.Context, pal palette, c *pickerCell) layout
 func mix(a, b color.NRGBA, t float32) color.NRGBA {
 	l := func(x, y uint8) uint8 { return uint8(float32(x)*(1-t) + float32(y)*t) }
 	return color.NRGBA{R: l(a.R, b.R), G: l(a.G, b.G), B: l(a.B, b.B), A: a.A}
+}
+
+// plural is "1 second", "3 seconds".
+func plural(n int, what string) string {
+	if n == 1 {
+		return "1 " + what
+	}
+	return strconv.Itoa(n) + " " + what + "s"
 }

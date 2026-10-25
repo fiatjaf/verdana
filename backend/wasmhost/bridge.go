@@ -58,6 +58,10 @@ type Prompt struct {
 	Summary  string         `json:"summary"`
 	Options  []PromptOption `json:"options"`
 	Remember bool           `json:"remember"`
+
+	// Countdown is, for a picker, how many milliseconds it waits before
+	// picking its Default option by itself.
+	Countdown int `json:"countdown"`
 }
 
 type PromptOption struct {
@@ -71,6 +75,9 @@ type PromptOption struct {
 	// picker.go): the napp's plain name, and its icon's bytes.
 	Name string `json:"name"`
 	Icon []byte `json:"icon"`
+
+	// Default is the action's configured default handler, put first.
+	Default bool `json:"default"`
 }
 
 type themeState struct {

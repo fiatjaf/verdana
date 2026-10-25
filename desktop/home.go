@@ -379,8 +379,14 @@ func openHomeItem(item backend.HomeItem) {
 }
 
 // bundleIcon is a bundle on the home tab: its napps' icons, up to four, two
-// by two on a tile, so it reads as a folder of the napps it opens.
+// by two on a tile, so it reads as a folder of the napps it opens — or the
+// icon a napp configuration gave it, once that has loaded.
 func bundleIcon(gtx layout.Context, b backend.BundleInfo, size int) layout.Dimensions {
+	if b.Icon != "" {
+		if img, ok := getImage(b.Icon); ok {
+			return imageSquare(gtx, size, img, true)
+		}
+	}
 	sz := gtx.Dp(unit.Dp(size))
 	r := gtx.Dp(10)
 	tile := clip.RRect{Rect: image.Rect(0, 0, sz, sz), NW: r, NE: r, SW: r, SE: r}.Push(gtx.Ops)

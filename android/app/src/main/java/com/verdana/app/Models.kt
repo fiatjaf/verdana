@@ -61,6 +61,9 @@ data class PromptOption(
     // bytes as base64: only sent to a picker window (see PickerWindow)
     val name: String = "",
     val icon: String = "",
+    // default is the action's default handler, from a napp configuration:
+    // the backend put it first
+    val default: Boolean = false,
 )
 
 data class Prompt(
@@ -82,6 +85,9 @@ data class Prompt(
     // instance is the window the prompt belongs over, when a napp fired it.
     // Blank for questions the launcher asked itself.
     val instance: String = "",
+    // countdown, in milliseconds, is how long a picker waits before it
+    // picks the default option by itself; 0 waits for the user
+    val countdown: Long = 0,
 )
 
 // a bundle (see backend/bundles.go): napps opened together, each with the
@@ -93,6 +99,9 @@ data class BundleInfo(
     val entries: List<BundleEntry>,
     val pinned: Boolean,
     val shortcut: Boolean,
+    // icon is the url of the image a napp configuration gave the bundle,
+    // shown instead of its napps' icons; "" for none
+    val icon: String = "",
 )
 
 // BundleDraftEntry is one napp of a bundle in the editor: lines are its
@@ -216,9 +225,11 @@ fun parsePrompt(json: String): Prompt? {
                 dev = p.optBoolean("dev"),
                 name = p.optString("name"),
                 icon = p.optString("icon"),
+                default = p.optBoolean("default"),
             )
         },
         instance = o.optString("instance"),
+        countdown = o.optLong("countdown"),
     )
 }
 
@@ -273,8 +284,9 @@ fun parseProfile(json: String): ProfileDetail? {
 }
 
 // Opened is what a pasted nostr code or nostr: link turned out to be (see
-// OpenCode in backend/resolve.go): a "profile" page, a "napp" page, or an
-// "action" already handed to a napp, with nothing for the launcher to show.
+// OpenCode in backend/resolve.go): a "profile" page, a "napp" page, an
+// "action" already handed to a napp or a "config" the user is being asked to
+// apply, with nothing for the launcher to show.
 data class Opened(val kind: String, val pubkey: String, val napp: Napp?)
 
 fun parseOpened(json: String): Opened? = try {
@@ -366,5 +378,6 @@ fun parseBundle(b: JSONObject): BundleInfo {
         },
         pinned = b.optBoolean("pinned"),
         shortcut = b.optBoolean("shortcut"),
+        icon = b.optString("icon"),
     )
 }

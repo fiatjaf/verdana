@@ -832,8 +832,22 @@ func runNappAction(
 		return nil, fmt.Errorf("no installed napp handles %q", name)
 	}
 
+	// the default handler a napp configuration gives the action, if any. A
+	// raw "view" with none of its own, while some kind has one, waits for
+	// its kind to be known so that one gets a say.
+	def, hasDef := configuredHandler(req.name, candidates, open)
+	if !hasDef && !ruled && viewing != nil && hasViewDefaults() {
+		takeView(true)
+		def, hasDef = configuredHandler(req.name, candidates, open)
+	}
+	forced := !ruled && hasDef && def.mode == HandlerForced
+	if forced {
+		// nobody is asked, so there is nothing to show meanwhile either
+		takeView(true)
+	}
+
 	// exactly one possibility: no need to bother the user
-	if len(candidates)+len(open) == 1 && viewing == nil {
+	if len(candidates)+len(open) == 1 && viewing == nil && !forced {
 		if len(open) == 1 {
 			log.Info().Str("from", callerName).Str("action", name).
 				Str("instance", open[0].instance).Msg("dispatching action")
@@ -878,10 +892,16 @@ func runNappAction(
 		log.Info().Str("from", callerName).Str("action", name).
 			Str("napp", picked.NappID).Msg("the rules picked the handler")
 		choice = picked
+	} else if forced {
+		// a forced default handler gives the user no say
+		log.Info().Str("from", callerName).Str("action", req.name).
+			Str("napp", def.option.NappID).Str("instance", def.option.Instance).
+			Msg("the configured default handler takes the action")
+		choice = def.option
 	} else {
 		var picked PromptOption
 		var ok bool
-		picked, picker, ok = askActionHandler(caller, name, payload, candidates, open, viewing)
+		picked, picker, ok = askActionHandler(caller, name, payload, candidates, open, viewing, def)
 		if !ok {
 			return nil, errors.New("action handler selection cancelled")
 		}

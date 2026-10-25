@@ -87,6 +87,10 @@ type PromptOption struct {
 	// picker.go).
 	Name string `json:"name,omitempty"`
 	Icon []byte `json:"icon,omitempty"`
+
+	// Default says a napp configuration made this the action's default
+	// handler (see config.go): the picker puts it first, apart from the rest.
+	Default bool `json:"default,omitempty"`
 }
 
 // PromptBody is what a prompt shows under its title, in this order.
@@ -120,6 +124,11 @@ type Prompt struct {
 
 	// Options is empty for a plain approve/deny prompt.
 	Options []PromptOption `json:"options"`
+
+	// Countdown, in milliseconds, is how long a picker waits before it picks
+	// its Default option by itself: a timed default handler. The picker adds
+	// to it while the user moves around in it. Zero waits for the user.
+	Countdown int `json:"countdown,omitempty"`
 
 	// Remember says the answer can stick, so a GUI offers the scopes
 	// alongside the yes and the no. False for a picker, whose answer is
@@ -357,11 +366,15 @@ func askApprovalFor(ci *Instance, perm Permission, title string, body func() Pro
 // was picked in it or closes it. A platform with no picker windows has no way
 // to ask, so the action goes nowhere.
 //
+// def is the action's default handler, when a napp configuration gives it
+// one: it goes first, and for a timed one the picker takes it by itself once
+// its countdown runs out.
+//
 // For a raw "view", viewing is the search for the event's kind: the picker
 // starts with the "view" napps and, when the kind turns up, also lists the
 // napps viewing that kind, after the options already shown so that what the
 // user may be about to click stays where it is.
-func askActionHandler(caller *Instance, action string, payload json.RawMessage, candidates []Napp, open []*Instance, viewing *viewLookup) (PromptOption, *Instance, bool) {
+func askActionHandler(caller *Instance, action string, payload json.RawMessage, candidates []Napp, open []*Instance, viewing *viewLookup, def *handlerDefault) (PromptOption, *Instance, bool) {
 	callerName := "launcher"
 	callerID := ""
 	if caller != nil {
@@ -381,6 +394,19 @@ func askActionHandler(caller *Instance, action string, payload json.RawMessage, 
 	// in the order it arrived in
 	sortHandlerOptions(options, callerID, action)
 
+	// the default handler goes before even those
+	if def != nil {
+		if i := slices.IndexFunc(options, func(o PromptOption) bool {
+			return o.NappID == def.option.NappID && o.Instance == def.option.Instance
+		}); i >= 0 {
+			opt := options[i]
+			opt.Default = true
+			options = slices.Insert(slices.Delete(options, i, i+1), 0, opt)
+		} else {
+			def = nil
+		}
+	}
+
 	code := ""
 	if len(payload) != 0 && string(payload) != "null" {
 		code = preview(string(payload), 500)
@@ -388,6 +414,9 @@ func askActionHandler(caller *Instance, action string, payload json.RawMessage, 
 
 	p := newPrompt(callerName, "Open “"+action+"” with…", PromptBody{Code: code}, options)
 	p.Instance = picker.instance
+	if def != nil && def.mode == HandlerTimed {
+		p.Countdown = int(defaultCountdown / time.Millisecond)
+	}
 	// closing the picker is saying no
 	go func() {
 		<-picker.gone

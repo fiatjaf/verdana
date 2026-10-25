@@ -19,6 +19,7 @@ const (
 	OpenedProfile = "profile" // Pubkey: the launcher shows that user's page
 	OpenedNapp    = "napp"    // Napp: the launcher shows that napp's page
 	OpenedAction  = "action"  // nothing to show: a view:<kind> action was fired
+	OpenedConfig  = "config"  // nothing to show: the user is asked to apply a configuration
 )
 
 // Opened is what OpenCode made of a code.
@@ -30,8 +31,9 @@ type Opened struct {
 
 // OpenCode takes whatever the user pasted — an npub, nprofile, note, nevent
 // or naddr, bare or as a nostr: link — and says what to do with it: a user
-// goes to their page, a napp to its page, and any other event is handed to
-// the napps that view its kind with a view:<kind> action, fired right here.
+// goes to their page, a napp to its page, a napp configuration is offered to
+// be applied, and any other event is handed to the napps that view its kind
+// with a view:<kind> action, fired right here.
 // It blocks while fetching events, so call it off the render loop.
 func OpenCode(ctx context.Context, input string) (Opened, error) {
 	code := strings.TrimSpace(input)
@@ -57,13 +59,13 @@ func OpenCode(ctx context.Context, input string) (Opened, error) {
 		return Opened{}, errors.New("that is a secret key: never paste it anywhere")
 	case "naddr":
 		ptr := data.(nostr.EntityPointer)
-		if !isNappKind(ptr.Kind) {
+		if !isNappKind(ptr.Kind) && ptr.Kind != KindConfig {
 			// the action resolves the address itself
 			return viewCode(ptr.Kind, code)
 		}
 	case "nevent":
 		ptr := data.(nostr.EventPointer)
-		if ptr.Kind != 0 && !isNappKind(ptr.Kind) {
+		if ptr.Kind != 0 && !isNappKind(ptr.Kind) && ptr.Kind != KindConfig {
 			return viewCode(ptr.Kind, code)
 		}
 	case "note":
@@ -71,7 +73,7 @@ func OpenCode(ctx context.Context, input string) (Opened, error) {
 		return Opened{}, errors.New("can't open a " + prefix)
 	}
 
-	// an event of a kind we don't know yet, or a napp: get it
+	// an event of a kind we don't know yet, a napp or a configuration: get it
 	if sys == nil {
 		return Opened{}, errors.New("not ready yet")
 	}
@@ -91,6 +93,9 @@ func OpenCode(ctx context.Context, input string) (Opened, error) {
 		}
 		rememberNapp(n)
 		return Opened{Kind: OpenedNapp, Napp: &n}, nil
+	case evt.Kind == KindConfig:
+		offerConfiguration(*evt)
+		return Opened{Kind: OpenedConfig}, nil
 	case evt.Kind == 0:
 		return Opened{Kind: OpenedProfile, Pubkey: evt.PubKey.Hex()}, nil
 	default:

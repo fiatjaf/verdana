@@ -232,7 +232,7 @@ class MainActivity : ComponentActivity() {
                 null
             }
             withContext(Dispatchers.Main) {
-                if (opened != null && opened.kind != "action") {
+                if (opened != null && (opened.kind == "profile" || opened.kind == "napp")) {
                     showProfile = false
                     openedPage = opened
                 }
