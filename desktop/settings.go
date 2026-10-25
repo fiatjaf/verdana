@@ -3,6 +3,7 @@ package main
 import (
 	"image"
 	"time"
+	"verdana/backend"
 
 	"gioui.org/font"
 	"gioui.org/io/pointer"
@@ -13,8 +14,6 @@ import (
 	"gioui.org/widget"
 	"gioui.org/widget/material"
 	"golang.org/x/exp/shiny/materialdesign/icons"
-
-	"verdana/backend"
 )
 
 // The settings tab, opened from the gear in the header: authenticating on
@@ -197,7 +196,7 @@ func layoutSettings(gtx layout.Context, th *material.Theme, st backend.State) la
 		rows = append(rows, func(gtx layout.Context) layout.Dimensions {
 			mode := string(h.Mode)
 			if h.Singleton {
-				mode += ", in its open window"
+				mode += ", singleton"
 			}
 			return layout.Inset{Bottom: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
@@ -326,7 +325,8 @@ func configRow(gtx layout.Context, th *material.Theme, c backend.ConfigurationIn
 // choiceRow is a label and its choices, the one in force (current)
 // highlighted.
 func choiceRow(gtx layout.Context, th *material.Theme, label string, btns []widget.Clickable,
-	labels, tips []string, current int) layout.Dimensions {
+	labels, tips []string, current int,
+) layout.Dimensions {
 	children := []layout.FlexChild{
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			gtx.Constraints.Min.X = gtx.Dp(200)

@@ -331,7 +331,7 @@ func parseBundleItem(item string) ([]ShortcutEntry, error) {
 // ─── applying a configuration ────────────────────────────────────
 
 // lines are what a configuration sets, a line each, the way the settings
-// list it and the prompt asking to apply it says it.
+// list it (the prompt asking to apply it groups them: see sections).
 func (c NappConfiguration) lines() []string {
 	var lines []string
 	for _, ref := range c.Napps {
@@ -340,13 +340,55 @@ func (c NappConfiguration) lines() []string {
 	for _, h := range c.Handlers {
 		line := "send “" + h.Action + "” to " + nappName(h.Target) + " (" + string(h.Mode)
 		if h.Singleton {
-			line += ", in its open window"
+			line += ", singleton"
 		}
 		lines = append(lines, line+")")
 	}
 	for _, b := range c.Bundles {
 		lines = append(lines, "add the bundle “"+b.Name+"” to the home tab, with "+plural(len(b.Entries), "napp", "napps"))
 	}
+	return append(lines, c.permissionLines()...)
+}
+
+// sections are lines grouped under what they touch, the way the prompt
+// asking to apply the configuration shows them.
+func (c NappConfiguration) sections() []PromptSection {
+	var sections []PromptSection
+	add := func(heading string, lines []string) {
+		if len(lines) > 0 {
+			sections = append(sections, PromptSection{Heading: heading, Lines: lines})
+		}
+	}
+
+	var napps []string
+	for _, ref := range c.Napps {
+		napps = append(napps, ref.label())
+	}
+	add("Install", napps)
+
+	var handlers []string
+	for _, h := range c.Handlers {
+		line := "“" + h.Action + "” → " + nappName(h.Target) + " (" + string(h.Mode)
+		if h.Singleton {
+			line += ", singleton"
+		}
+		handlers = append(handlers, line+")")
+	}
+	add("Default handlers", handlers)
+
+	var bundles []string
+	for _, b := range c.Bundles {
+		bundles = append(bundles, "“"+b.Name+"”, with "+plural(len(b.Entries), "napp", "napps"))
+	}
+	add("Bundles on the home tab", bundles)
+
+	add("Permissions", c.permissionLines())
+	return sections
+}
+
+// permissionLines say what a configuration sets the permissions to.
+func (c NappConfiguration) permissionLines() []string {
+	var lines []string
 	for _, p := range []struct {
 		what string
 		d    Decision
@@ -421,7 +463,7 @@ func offerConfiguration(evt nostr.Event) {
 			return
 		}
 		p := newPrompt("launcher", "Apply the configuration “"+c.Label()+"”?", PromptBody{
-			Detail: "It will " + strings.Join(lines, "; ") + ".",
+			Sections: c.sections(),
 		}, nil)
 		enqueuePrompt(p)
 		if !p.wait().OK {

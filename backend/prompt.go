@@ -107,6 +107,10 @@ type PromptBody struct {
 	// start with, and the answer says which ones the user unticked.
 	Items []string `json:"items,omitempty"`
 
+	// Sections are what the prompt is about, grouped: a heading each, with a
+	// row under it per line. Read-only, unlike Items.
+	Sections []PromptSection `json:"sections,omitempty"`
+
 	// Code is an optional monospace block with the payload at stake. With
 	// a Summary it starts folded under that one line ("kind-1 · 3 tags").
 	Code    string `json:"code"`
@@ -116,6 +120,12 @@ type PromptBody struct {
 	// big as it fits, with the answers to one side of it, and calls them
 	// "Open in browser" and "Close" (see showImage in files.go).
 	Image string `json:"image,omitempty"`
+}
+
+// PromptSection is a heading and the lines under it (see PromptBody).
+type PromptSection struct {
+	Heading string   `json:"heading"`
+	Lines   []string `json:"lines"`
 }
 
 // Prompt is a question the user has to answer before a napp can continue.

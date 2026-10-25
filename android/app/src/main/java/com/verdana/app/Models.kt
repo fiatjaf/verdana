@@ -66,6 +66,9 @@ data class PromptOption(
     val default: Boolean = false,
 )
 
+// PromptSection is a heading of a prompt and the lines under it.
+data class PromptSection(val heading: String, val lines: List<String>)
+
 data class Prompt(
     val id: Long,
     val title: String,
@@ -78,6 +81,8 @@ data class Prompt(
     // when there is one, is the line code starts folded under.
     val warning: String = "",
     val items: List<String> = listOf(),
+    // sections are what the prompt is about, grouped under headings
+    val sections: List<PromptSection> = listOf(),
     val summary: String = "",
     // image is the url of an image the prompt is about: shown as big as it
     // fits, with "Open in browser" and "Close" beside it (see ImagePrompt)
@@ -274,6 +279,16 @@ fun parsePrompt(json: String): Prompt? {
         code = o.optString("code"),
         warning = o.optString("warning"),
         items = o.optJSONArray("items")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: listOf(),
+        sections = o.optJSONArray("sections")?.let { a ->
+            (0 until a.length()).map { i ->
+                val sec = a.getJSONObject(i)
+                val lines = sec.optJSONArray("lines")
+                PromptSection(
+                    heading = sec.optString("heading"),
+                    lines = lines?.let { l -> (0 until l.length()).map { l.getString(it) } } ?: listOf(),
+                )
+            }
+        } ?: listOf(),
         summary = o.optString("summary"),
         image = o.optString("image"),
         napp = o.optString("napp"),

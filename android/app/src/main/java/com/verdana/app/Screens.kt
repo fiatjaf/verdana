@@ -1764,6 +1764,18 @@ fun PromptWindow(p: Prompt, onAnswer: (Boolean, String, List<Int>) -> Unit) {
                 }
             }
         }
+        p.sections.forEach { sec ->
+            Spacer(Modifier.height(12.dp))
+            Text(sec.heading, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyLarge, color = theme.fg)
+            sec.lines.forEach { line ->
+                Text(
+                    "• $line",
+                    modifier = Modifier.padding(start = 10.dp, top = 2.dp),
+                    color = theme.subtle,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+        }
         if (p.warning.isNotBlank()) {
             Spacer(Modifier.height(10.dp))
             Text(

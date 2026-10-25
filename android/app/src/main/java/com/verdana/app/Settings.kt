@@ -80,7 +80,7 @@ fun SettingsScreen(activity: MainActivity, st: LauncherState) {
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    Text(h.mode + if (h.singleton) ", in its open window" else "", color = theme.muted, fontSize = 12.sp)
+                    Text(h.mode + if (h.singleton) ", singleton" else "", color = theme.muted, fontSize = 12.sp)
                 }
                 Spacer(Modifier.width(8.dp))
                 Choice("Delete", false, theme) { activity.removeDefaultHandler(h.action) }

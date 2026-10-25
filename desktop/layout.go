@@ -52,6 +52,9 @@ type promptButtons struct {
 	foldOpen bool
 	ticks    []widget.Bool
 	shownFor int
+
+	// list scrolls the prompt when it is taller than the window
+	list widget.List
 }
 
 // reset makes the buttons ready for prompt p, the first time it is drawn.
@@ -60,6 +63,8 @@ func (btns *promptButtons) reset(p *backend.Prompt) {
 		return
 	}
 	btns.shownFor, btns.foldOpen = p.ID, false
+	btns.list.Axis = layout.Vertical
+	btns.list.Position = layout.Position{}
 	btns.ticks = make([]widget.Bool, len(p.Items))
 	for i := range btns.ticks {
 		btns.ticks[i].Value = true
@@ -109,14 +114,13 @@ func layoutPrompt(
 	}
 
 	// codeBox draws text on a rounded code-coloured block
-	codeBox := func(text string, maxLines int) layout.Widget {
+	codeBox := func(text string) layout.Widget {
 		return func(gtx layout.Context) layout.Dimensions {
 			macro := op.Record(gtx.Ops)
 			dims := layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				gtx.Constraints.Min.X = gtx.Constraints.Max.X
 				l := material.Body2(th, text)
 				l.Color = currentTheme().codeFg
-				l.MaxLines = maxLines
 				return l.Layout(gtx)
 			})
 			call := macro.Stop()
@@ -139,6 +143,26 @@ func layoutPrompt(
 			cb.Color = currentTheme().codeFg
 			return cb.Layout(gtx)
 		}))
+	}
+
+	for _, sec := range p.Sections {
+		children = append(children,
+			layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				l := material.Body1(th, sec.Heading)
+				l.Font.Weight = font.Bold
+				return l.Layout(gtx)
+			}),
+		)
+		for _, line := range sec.Lines {
+			children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return layout.Inset{Top: unit.Dp(2), Left: unit.Dp(10)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					l := material.Body2(th, "• "+line)
+					l.Color = currentTheme().subtle
+					return l.Layout(gtx)
+				})
+			}))
+		}
 	}
 
 	if p.Warning != "" {
@@ -173,15 +197,9 @@ func layoutPrompt(
 	}
 
 	if p.Code != "" && (p.Summary == "" || btns.foldOpen) {
-		// this view doesn't scroll: a long payload is cut where it would
-		// push the answers off the window
-		lines := 0
-		if p.Summary != "" {
-			lines = 24
-		}
 		children = append(children,
 			layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
-			layout.Rigid(codeBox(p.Code, lines)),
+			layout.Rigid(codeBox(p.Code)),
 		)
 	}
 
@@ -259,7 +277,9 @@ func layoutPrompt(
 		)
 	}
 
-	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
+	return material.List(th, &btns.list).Layout(gtx, 1, func(gtx layout.Context, _ int) layout.Dimensions {
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
+	})
 }
 
 func layoutLogin(
