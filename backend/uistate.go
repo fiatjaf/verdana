@@ -229,12 +229,6 @@ func Snapshot() State {
 		FetchErr:         ls.fetchErr,
 		Fetching:         ls.fetching,
 		Theme:            name,
-		ReadAuth:         ReadAuth(),
-		SignPolicy:       NappPolicy(PermSign),
-		PublishPolicy:    NappPolicy(PermPublish),
-		OpenLinks:        OpenLinks(),
-		DefaultHandlers:  defaultHandlers(),
-		Configurations:   knownConfigurations(),
 		Installed:        append([]Napp(nil), ls.installed...),
 		Discovery:        append([]Napp(nil), ls.discovery...),
 		Contacts:         append([]Napp(nil), ls.contacts...),
@@ -250,6 +244,14 @@ func Snapshot() State {
 	}
 	ls.mu.Unlock()
 
+	// these take stateMu, and knownConfigurations can take ls.mu itself (to
+	// name napps), so they stay out of the section above
+	s.ReadAuth = ReadAuth()
+	s.SignPolicy = NappPolicy(PermSign)
+	s.PublishPolicy = NappPolicy(PermPublish)
+	s.OpenLinks = OpenLinks()
+	s.DefaultHandlers = defaultHandlers()
+	s.Configurations = knownConfigurations()
 	s.Relays = Relays()
 	s.Windows = OpenWindows()
 	s.ManagedWindows = ManagedWindows()
