@@ -287,6 +287,8 @@ func gioMain() {
 		loginEd             widget.Editor
 		loginBtn            widget.Clickable
 		googleBtn           widget.Clickable
+		scratchBtn          widget.Clickable
+		bootstrapBtn        widget.Clickable
 		relaysEd            widget.Editor
 		fetchBtn            widget.Clickable
 		tabHomeBtn          widget.Clickable
@@ -458,6 +460,14 @@ func gioMain() {
 							go backend.LoginWithGoogle()
 						}
 						return layoutLogin(gtx, th, &loginEd, &loginBtn, &googleBtn, st.LoginErr, st.LoginStatus)
+					case backend.PhaseWelcome:
+						if scratchBtn.Clicked(gtx) {
+							backend.Welcome(false)
+						}
+						if bootstrapBtn.Clicked(gtx) {
+							backend.Welcome(true)
+						}
+						return layoutWelcome(gtx, th, &scratchBtn, &bootstrapBtn, st.ProfileName)
 					case backend.PhaseMain:
 						handleOpenBox(gtx)
 						if tabHomeBtn.Clicked(gtx) {

@@ -340,6 +340,34 @@ func layoutLogin(
 	)
 }
 
+// layoutWelcome is the screen of the first login: an empty launcher, or the
+// bootstrap configuration's napps and settings.
+func layoutWelcome(gtx layout.Context, th *material.Theme, scratchBtn, bootstrapBtn *widget.Clickable, name string) layout.Dimensions {
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			t := material.H5(th, "Welcome to Verdana, "+name)
+			t.Font.Weight = font.Bold
+			return t.Layout(gtx)
+		}),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			l := material.Body2(th, "How do you want to start? The bootstrapped configuration installs a set of napps, puts some on the home tab and sets defaults you can change later in the settings.")
+			l.Color = currentTheme().subtle
+			return l.Layout(gtx)
+		}),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(20)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			pointer.CursorPointer.Add(gtx.Ops)
+			return withTooltip(gtx, bootstrapBtn, "Install the napps of the bootstrapped configuration and take its settings", material.Button(th, bootstrapBtn, "Apply bootstrapped configuration").Layout)
+		}),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			pointer.CursorPointer.Add(gtx.Ops)
+			return withTooltip(gtx, scratchBtn, "An empty launcher: find napps yourself in the Explore tab", material.Button(th, scratchBtn, "Start from scratch").Layout)
+		}),
+	)
+}
+
 func layoutMain(
 	gtx layout.Context,
 	th *material.Theme,

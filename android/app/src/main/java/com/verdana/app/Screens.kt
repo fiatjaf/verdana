@@ -230,6 +230,41 @@ fun LoginScreen(activity: MainActivity, st: LauncherState) {
     }
 }
 
+// WelcomeScreen is the first login's question: an empty launcher, or the
+// bootstrap configuration's napps and settings.
+@Composable
+fun WelcomeScreen(activity: MainActivity, st: LauncherState) {
+    val theme = themeByName(st.theme)
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(20.dp),
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Text(
+            "Welcome to Verdana, ${st.profileName}",
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold,
+            color = theme.fg,
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "How do you want to start? The bootstrapped configuration installs a set of napps, puts some on the home tab and sets defaults you can change later in the settings.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = theme.subtle,
+        )
+        Spacer(Modifier.height(20.dp))
+        Button(onClick = { activity.welcome(true) }, modifier = Modifier.fillMaxWidth()) {
+            Text("Apply bootstrapped configuration")
+        }
+        Spacer(Modifier.height(12.dp))
+        OutlinedButton(onClick = { activity.welcome(false) }, modifier = Modifier.fillMaxWidth()) {
+            Text("Start from scratch", color = theme.fg)
+        }
+    }
+}
+
 @Composable
 fun LauncherScreen(activity: MainActivity, st: LauncherState) {
     val theme = themeByName(st.theme)

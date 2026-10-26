@@ -115,6 +115,7 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch { GoogleLogin.login(this@MainActivity) }
     }
     fun logout() = Mobile.logout()
+    fun welcome(bootstrap: Boolean) = Mobile.welcome(bootstrap)
     fun fetchNapps() = Mobile.fetch()
     fun fetchContacts() = Mobile.fetchContacts()
     fun refetchContacts() = Mobile.refetchContacts()
@@ -339,6 +340,7 @@ class MainActivity : ComponentActivity() {
                     Box(Modifier.weight(1f).then(if (hasHeader) Modifier else Modifier.statusBarsPadding())) {
                         when {
                             state.phase == "login" -> LoginScreen(this@MainActivity, state)
+                            state.phase == "welcome" -> WelcomeScreen(this@MainActivity, state)
                             showProfile && state.phase == "main" -> ProfileScreen(this@MainActivity, state)
                             showSettings && state.phase == "main" -> SettingsScreen(this@MainActivity, state)
                             state.phase == "main" -> LauncherScreen(this@MainActivity, state)

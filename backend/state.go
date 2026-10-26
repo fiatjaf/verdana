@@ -88,6 +88,10 @@ type AppState struct {
 	// NoReadAuth stops the launcher from authenticating (NIP-42) to relays
 	// that ask for it when reading. Publishing authenticates regardless.
 	NoReadAuth bool `json:"no_read_auth,omitempty"`
+
+	// Welcomed is set once the user answered the welcome screen of their
+	// first login (see Welcome), whichever way.
+	Welcomed bool `json:"welcomed,omitempty"`
 }
 
 var (

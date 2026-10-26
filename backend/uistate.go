@@ -21,6 +21,11 @@ const (
 	PhaseLoading = "loading"
 	PhaseLogin   = "login"
 	PhaseMain    = "main"
+
+	// PhaseWelcome is right after the very first login: the user picks
+	// between starting from scratch and the bootstrap configuration (see
+	// Welcome).
+	PhaseWelcome = "welcome"
 )
 
 // State is an immutable snapshot of the launcher. The json tags are part of
@@ -419,13 +424,13 @@ func setLoginStatus(msg string) {
 	notifyState()
 }
 
-func setProfile(pubkey, name, picture string) {
+func setProfile(pubkey, name, picture, phase string) {
 	ls.mu.Lock()
 	ls.loginErr = ""
 	ls.pubkey = pubkey
 	ls.profName = name
 	ls.profPic = picture
-	setPhaseLocked(PhaseMain)
+	setPhaseLocked(phase)
 	ls.mu.Unlock()
 	notifyState()
 }

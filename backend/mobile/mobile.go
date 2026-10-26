@@ -280,6 +280,10 @@ func LoginFailed(msg string) { backend.LoginFailed(msg) }
 // Logout forgets the key and closes every napp.
 func Logout() { backend.Logout() }
 
+// Welcome answers the welcome screen of the first login: bootstrap applies
+// the bootstrap napp configuration, otherwise the user starts from scratch.
+func Welcome(bootstrap bool) { backend.Welcome(bootstrap) }
+
 // Fetch looks for napps on the discovery relays.
 func Fetch() { go backend.Discover() }
 

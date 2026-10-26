@@ -157,7 +157,11 @@ func setProfileFromUser(ctx context.Context, pk nostr.PubKey) {
 
 	pm := sys.FetchProfileMetadata(ctx, pk)
 	name := pm.ShortName()
-	setProfile(pk.Hex(), name, pm.Picture)
+	phase := PhaseMain
+	if needsWelcome() {
+		phase = PhaseWelcome
+	}
+	setProfile(pk.Hex(), name, pm.Picture, phase)
 
 	log.Info().Str("pubkey", pk.Hex()).Str("name", name).Msg("login successful")
 	go Discover()
@@ -183,8 +187,7 @@ func Logout() {
 	saveState()
 	stateMu.Unlock()
 
-	setProfile("", "", "")
-	setPhase(PhaseLogin)
+	setProfile("", "", "", PhaseLogin)
 	log.Info().Msg("logged out")
 }
 
