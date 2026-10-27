@@ -3,7 +3,7 @@ module fiatjaf.com/verdana/desktop
 go 1.26.2
 
 require (
-	fiatjaf.com/nostr v0.0.0-20261005012418-685c38fc6629 // indirect
+	fiatjaf.com/nostr v0.0.0-20261026145325-252a038facda // indirect
 	gioui.org v0.10.0
 )
 

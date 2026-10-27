@@ -578,6 +578,10 @@ func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 			return listCall(params, func(ctx context.Context, pk nostr.PubKey) any {
 				return fetchFavoriteFollowSetsWithSets(ctx, pk)
 			}, []any{})
+		case "napp.fetchInstalledSlashCommands":
+			return listCall(params, func(ctx context.Context, pk nostr.PubKey) any {
+				return fetchInstalledSlashCommands(ctx, pk)
+			}, []any{})
 
 		// ─── addressable sets ────────────────────────────────────
 		case "napp.loadFollowSets":

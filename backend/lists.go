@@ -86,6 +86,8 @@ func invalidateList(kind nostr.Kind, pubkey nostr.PubKey) {
 		dropCached(sys.GoodWikiAuthorListCache, pubkey)
 	case 10102:
 		dropCached(sys.GoodWikiRelayListCache, pubkey)
+	case 10992:
+		dropCached(sys.InstalledSlashCommandsListCache, pubkey)
 	case 30000:
 		dropCached(sys.FollowSetsCache, pubkey)
 	case 30002:
@@ -450,6 +452,47 @@ func fetchFavoriteFollowSetsWithSets(ctx context.Context, pubkey nostr.PubKey) [
 				convItems(sets.Sets[p.Identifier], profileRefItem)))
 			break
 		}
+	}
+	return out
+}
+
+// fetchInstalledSlashCommands is gadgets' fetchInstalledSlashCommands: the
+// kind:31992 definitions a kind:10992 list points at, parsed.
+func fetchInstalledSlashCommands(ctx context.Context, pubkey nostr.PubKey) []any {
+	refs := sys.FetchInstalledSlashCommands(ctx, pubkey)
+	out := make([]any, 0, len(refs))
+	for _, ref := range refs {
+		cmd := ref.Command
+		args := make([]any, 0, len(cmd.Args))
+		for _, arg := range cmd.Args {
+			a := map[string]any{
+				"name":     arg.Name,
+				"type":     string(arg.Type),
+				"required": arg.Required,
+				"choices":  append([]string{}, arg.Choices...),
+			}
+			if arg.Label != "" {
+				a["label"] = arg.Label
+			}
+			args = append(args, a)
+		}
+		c := map[string]any{
+			"pointer": addressPointerItem(ref.Pointer),
+			"event":   cmd.Event,
+			"pubkey":  ref.Pointer.PublicKey.Hex(),
+			"d":       cmd.Identifier,
+			"command": cmd.Command,
+			"args":    args,
+			"scopes":  append([]string{}, cmd.Scopes...),
+			"ignores": append([]string{}, cmd.Ignores...),
+		}
+		if cmd.Title != "" {
+			c["title"] = cmd.Title
+		}
+		if cmd.Description != "" {
+			c["description"] = cmd.Description
+		}
+		out = append(out, c)
 	}
 	return out
 }

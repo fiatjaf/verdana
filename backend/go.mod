@@ -3,7 +3,7 @@ module verdana/backend
 go 1.26.2
 
 require (
-	fiatjaf.com/nostr v0.0.0-20261005012418-685c38fc6629
+	fiatjaf.com/nostr v0.0.0-20261026145325-252a038facda
 	fiatjaf.com/promenade v0.4.5-0.20261005032418-d2a5b39e7d33
 	github.com/btcsuite/btcd/btcec/v2 v2.3.6
 	github.com/dgraph-io/ristretto/v2 v2.3.0

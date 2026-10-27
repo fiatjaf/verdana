@@ -2,8 +2,8 @@ eliasnaur.com/font v0.0.0-20230308162249-dd43949cb42d h1:ARo7NCVvN2NdhLlJE9xAbKw
 eliasnaur.com/font v0.0.0-20230308162249-dd43949cb42d/go.mod h1:OYVuxibdk9OSLX8vAqydtRPP87PyTFcT9uH3MlEGBQA=
 fiatjaf.com/lib v0.3.7 h1:mXZOn7NrUcjSdy4oNvwQyAmes7Ueb+Zr5hjqMIe2dxI=
 fiatjaf.com/lib v0.3.7/go.mod h1:UlHaZvPHj25PtKLh9GjZkUHRmQ2xZ8Jkoa4VRaLeeQ8=
-fiatjaf.com/nostr v0.0.0-20261005012418-685c38fc6629 h1:Y0BghPa4aYypMMinVv9R5n76k4GHyoxRXCWnj44XW9c=
-fiatjaf.com/nostr v0.0.0-20261005012418-685c38fc6629/go.mod h1:b1EIUDnd133Ie8Pg8O/biaKdFyCMz28aD4n64g1GqvM=
+fiatjaf.com/nostr v0.0.0-20261026145325-252a038facda h1:tzM+LEIsWRrx4mV+Q6RZKy0tdGGcLd2qIO3tRtAwcVE=
+fiatjaf.com/nostr v0.0.0-20261026145325-252a038facda/go.mod h1:b1EIUDnd133Ie8Pg8O/biaKdFyCMz28aD4n64g1GqvM=
 fiatjaf.com/promenade v0.4.5-0.20261005032418-d2a5b39e7d33 h1:jorFCl8vBHF/Ig5x7xmB/RohQWnxpvPlgGLjDYAMl+A=
 fiatjaf.com/promenade v0.4.5-0.20261005032418-d2a5b39e7d33/go.mod h1:yKOjC0LRqjzFgT+BpdIx3+DUDhwse7orTvNxDqmT01I=
 gioui.org v0.10.0 h1:kV6NKGbEp0JSPLtgoT/xk5dMexVDzvEOErXA40gUxrU=

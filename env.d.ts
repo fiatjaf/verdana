@@ -92,6 +92,20 @@ type SimpleGroupItem = {
   name?: string
 }
 
+// a parsed kind 31992 slash command definition
+type SlashCommand = {
+  pointer: AddressPointer
+  event: NostrEvent
+  pubkey: string
+  d: string
+  command: string
+  title?: string
+  description?: string
+  args: { name: string; type: string; required: boolean; label?: string; choices: string[] }[]
+  scopes: string[]
+  ignores: string[]
+}
+
 type ResolvedSet<I> = {
   pointer: AddressPointer
   event: NostrEvent | null
@@ -222,6 +236,7 @@ type NappUtils = {
   fetchFavoriteRelaysWithSets(pubkey: string): Promise<Array<string | ResolvedSet<string>>>
   fetchEmojisWithSets(pubkey: string): Promise<Array<Emoji | ResolvedSet<Emoji>>>
   fetchFavoriteFollowSetsWithSets(pubkey: string): Promise<Array<ResolvedSet<string>>>
+  fetchInstalledSlashCommands(pubkey: string): Promise<SlashCommand[]> // kind 10992 → parsed kind 31992
 
   // Addressable sets
   loadFollowSets(pubkey: string): Promise<SetResult<string>>

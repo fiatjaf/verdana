@@ -842,6 +842,7 @@
       fetchFavoriteRelaysWithSets: user => rpc("napp.fetchFavoriteRelaysWithSets", user),
       fetchEmojisWithSets: user => rpc("napp.fetchEmojisWithSets", user),
       fetchFavoriteFollowSetsWithSets: user => rpc("napp.fetchFavoriteFollowSetsWithSets", user),
+      fetchInstalledSlashCommands: user => rpc("napp.fetchInstalledSlashCommands", user),
 
       // ── addressable sets ─────────────────────────
       loadFollowSets: user => rpc("napp.loadFollowSets", user),
