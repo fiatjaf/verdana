@@ -291,10 +291,6 @@ func Fetch() { go backend.Discover() }
 // (and by the user) from the local store again.
 func FetchContacts() { backend.RefreshContacts() }
 
-// RefetchContacts does the same: the contacts' napps are fetched by a sync
-// that runs in the background on its own.
-func RefetchContacts() { backend.RefreshContacts() }
-
 // SetRelays replaces the discovery relay list, one relay per line.
 func SetRelays(text string) {
 	lines := strings.Split(text, "\n")

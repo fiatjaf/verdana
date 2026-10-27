@@ -118,7 +118,6 @@ class MainActivity : ComponentActivity() {
     fun welcome(bootstrap: Boolean) = Mobile.welcome(bootstrap)
     fun fetchNapps() = Mobile.fetch()
     fun fetchContacts() = Mobile.fetchContacts()
-    fun refetchContacts() = Mobile.refetchContacts()
     fun saveRelays(text: String) = Mobile.setRelays(text)
     fun install(id: String) = Mobile.install(id)
     // checkUpdate: bring an already previewed napp up to date before opening

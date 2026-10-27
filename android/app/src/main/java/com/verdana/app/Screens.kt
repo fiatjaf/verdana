@@ -287,6 +287,8 @@ fun LauncherScreen(activity: MainActivity, st: LauncherState) {
     var detailProfile by remember { mutableStateOf<String?>(null) }
 
     fun pickTab(t: Int) {
+        // coming to explore from another tab starts on the discovery list
+        if (t == 3 && tab != 3) contactsMode = false
         tab = t
         detailNapp = null
         detailProfile = null
@@ -684,8 +686,10 @@ private fun DiscoveryTab(
             )
             Spacer(Modifier.height(10.dp))
             if (contactsMode) {
-                Button(onClick = { activity.refetchContacts() }, enabled = !fetching) {
-                    Text(if (fetching) "Fetching…" else "Refresh")
+                // the contacts' napps come from a sync running on its own
+                // (see backend/contacts.go), this only says whether it is at it
+                if (fetching) {
+                    Text("Looking for more napps on your contacts' relays…", color = theme.muted, fontSize = 13.sp)
                 }
             } else {
                 Column {

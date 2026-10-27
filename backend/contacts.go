@@ -152,6 +152,8 @@ func contactsSync(ctx context.Context, me nostr.PubKey) {
 			}
 		}
 		if time.Since(oldest) < contactsRescan {
+			// the pass is over, it was "fetching" from its first scan to here
+			setContactsFetching(me, false)
 			log.Info().Int("contacts", len(list)).Msg("all contacts scanned in the past hour, resting")
 			if !sleepCtx(ctx, contactsRescan) {
 				return
@@ -161,7 +163,6 @@ func contactsSync(ctx context.Context, me nostr.PubKey) {
 
 		setContactsFetching(me, true)
 		scanAuthorNapps(ctx, next)
-		setContactsFetching(me, false)
 		refreshContacts(me)
 
 		if !sleepCtx(ctx, contactsPace) {
