@@ -632,9 +632,9 @@ func layoutWindowsTab(
 										return l.Layout(gtx)
 									}),
 									layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-										// every action this window was sent, so a
-										// row says where it has been and not
-										// only where it is
+										// the window's history up to where it
+										// is, so a row says how it got there and
+										// not only where it is
 										pills := historyPills(th, w.History)
 										if len(pills) == 0 {
 											return layout.Dimensions{}

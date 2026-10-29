@@ -188,7 +188,7 @@ class NappWebView(
                 val payload = if (m.optString("params").isBlank()) "null" else m.optString("params")
                 val code = "window.__bridge_dispatch_action(" +
                     m.optLong("id", -1) + "," + jsString(m.optString("method")) + "," +
-                    jsString(payload) + "," + idx + ")"
+                    jsString(payload) + "," + idx + "," + jsString(m.optString("record")) + ")"
                 view.post { view.evaluateJavascript(code, null) }
             }
             "theme" -> {

@@ -10,7 +10,7 @@ import "encoding/json"
 //
 //	{t:"resp",   id, result|error}   the answer to an rpc
 //	{t:"eval",   code}               run this in the napp's page
-//	{t:"action", id, method, params, idx?}  dispatch an action
+//	{t:"action", id, method, params, idx?, record}  dispatch an action
 //	{t:"theme",  method:<name>, params:<vars json>}  theme changed
 //	{t:"prompt", params:<prompt json>}   show a prompt overlaying this
 //	                                     window ("" = take the overlay down)
@@ -49,6 +49,11 @@ type WireMsg struct {
 	// should answer an action dispatch. Absent when the napp registered the
 	// pattern without a handler (it only wants the popstate event).
 	Idx *int `json:"idx,omitempty"`
+
+	// Record is an action dispatch's action as it was asked for, JSON
+	// {name, payload} before view resolution: what the napp's history keeps
+	// for the launcher (see bridge.js).
+	Record string `json:"record,omitempty"`
 }
 
 // JSON is the message as one line of JSON, for platforms that carry it as a

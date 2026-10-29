@@ -44,8 +44,8 @@ import mobile.Mobile
 // Android may kill the process with windows still in Recents, and bring one
 // back later as a fresh activity in a fresh process, where the backend has
 // no such window open. That window recovers: the backend opens its instance
-// again from the record it kept on disk, and replays the actions it was sent
-// to put it back where it was (see backend/window_records.go).
+// again from the record it kept on disk, and replays its history to put it
+// back where it was (see backend/window_records.go).
 //
 // A window can also start as a picker (mode "picker"): no napp yet, only the
 // question of which napp handles an action (see Picker.kt). The napp picked in
@@ -140,7 +140,7 @@ class NappActivity : ComponentActivity() {
     // reload is the user pulling the window down: the napp starts over, as
     // if Android had killed it and the window were being recovered — a fresh
     // page (or a fresh wasm module) under the same instance, put back where
-    // it was by replaying the actions it was sent, like the desktop's reload.
+    // it was by replaying its history, like the desktop's reload.
     private fun reload() {
         if (recovering || !ownsWindow || isFinishing || isDestroyed) return
         Log.i("Verdana", "reloading window $instance")
@@ -253,9 +253,19 @@ class NappActivity : ComponentActivity() {
 
         describeTask(spec)
 
-        // a canvas has no history: back leaves the window
+        // back walks the napp's history, which bridge.js keeps (the webview's
+        // own holds one entry per page); at its first entry it walks back the
+        // pages, then leaves the window. a canvas has no history.
         val back = {
-            if (web != null && web.view.canGoBack()) web.view.goBack() else finish()
+            if (web == null) {
+                finish()
+            } else {
+                web.view.evaluateJavascript("!!(window.__bridge_nav && window.__bridge_nav(\"back\"))") { moved ->
+                    if (moved != "true") {
+                        if (web.view.canGoBack()) web.view.goBack() else finish()
+                    }
+                }
+            }
         }
         val pull = PullToReload(this, view, edgeOnly = web == null) { reload() }
         web?.onPullVerdict = { pull.verdict(it) }

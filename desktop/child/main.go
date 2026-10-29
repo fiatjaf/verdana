@@ -31,6 +31,7 @@ type wireMsg struct {
 	Error  string          `json:"error,omitempty"`
 	Code   string          `json:"code,omitempty"`
 	Idx    *int            `json:"idx,omitempty"`
+	Record string          `json:"record,omitempty"`
 }
 
 type nappMeta struct {
@@ -307,7 +308,8 @@ func reader(w webview.WebView) {
 				payload = "null"
 			}
 			code := "window.__bridge_dispatch_action(" +
-				strconv.Itoa(m.ID) + "," + jsString(m.Method) + "," + jsString(payload) + "," + idx + ")"
+				strconv.Itoa(m.ID) + "," + jsString(m.Method) + "," + jsString(payload) + "," + idx + "," +
+				jsString(m.Record) + ")"
 			w.Dispatch(func() { w.Eval(code) })
 		case "theme":
 			// the launcher switched theme: apply it now, and make it the value

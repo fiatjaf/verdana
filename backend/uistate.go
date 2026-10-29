@@ -155,10 +155,10 @@ type WindowInfo struct {
 	Action string `json:"action"`
 	Open   bool   `json:"open"`
 
-	// History is every action this window was sent this run, oldest first:
-	// what a reopen puts it back on and what the bundle editor offers as the
-	// actions of its napp. Only the Windows tab listing carries it, the
-	// switcher just wants where each window is.
+	// History is the actions of this window's history up to where it is,
+	// oldest first: where a reopen puts it back and what the bundle editor
+	// offers as the actions of its napp. Only the Windows tab listing
+	// carries it, the switcher just wants where each window is.
 	History []ShortcutAction `json:"history,omitempty"`
 }
 

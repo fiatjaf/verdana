@@ -347,20 +347,24 @@ func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 			ci.settleDispatch(p.ID, p.Result, p.Error)
 			return nil, nil
 
-		case "napp.actionState":
-			// the napp navigated on its own and told us where it went, so a
-			// later restore/share can put the window back on this action
+		case "napp.history":
+			// the napp's history changed (bridge.js keeps it): the window's
+			// actions from now on, what a reopen replays and a bundle carries
 			var p struct {
-				Name    string          `json:"name"`
-				Payload json.RawMessage `json:"payload"`
-				Replace bool            `json:"replace"`
+				Actions []struct {
+					Name    string          `json:"name"`
+					Payload json.RawMessage `json:"payload"`
+				} `json:"actions"`
+				Ahead int `json:"ahead"`
 			}
 			if err := json.Unmarshal([]byte(params), &p); err != nil {
 				return nil, err
 			}
-			if p.Name != "" {
-				ci.setActionState(&actionRequest{name: p.Name, payload: p.Payload}, p.Replace)
+			reqs := make([]*actionRequest, len(p.Actions))
+			for i, a := range p.Actions {
+				reqs[i] = &actionRequest{name: a.Name, payload: a.Payload}
 			}
+			ci.setHistory(reqs, p.Ahead)
 			return nil, nil
 
 		case "napp.log":

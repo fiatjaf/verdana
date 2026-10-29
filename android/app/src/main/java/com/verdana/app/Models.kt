@@ -37,8 +37,8 @@ data class ProfileDetail(
 )
 
 // a napp window. open is false for one closed earlier this run, which the
-// Sessions tab can reopen; history is every action it was sent this run (only
-// managedWindows carries it).
+// Sessions tab can reopen; history is the actions of its history up to where
+// it is (only managedWindows carries it).
 data class WindowInfo(
     val instance: String,
     val nappId: String,

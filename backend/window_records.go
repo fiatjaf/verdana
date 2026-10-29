@@ -14,8 +14,8 @@ import (
 // death. The records are written to windows.json shortly after every change
 // — the process can die at any moment without warning, so there is no saving
 // on the way out — and read back on start. The OS then says which windows it
-// still has (KeepWindows), and each of those rebuilds itself from its log
-// when it comes back (RecoverWindow).
+// still has (KeepWindows), and each of those rebuilds itself from its
+// history when it comes back (RecoverWindow).
 
 var (
 	persistWindows  bool
@@ -121,7 +121,7 @@ func KeepWindows(instances []string) {
 func KnowsWindow(instance string) bool { return lookupInstance(instance) != nil }
 
 // RecoverWindow rebuilds a window the OS kept after killing the process:
-// opened again under its own instance and replayed back to where its log
+// opened again under its own instance and replayed back to where its history
 // says it was, as a reopen. The error means there is nothing to rebuild it
 // from.
 func RecoverWindow(instance string) error {

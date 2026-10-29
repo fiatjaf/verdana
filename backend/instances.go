@@ -82,23 +82,37 @@ type actionRequest struct {
 }
 
 // windowRecord is what the launcher remembers about a window it has opened
-// this run: its instance, the napp it runs, and every action that window was
-// asked to show. The log is what a window closed and reopened lands back on,
-// what the Windows tab lists and what the bundle editor suggests as the
-// actions of that napp. Where windows outlive the process (Android) the
-// records are kept on disk, so a window the OS killed is rebuilt from its
-// log when it comes back (see window_records.go); elsewhere nothing here
-// survives the launcher quitting.
+// this run: its instance, the napp it runs, and its history as actions — the
+// actions of the napp's history entries in order (bridge.js reports them),
+// the last Ahead of them forward of where the window is. The history is what
+// a window closed and reopened is replayed back onto, what the Windows tab
+// lists and what the bundle editor suggests as the actions of that napp.
+// Where windows outlive the process (Android) the records are kept on disk,
+// so a window the OS killed is rebuilt from its history when it comes back
+// (see window_records.go); elsewhere nothing here survives the launcher
+// quitting.
 type windowRecord struct {
 	Instance string           `json:"instance"`
 	NappID   string           `json:"nappId"`
 	Actions  []ShortcutAction `json:"actions,omitempty"`
+	Ahead    int              `json:"ahead,omitempty"`
 }
 
-// maxWindowActions bounds a window's log: the tail is what puts a reopened
-// window back where it was, and a window that was navigated a thousand times
-// this run should not hold a thousand entries (nor replay them).
-const maxWindowActions = 32
+// current is the history up to where the window is: what it shows, what a
+// bundle made from it carries.
+func (w windowRecord) current() []ShortcutAction {
+	return w.Actions[:len(w.Actions)-min(len(w.Actions), max(0, w.Ahead))]
+}
+
+// maxWindowActions bounds a window's history: the tail is what puts a
+// reopened window back where it was, and a window that was navigated a
+// thousand times this run should not hold a thousand entries (nor replay
+// them). maxWindowPayload bounds each payload, which the napp picks and the
+// records keep on disk.
+const (
+	maxWindowActions = 32
+	maxWindowPayload = 8192
+)
 
 // ID is the instance id the napp knows itself by.
 func (ci *Instance) ID() string { return ci.instance }
@@ -216,10 +230,10 @@ func ManagedWindows() []WindowInfo {
 			NappID:   rec.NappID,
 			Name:     napp.Label(),
 			Open:     false,
-			History:  rec.Actions,
+			History:  rec.current(),
 		}
-		if len(rec.Actions) > 0 {
-			info.Action = rec.Actions[len(rec.Actions)-1].Type
+		if cur := rec.current(); len(cur) > 0 {
+			info.Action = cur[len(cur)-1].Type
 		}
 		closed = append(closed, info)
 	}
@@ -604,10 +618,11 @@ func lookupWindow(instance string) *windowRecord {
 	return &w
 }
 
-// windowHistory is every action a window was sent this run, oldest first.
+// windowHistory is the actions of a window's history up to where it is,
+// oldest first.
 func windowHistory(instance string) []ShortcutAction {
 	if w := lookupWindow(instance); w != nil {
-		return w.Actions
+		return w.current()
 	}
 	return nil
 }
@@ -618,19 +633,20 @@ func putWindow(w windowRecord) {
 }
 
 // rememberWindow starts the record of a window that just came up, keeping the
-// actions a previous window with the same instance id had reached (a reopen
+// history a previous window with the same instance id had reached (a reopen
 // landing on the same id).
 func rememberWindow(ci *Instance) {
 	w := windowRecord{Instance: ci.instance, NappID: ci.napp.ID}
 	if old := lookupWindow(ci.instance); old != nil {
 		w.Actions = old.Actions
+		w.Ahead = old.Ahead
 	}
 	putWindow(w)
 }
 
 // ReopenWindow opens a closed window again under its own instance id and
-// puts it back where it was by replaying its log. The window comes up in the
-// background; the error is only about there being nothing to reopen.
+// puts it back where it was by replaying its history. The window comes up in
+// the background; the error is only about there being nothing to reopen.
 func ReopenWindow(instance string) error {
 	rec := lookupWindow(instance)
 	if rec == nil {
@@ -651,36 +667,70 @@ func ReopenWindow(instance string) error {
 	return nil
 }
 
-// replayActions puts a reopened window back where the one that closed had
-// navigated to, by re-dispatching the actions it was sent.
+// replayActions puts a reopened window back where the one that closed was:
+// its history rebuilt by re-dispatching the actions in order, then stepped
+// back over the ones that were ahead. Nothing is recorded meanwhile (the
+// record already has it all, and a replay cut short must not shorten it).
+// Each action is only delivered, not waited on: a napp that takes actions
+// through popstate alone never answers.
 func replayActions(ci *Instance, rec windowRecord) {
 	ci.replaying.Store(true)
 	defer ci.replaying.Store(false)
 	for i, action := range rec.Actions {
 		// The first action waits for the napp to boot, the next ones do not:
-		// a napp that has no handler for the action it was opened with will
-		// not register one while we sit and wait, and every wait is 20
-		// seconds of a window showing nothing.
-		if i > 0 {
-			if _, ok := ci.handlerFor(action.Type); !ok {
-				break
-			}
+		// a napp that has no handler for an action will not register one
+		// while we sit and wait, and every wait is 20 seconds of a window
+		// showing nothing. It gets the action through popstate still.
+		if i == 0 {
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			ci.waitForHandler(ctx, action.Type)
+			cancel()
+		}
+		select {
+		case <-ci.gone:
+			return
+		default:
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), replyWait)
-		_, err := dispatchToInstance(ctx, ci, &actionRequest{name: action.Type, payload: action.Payload})
+		err := ci.deliverAction(ctx, &actionRequest{name: action.Type, payload: action.Payload})
 		cancel()
 		if err != nil {
-			log.Warn().Err(err).Str("instance", rec.Instance).Msg("could not replay napp action")
-			break
+			log.Warn().Err(err).Str("instance", rec.Instance).Str("action", action.Type).
+				Msg("could not replay napp action")
 		}
+	}
+	if ahead := min(len(rec.Actions), rec.Ahead); ahead > 0 {
+		ci.eval("window.__bridge_nav && window.__bridge_nav(\"go\", " + strconv.Itoa(-ahead) + ")")
+	}
+	if cur := rec.current(); len(cur) > 0 {
+		last := cur[len(cur)-1]
+		ci.lastAction.Store(&actionRequest{name: last.Type, payload: last.Payload})
+		notifyState()
 	}
 }
 
-// recordAction adds an action to its window's log. It is skipped while a
-// reopen is being replayed (the log already has those actions) and replace is
-// for a napp that overwrote the history entry it was on rather than pushing a
-// new one.
-func recordAction(ci *Instance, req *actionRequest, replace bool) {
+// deliverAction hands an action to the napp, to its handler if it has one
+// and to its popstate either way, without waiting for an answer.
+func (ci *Instance) deliverAction(ctx context.Context, req *actionRequest) error {
+	payload := req.payload
+	if strings.HasPrefix(req.name, "view:") {
+		resolved, ok := resolveViewPayload(ctx, payload)
+		if !ok {
+			return fmt.Errorf("couldn't find the event for %s", req.name)
+		}
+		payload = resolved
+	}
+	var idx *int
+	if i, ok := ci.handlerFor(req.name); ok && i >= 0 {
+		idx = &i
+	}
+	ci.sendAction(-1, ci.deliveredName(req.name), payload, idx, req)
+	return nil
+}
+
+// editHistory rewrites a window's history, unless a reopen is being replayed
+// into it (the record already has those actions).
+func editHistory(ci *Instance, edit func(w *windowRecord)) {
 	if ci.replaying.Load() {
 		return
 	}
@@ -689,30 +739,40 @@ func recordAction(ci *Instance, req *actionRequest, replace bool) {
 		if w.NappID == "" {
 			w.NappID = ci.napp.ID
 		}
-		// the log is rebuilt rather than appended to in place: a record read
+		// the history is rebuilt rather than edited in place: a record read
 		// out of the map shares its Actions slice, and readers no longer take
 		// a lock that would keep this write from landing under them
-		act := asShortcutAction(req)
-		actions := make([]ShortcutAction, 0, maxWindowActions)
-		if replace && len(w.Actions) > 0 {
-			actions = append(actions, w.Actions[:len(w.Actions)-1]...)
-			actions = append(actions, act)
-		} else {
-			actions = append(actions, w.Actions...)
-			actions = append(actions, act)
-			if len(actions) > maxWindowActions {
-				actions = append([]ShortcutAction(nil), actions[len(actions)-maxWindowActions:]...)
-			}
+		edit(&w)
+		if len(w.Actions) > maxWindowActions {
+			cut := len(w.Actions) - maxWindowActions
+			w.Actions = w.Actions[cut:]
 		}
-		w.Actions = actions
+		w.Ahead = min(len(w.Actions), max(0, w.Ahead))
 		return w, false
 	})
 	saveWindowRecords()
 }
 
-// asShortcutAction is an action as the log and the bundle editor keep it: a
-// null payload is the same as no payload, so it doesn't clutter the lines the
-// editor suggests.
+// recordAction is an action dispatched to the window: a new entry where it
+// is, dropping those that were ahead, as a navigation does. For a napp with a
+// page the history it reports (setHistory) follows and has the last word.
+func recordAction(ci *Instance, req *actionRequest) {
+	act := asShortcutAction(req)
+	if len(act.Payload) > maxWindowPayload {
+		return
+	}
+	editHistory(ci, func(w *windowRecord) {
+		cur := w.current()
+		actions := make([]ShortcutAction, 0, len(cur)+1)
+		actions = append(actions, cur...)
+		w.Actions = append(actions, act)
+		w.Ahead = 0
+	})
+}
+
+// asShortcutAction is an action as the history and the bundle editor keep
+// it: a null payload is the same as no payload, so it doesn't clutter the
+// lines the editor suggests.
 func asShortcutAction(req *actionRequest) ShortcutAction {
 	payload := bytes.TrimSpace(req.payload)
 	if string(payload) == "null" {
@@ -721,12 +781,34 @@ func asShortcutAction(req *actionRequest) ShortcutAction {
 	return ShortcutAction{Type: req.name, Payload: append(json.RawMessage(nil), payload...)}
 }
 
-// setActionState is a napp saying where it navigated to on its own: the window
-// is now on that action, whether we dispatched it or the napp pushed it, and
-// it joins the window's log all the same.
-func (ci *Instance) setActionState(req *actionRequest, replace bool) {
-	ci.lastAction.Store(req)
-	recordAction(ci, req, replace)
+// setHistory is the napp's history as it reports it (bridge.js): the actions
+// of its entries in order, ahead of them past the current one. The window is
+// now on the current one, whether we dispatched it or the napp pushed it.
+func (ci *Instance) setHistory(reqs []*actionRequest, ahead int) {
+	kept := make([]ShortcutAction, 0, len(reqs))
+	keptAhead := 0
+	for i, req := range reqs {
+		if req.name == "" || len(req.name) > 64 {
+			continue
+		}
+		act := asShortcutAction(req)
+		if len(act.Payload) > maxWindowPayload {
+			continue
+		}
+		kept = append(kept, act)
+		if i >= len(reqs)-ahead {
+			keptAhead++
+		}
+	}
+	editHistory(ci, func(w *windowRecord) {
+		w.Actions = kept
+		w.Ahead = keptAhead
+	})
+	cur := windowRecord{Actions: kept, Ahead: keptAhead}.current()
+	if len(cur) > 0 {
+		last := cur[len(cur)-1]
+		ci.lastAction.Store(&actionRequest{name: last.Type, payload: last.Payload})
+	}
 	notifyState()
 }
 
@@ -1030,7 +1112,7 @@ func dispatchToInstance(ctx context.Context, ci *Instance, req *actionRequest) (
 			return nil, fmt.Errorf("stopped routing of %s: couldn't find the event", req.name)
 		}
 	}
-	recordAction(ci, &actionRequest{name: req.name, payload: payload}, false)
+	recordAction(ci, req)
 
 	waitCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	idx, ok := ci.waitForHandler(waitCtx, req.name)
@@ -1043,7 +1125,7 @@ func dispatchToInstance(ctx context.Context, ci *Instance, req *actionRequest) (
 		}
 		// The napp may only be listening on popstate: still deliver it, but
 		// there is no result to wait for.
-		ci.sendAction(-1, ci.deliveredName(req.name), payload, nil)
+		ci.sendAction(-1, ci.deliveredName(req.name), payload, nil, req)
 		return nil, nil
 	}
 	ci.lastAction.Store(&actionRequest{name: req.name, payload: payload})
@@ -1051,7 +1133,7 @@ func dispatchToInstance(ctx context.Context, ci *Instance, req *actionRequest) (
 
 	name := ci.deliveredName(req.name)
 	if idx < 0 {
-		ci.sendAction(-1, name, payload, nil)
+		ci.sendAction(-1, name, payload, nil, req)
 		return nil, nil
 	}
 
@@ -1060,7 +1142,7 @@ func dispatchToInstance(ctx context.Context, ci *Instance, req *actionRequest) (
 	ci.dispatches.Store(id, ch)
 	defer ci.dispatches.Delete(id)
 
-	ci.sendAction(id, name, payload, &idx)
+	ci.sendAction(id, name, payload, &idx, req)
 
 	select {
 	case <-ci.gone:
@@ -1086,17 +1168,24 @@ func dispatchToInstance(ctx context.Context, ci *Instance, req *actionRequest) (
 	}
 }
 
-// sendAction asks the shell to run the dispatch inside its webview.
-func (ci *Instance) sendAction(id int, name string, payload json.RawMessage, idx *int) {
+// sendAction asks the shell to run the dispatch inside its webview. record is
+// the action as it was asked for, before view resolution: what the napp's
+// history keeps for us.
+func (ci *Instance) sendAction(id int, name string, payload json.RawMessage, idx *int, record *actionRequest) {
 	if len(payload) == 0 {
 		payload = json.RawMessage("null")
 	}
+	rec, _ := json.Marshal(struct {
+		Name    string          `json:"name"`
+		Payload json.RawMessage `json:"payload"`
+	}{record.name, asShortcutAction(record).Payload})
 	ci.send(WireMsg{
 		T:      "action",
 		ID:     id,
 		Method: name,
 		Params: string(payload),
 		Idx:    idx,
+		Record: string(rec),
 	})
 }
 

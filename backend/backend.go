@@ -41,10 +41,10 @@ type Options struct {
 	// Log is optional; without one, logs go to stderr.
 	Log *zerolog.Logger
 
-	// PersistWindows keeps the windows' records (instance, napp, action
-	// log) on disk, for a platform whose windows outlive the process: the
+	// PersistWindows keeps the windows' records (instance, napp,
+	// history) on disk, for a platform whose windows outlive the process: the
 	// OS can kill it and bring a window back later, which then rebuilds
-	// itself from its log (see window_records.go).
+	// itself from its history (see window_records.go).
 	PersistWindows bool
 }
 
