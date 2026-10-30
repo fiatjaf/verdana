@@ -45,6 +45,7 @@ class NappWebView(
     val name: String,
     private val spec: WindowSpec,
     private val onClose: () -> Unit,
+    private val onRendererGone: (crashed: Boolean) -> Unit,
 ) {
     val view: WebView = WebView(activity)
 
@@ -147,11 +148,11 @@ class NappWebView(
 
             // Android kills the renderer to reclaim memory (or it crashes),
             // which unhandled takes the whole app down with it. The page is
-            // gone either way: close the window, so whatever was waiting on
-            // it (a dispatch, say) stops waiting.
+            // gone either way and this webview is dead; what the window
+            // does about it is up to onRendererGone.
             override fun onRenderProcessGone(v: WebView, detail: RenderProcessGoneDetail): Boolean {
                 android.util.Log.w("Verdana", "renderer of $instance gone (crashed: ${detail.didCrash()})")
-                onClose()
+                onRendererGone(detail.didCrash())
                 return true
             }
         }

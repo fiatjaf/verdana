@@ -233,6 +233,14 @@ class NappActivity : ComponentActivity() {
                 name = spec.name,
                 spec = spec,
                 onClose = { finishWindow() },
+                // Android killing the renderer of a window in the background
+                // (all webviews share it, so every window loses its page at
+                // once) is not the user closing anything: the window starts
+                // over like a reload. A renderer that crashed would likely
+                // crash again, so that one closes the window.
+                onRendererGone = { crashed ->
+                    window.decorView.post { if (crashed) finishWindow() else reload() }
+                },
             )
             view = web.view
         }
