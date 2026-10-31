@@ -349,6 +349,17 @@ fun LauncherScreen(activity: MainActivity, st: LauncherState) {
 
             Spacer(Modifier.height(12.dp))
 
+            if (st.unhandledAction.isNotEmpty()) {
+                UnhandledNotice(st.unhandledAction, theme,
+                    onFind = {
+                        pickTab(3)
+                        discoveryFilter = Mobile.actionQuery(st.unhandledAction)
+                        Mobile.dismissUnhandledAction()
+                    },
+                    onDismiss = { Mobile.dismissUnhandledAction() })
+                Spacer(Modifier.height(12.dp))
+            }
+
             when {
                 freshDetail != null -> NappDetailScreen(activity, st, theme, freshDetail,
                     onBack = { detailNapp = null },
@@ -508,19 +519,58 @@ fun ProfileScreen(activity: MainActivity, st: LauncherState) {
     }
 }
 
-// appMatches: the filter the two tabs share — a case-insensitive substring
+// matchesQuery: the filter the two tabs share — a case-insensitive substring
 // match on name, description, author pubkey and author name (the name the
-// backend resolves into every napp it sends over).
-private fun Napp.matchesQuery(q: String): Boolean =
-    name.contains(q, ignoreCase = true) ||
-        description.contains(q, ignoreCase = true) ||
-        author.contains(q, ignoreCase = true) ||
-        authorName.contains(q, ignoreCase = true)
+// backend resolves into every napp it sends over), and for every
+// "#action=<name>" word a napp handling that action (as the desktop's
+// backend.Napp.MatchesQuery does).
+private const val ACTION_QUERY = "#action="
+
+private fun Napp.handlesAction(action: String): Boolean =
+    actions.any {
+        it.equals(action, ignoreCase = true) ||
+            (it.equals("view", ignoreCase = true) && action.startsWith("view:", ignoreCase = true))
+    }
+
+private fun Napp.matchesQuery(q: String): Boolean {
+    val (filters, words) = q.split(Regex("\\s+")).filter { it.isNotEmpty() }
+        .partition { it.startsWith(ACTION_QUERY, ignoreCase = true) }
+    if (filters.any { f -> f.length > ACTION_QUERY.length && !handlesAction(f.substring(ACTION_QUERY.length)) }) return false
+    if (words.isEmpty()) return true
+    val text = words.joinToString(" ")
+    return name.contains(text, ignoreCase = true) ||
+        description.contains(text, ignoreCase = true) ||
+        author.contains(text, ignoreCase = true) ||
+        authorName.contains(text, ignoreCase = true)
+}
 
 private fun List<Napp>.matching(filter: String): List<Napp> =
     filter.trim().let { q ->
         if (q.isEmpty()) this else filter { n -> n.matchesQuery(q) }
     }
+
+// UnhandledNotice says an action was fired with no napp to take it, and
+// offers to look for one in Explore, filtered down to the napps handling it.
+@Composable
+private fun UnhandledNotice(action: String, theme: Theme, onFind: () -> Unit, onDismiss: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(theme.suggestBg)
+            .padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            "No installed napp handles “$action”.",
+            color = theme.suggestFg,
+            fontSize = 13.sp,
+            modifier = Modifier.weight(1f),
+        )
+        TextButton(onClick = onFind) { Text("Find one", color = theme.suggestFg, fontWeight = FontWeight.Bold) }
+        TextButton(onClick = onDismiss) { Text("✕", color = theme.suggestFg) }
+    }
+}
 
 // LogoutConfirmDialog asks before logging out: it closes every open napp
 // window, so it deserves a second look — same flow as the desktop launcher.
@@ -581,7 +631,7 @@ private fun InstalledTab(activity: MainActivity, st: LauncherState, theme: Theme
             value = filter,
             onValueChange = setFilter,
             modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text("filter by name, author or description", color = theme.inputHint) },
+            placeholder = { Text("filter by name, author or #action=<name>", color = theme.inputHint) },
             colors = outlinedColors(theme),
             singleLine = true,
         )
@@ -680,7 +730,7 @@ private fun DiscoveryTab(
                 value = filter,
                 onValueChange = setFilter,
                 modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("filter by name, author or description", color = theme.inputHint) },
+                placeholder = { Text("filter by name, author or #action=<name>", color = theme.inputHint) },
                 colors = outlinedColors(theme),
                 singleLine = true,
             )

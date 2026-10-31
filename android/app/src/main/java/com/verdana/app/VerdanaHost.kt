@@ -232,8 +232,22 @@ object VerdanaHost : UI {
     override fun stateChanged() {
         val snapshot = Mobile.state()
         android.os.Handler(android.os.Looper.getMainLooper()).post {
+            val before = state.unhandledAction
             state = parseState(snapshot)
+            // an action nobody handles, fired from a napp window or a link:
+            // the launcher, where the notice offering to find a napp for it
+            // is, comes to the front, once per notice
+            val action = state.unhandledAction
+            if (action.isNotEmpty() && action != before) showLauncher()
         }
+    }
+
+    private fun showLauncher() {
+        val ctx = appContext ?: return
+        ctx.startActivity(
+            Intent(ctx, MainActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
+        )
     }
 
     override fun promptsChanged() {

@@ -479,6 +479,7 @@ func gioMain() {
 						return layoutWelcome(gtx, th, &scratchBtn, &bootstrapBtn, st.ProfileName)
 					case backend.PhaseMain:
 						handleOpenBox(gtx)
+						handleUnhandled(gtx, st)
 						if tabHomeBtn.Clicked(gtx) {
 							setTab(tabHome)
 						}

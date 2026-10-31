@@ -502,6 +502,13 @@ func OpenCode(input string) (string, error) {
 	return string(data), nil
 }
 
+// DismissUnhandledAction clears State.unhandledAction: the user went to
+// look for a napp handling it, or closed the notice.
+func DismissUnhandledAction() { backend.DismissUnhandledAction() }
+
+// ActionQuery is the explore filter that lists the napps handling action.
+func ActionQuery(action string) string { return backend.ActionQuery(action) }
+
 // OpenLink opens a nostr: link or a nostrapps.com link another app sent us
 // (see backend.OpenLink). Blocks while fetching; call it off the main thread.
 func OpenLink(link string) error { return backend.OpenLink(link) }

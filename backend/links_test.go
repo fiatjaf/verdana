@@ -40,3 +40,20 @@ func TestParseLinkAction(t *testing.T) {
 		t.Error("an action with no name was taken")
 	}
 }
+
+func TestMatchesActionQuery(t *testing.T) {
+	n := Napp{Name: "Notes", Actions: []string{"view", "Profile"}}
+	for q, want := range map[string]bool{
+		"":                               true,
+		"#action=profile":                true,
+		"#action=view:1":                 true,
+		"#action=zap":                    false,
+		"#action=profile notes":          true,
+		"#action=profile other":          false,
+		"#action=profile #action=view:0": true,
+	} {
+		if got := n.MatchesQuery(q); got != want {
+			t.Errorf("MatchesQuery(%q) = %v", q, got)
+		}
+	}
+}

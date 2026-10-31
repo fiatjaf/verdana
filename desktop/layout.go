@@ -445,6 +445,9 @@ func layoutMain(
 			return layoutTabs(gtx, th, tabHomeBtn, tabCollectionBtn, tabWindowsBtn, tabDiscoBtn, tab, len(st.Installed), len(st.Discovery), extra, extraBtn)
 		}),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layoutUnhandled(gtx, th, st)
+		}),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			if editing := currentBundleEdit(); editing != nil {
 				return layoutBundleEditor(gtx, th, saveBundleBtn, cancelBundleBtn, editing)
@@ -896,7 +899,7 @@ func layoutInstalledList(
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-					return editorBox(gtx, th, filterEd, "filter by name, author or description")
+					return editorBox(gtx, th, filterEd, "filter by name, author or description, or #action=<name>")
 				}),
 				// "Update all" only shows when a check found something
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -1014,7 +1017,7 @@ func layoutDiscoveryTab(
 		// the filter box, narrowing the entries below by name, author,
 		// author name or description.
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return editorBox(gtx, th, filterEd, "filter by name, author or description")
+			return editorBox(gtx, th, filterEd, "filter by name, author or description, or #action=<name>")
 		}),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
 		// the stored modes only say whether the sync is at it

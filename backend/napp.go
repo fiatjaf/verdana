@@ -338,14 +338,43 @@ func (n Napp) AuthorShortName() string {
 	return ""
 }
 
-// MatchesQuery says whether the napp matches a case-insensitive substring in
-// its name, description, author pubkey or author name.
+// ActionQuery is the filter that narrows a napps list to those handling an
+// action: what a GUI prefills when nothing installed handles one.
+func ActionQuery(action string) string { return actionQueryPrefix + action }
+
+const actionQueryPrefix = "#action="
+
+// MatchesQuery says whether a napp passes a list's filter, q in lower case: a
+// substring of its name, description, author pubkey or author name, and, for
+// every "#action=<name>" word in q, a napp handling that action.
 func (n Napp) MatchesQuery(q string) bool {
-	if q == "" {
+	var text []string
+	for _, word := range strings.Fields(q) {
+		if action, ok := strings.CutPrefix(word, actionQueryPrefix); ok {
+			if action != "" && !n.handlesFold(action) {
+				return false
+			}
+			continue
+		}
+		text = append(text, word)
+	}
+	if len(text) == 0 {
 		return true
 	}
-	return strings.Contains(strings.ToLower(n.Name), q) ||
-		strings.Contains(strings.ToLower(n.Description), q) ||
-		strings.Contains(strings.ToLower(n.Author.Hex()), q) ||
-		strings.Contains(strings.ToLower(n.AuthorShortName()), q)
+	t := strings.Join(text, " ")
+	return strings.Contains(strings.ToLower(n.Name), t) ||
+		strings.Contains(strings.ToLower(n.Description), t) ||
+		strings.Contains(strings.ToLower(n.Author.Hex()), t) ||
+		strings.Contains(strings.ToLower(n.AuthorShortName()), t)
+}
+
+// handlesFold is Handles ignoring case, for an action typed in a filter.
+func (n Napp) handlesFold(action string) bool {
+	for _, a := range n.Actions {
+		if strings.EqualFold(a, action) ||
+			(strings.EqualFold(a, "view") && strings.HasPrefix(strings.ToLower(action), "view:")) {
+			return true
+		}
+	}
+	return false
 }

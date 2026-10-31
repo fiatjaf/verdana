@@ -127,6 +127,9 @@ func openNostrAppsLink(fragment string) error {
 		for _, act := range loose {
 			act = resolveLinkAction(ctx, act)
 			if _, err := runNappAction(ctx, nil, act.Type, act.Payload, actionOptions{}); err != nil {
+				if errors.As(err, new(noHandlerError)) {
+					continue
+				}
 				log.Warn().Err(err).Str("action", act.Type).Msg("link action failed")
 				SetFetchErr(act.Type + ": " + err.Error())
 			}

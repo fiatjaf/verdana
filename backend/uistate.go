@@ -53,6 +53,11 @@ type State struct {
 	// Fetching is true while discovery is running.
 	Fetching bool `json:"fetching"`
 
+	// UnhandledAction is the last action fired with no napp to handle it,
+	// until the user dismisses it: a GUI offers to look for one in the
+	// explore tab, filtered with ActionQuery.
+	UnhandledAction string `json:"unhandledAction,omitempty"`
+
 	// Theme is "light" or "dark".
 	Theme string `json:"theme"`
 
@@ -173,6 +178,7 @@ type launcherState struct {
 	pubkey     string
 	fetchErr   string
 	fetching   bool
+	unhandled  string
 	installed  []Napp
 	discovery  []Napp
 	dev        []Napp
@@ -233,6 +239,7 @@ func Snapshot() State {
 		Pubkey:           ls.pubkey,
 		FetchErr:         ls.fetchErr,
 		Fetching:         ls.fetching,
+		UnhandledAction:  ls.unhandled,
 		Theme:            name,
 		Installed:        append([]Napp(nil), ls.installed...),
 		Discovery:        append([]Napp(nil), ls.discovery...),
@@ -443,6 +450,19 @@ func SetFetchErr(msg string) {
 	ls.mu.Unlock()
 	notifyState()
 }
+
+// setUnhandledAction says no napp handles action, for the GUI to offer to
+// find one (see State.UnhandledAction).
+func setUnhandledAction(action string) {
+	ls.mu.Lock()
+	ls.unhandled = action
+	ls.mu.Unlock()
+	notifyState()
+}
+
+// DismissUnhandledAction is the GUI being done with State.UnhandledAction:
+// the user went looking for a napp, or doesn't care to.
+func DismissUnhandledAction() { setUnhandledAction("") }
 
 func setFetching(fetching bool) {
 	ls.mu.Lock()

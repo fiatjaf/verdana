@@ -3,6 +3,7 @@ package backend
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strconv"
 	"time"
 
@@ -94,6 +95,9 @@ func pickerIcon(n Napp) []byte {
 func FireAction(action string, payload json.RawMessage) {
 	go func() {
 		if _, err := runNappAction(context.Background(), nil, action, payload, actionOptions{}); err != nil {
+			if errors.As(err, new(noHandlerError)) {
+				return
+			}
 			log.Warn().Err(err).Str("action", action).Msg("launcher action failed")
 			SetFetchErr(action + ": " + err.Error())
 		}

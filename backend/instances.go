@@ -911,7 +911,8 @@ func runNappAction(
 		takeView(true)
 	}
 	if len(candidates) == 0 && len(open) == 0 {
-		return nil, fmt.Errorf("no installed napp handles %q", name)
+		setUnhandledAction(req.name)
+		return nil, noHandlerError(req.name)
 	}
 
 	// the default handler a napp configuration gives the action, if any. A
@@ -1021,6 +1022,13 @@ func runNappAction(
 	}
 	return nil, fmt.Errorf("napp %q is gone", choice.NappID)
 }
+
+// noHandlerError is a dispatch with no napp to take it. The launcher state
+// already offers to find one (see setUnhandledAction), so whoever fired it
+// from the launcher has nothing more to show.
+type noHandlerError string
+
+func (e noHandlerError) Error() string { return fmt.Sprintf("no installed napp handles %q", string(e)) }
 
 // dispatchTo hands an action to the window that will handle it, counting where
 // it went on the way. Every dispatch a napp asked for goes through here, so
