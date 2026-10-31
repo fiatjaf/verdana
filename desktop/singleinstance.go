@@ -17,11 +17,13 @@ import (
 // writes the number to launcher.port in its data dir. When a shortcut (or the
 // user) starts verdana again with a bundle token, the new process finds the
 // port, hands the token over and exits — the running launcher opens the
-// bundle's napps.
+// bundle's napps. A nostr: link the launcher is started with goes the same
+// way.
 
-// forwardedInv is what a second launcher sends the running one over the port.
+// forwarded is what a second launcher sends the running one over the port.
 type forwarded struct {
-	Token string `json:"token"`
+	Token string   `json:"token"`
+	Links []string `json:"links,omitempty"`
 }
 
 func portFilePath(dataDir string) string {
@@ -40,9 +42,9 @@ func readPort(dataDir string) int {
 	return port
 }
 
-// forwardToInstance sends token to a launcher already running, if there is
+// forwardToInstance sends msg to a launcher already running, if there is
 // one, answering true when it did (the caller should exit).
-func forwardToInstance(dataDir, token string) bool {
+func forwardToInstance(dataDir string, msg forwarded) bool {
 	port := readPort(dataDir)
 	if port == 0 {
 		return false
@@ -53,7 +55,7 @@ func forwardToInstance(dataDir, token string) bool {
 	}
 	defer conn.Close()
 	conn.SetDeadline(time.Now().Add(time.Second))
-	if err := json.NewEncoder(conn).Encode(forwarded{Token: token}); err != nil {
+	if err := json.NewEncoder(conn).Encode(msg); err != nil {
 		return false
 	}
 	if _, err := bufio.NewReader(conn).ReadString('\n'); err != nil {
@@ -95,7 +97,12 @@ func serveForward(conn net.Conn) {
 	if err := json.NewDecoder(conn).Decode(&msg); err != nil {
 		return
 	}
-	go runBundleToken(msg.Token)
+	if msg.Token != "" {
+		go runBundleToken(msg.Token)
+	}
+	for _, link := range msg.Links {
+		go runLink(link)
+	}
 	conn.Write([]byte("ok\n"))
 }
 
@@ -114,5 +121,14 @@ func runBundleToken(token string) {
 	if err := backend.RunShortcutToken(token); err != nil {
 		log.Warn().Err(err).Str("token", previewToken(token)).Msg("bundle invocation failed")
 		backend.SetFetchErr("shortcut failed: " + err.Error())
+	}
+}
+
+// runLink opens a nostr: link as soon as this launcher can.
+func runLink(link string) {
+	<-launcherReady
+	if err := backend.OpenLink(link); err != nil {
+		log.Warn().Err(err).Str("link", link).Msg("link failed")
+		backend.SetFetchErr(link + ": " + err.Error())
 	}
 }

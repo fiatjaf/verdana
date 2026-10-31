@@ -32,16 +32,25 @@ func Preview(n Napp, checkUpdate bool) {
 		return
 	}
 
-	log.Info().Str("napp", n.ID).Str("name", n.Name).Msg("downloading napp for preview")
-	setBusy(n.ID, true)
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
-	err := replaceNappFiles(ctx, n, nappBaseDir(n.ID), n.BlossomServers(ctx))
+	err := downloadPreview(ctx, n)
 	cancel()
 	if err != nil {
-		setBusy(n.ID, false)
-		log.Error().Err(err).Str("napp", n.ID).Msg("preview failed")
 		SetFetchErr("preview failed: " + err.Error())
 		return
+	}
+	Launch(n)
+}
+
+// downloadPreview puts a napp that isn't on disk yet there as a preview,
+// without opening it (the download shows up as IsBusy).
+func downloadPreview(ctx context.Context, n Napp) error {
+	log.Info().Str("napp", n.ID).Str("name", n.Name).Msg("downloading napp for preview")
+	setBusy(n.ID, true)
+	defer setBusy(n.ID, false)
+	if err := replaceNappFiles(ctx, n, nappBaseDir(n.ID), n.BlossomServers(ctx)); err != nil {
+		log.Error().Err(err).Str("napp", n.ID).Msg("preview failed")
+		return err
 	}
 
 	stateMu.Lock()
@@ -51,9 +60,7 @@ func Preview(n Napp, checkUpdate bool) {
 		saveState()
 	}
 	stateMu.Unlock()
-	setBusy(n.ID, false)
-
-	Launch(n)
+	return nil
 }
 
 // updatePreview looks for a newer version of a previewed napp and installs it

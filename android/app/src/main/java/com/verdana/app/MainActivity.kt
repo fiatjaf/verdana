@@ -43,8 +43,8 @@ class MainActivity : ComponentActivity() {
     // launcher screen to show and clear
     var openedPage by mutableStateOf<Opened?>(null)
 
-    // a nostr: link another app sent us, waiting for the backend to be
-    // logged in before it is opened
+    // a nostr: or nostrapps.com link another app sent us, waiting for the
+    // backend to be logged in before it is opened
     var pendingLink by mutableStateOf<String?>(null)
 
     // the bundles in the Verdana icon's long-press menu (see
@@ -93,11 +93,16 @@ class MainActivity : ComponentActivity() {
         takeNostrLink(intent)
     }
 
-    // a nostr:<code> link opened from elsewhere goes the way a pasted code
-    // does, once the launcher is logged in (see Launcher)
+    // a nostr:<code> or nostrapps.com link opened from elsewhere is opened
+    // by the backend (see openLink) once the launcher is logged in (see
+    // Launcher)
     private fun takeNostrLink(intent: Intent?) {
         val uri = intent?.data ?: return
-        if (intent.action != Intent.ACTION_VIEW || !uri.scheme.equals("nostr", ignoreCase = true)) return
+        if (intent.action != Intent.ACTION_VIEW) return
+        val nostr = uri.scheme.equals("nostr", ignoreCase = true)
+        val nostrApps = uri.scheme.equals("https", ignoreCase = true) &&
+            uri.host?.removePrefix("www.").equals("nostrapps.com", ignoreCase = true) == true
+        if (!nostr && !nostrApps) return
         setIntent(Intent(intent).setAction(Intent.ACTION_MAIN).setData(null))
         pendingLink = uri.toString()
     }
@@ -258,6 +263,20 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // openLink hands a link from another app to the backend, which fires
+    // the actions it stands for
+    fun openLink(link: String) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            val err = try {
+                Mobile.openLink(link)
+                null
+            } catch (e: Exception) {
+                e.message ?: "couldn't open that"
+            }
+            if (err != null) withContext(Dispatchers.Main) { toast(err) }
+        }
+    }
+
     fun loadIcon(napp: Napp, onReady: (ByteArray?) -> Unit) {
         lifecycleScope.launch(Dispatchers.IO) {
             val bytes = try {
@@ -307,7 +326,7 @@ class MainActivity : ComponentActivity() {
                 androidx.compose.runtime.LaunchedEffect(link, state.phase) {
                     if (link != null && state.phase == "main") {
                         pendingLink = null
-                        openCode(link) { err -> if (err != null) toast(err) }
+                        openLink(link)
                     }
                 }
                 BackHandler(enabled = (showProfile || showSettings) && state.phase == "main" && prompt == null) {

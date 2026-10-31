@@ -120,9 +120,15 @@ func main() {
 	// a launcher is already running they were forwarded there and we never
 	// got this far; with none running, this process serves it. Tool and
 	// toolkit flags are left for gio and friends to chew on.
-	var tokenArgs []string
+	// A nostr: link (the desktop entry registers verdana as their handler)
+	// is opened instead, see backend.OpenLink.
+	var tokenArgs, links []string
 	for _, arg := range os.Args[1:] {
 		if strings.HasPrefix(arg, "-") {
+			continue
+		}
+		if backend.IsLink(arg) {
+			links = append(links, arg)
 			continue
 		}
 		tokenArgs = append(tokenArgs, arg)
@@ -131,9 +137,9 @@ func main() {
 
 	verdanaDir := filepath.Join(dataDir, "Verdana")
 
-	if startupToken != "" && forwardToInstance(verdanaDir, startupToken) {
-		log.Info().Str("token", previewToken(startupToken)).
-			Msg("forwarded a bundle invocation to the running launcher")
+	if (startupToken != "" || len(links) > 0) && forwardToInstance(verdanaDir, forwarded{Token: startupToken, Links: links}) {
+		log.Info().Str("token", previewToken(startupToken)).Strs("links", links).
+			Msg("forwarded an invocation to the running launcher")
 		return
 	}
 
@@ -158,6 +164,9 @@ func main() {
 	if startupToken != "" {
 		log.Info().Str("token", previewToken(startupToken)).Msg("bundle invocation at startup")
 		go runBundleToken(startupToken)
+	}
+	for _, link := range links {
+		go runLink(link)
 	}
 
 	// the palette the user last chose, and its CSS tokens for napps

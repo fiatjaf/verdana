@@ -1101,9 +1101,12 @@ func findHandlersForAction(name string) ([]Napp, []*Instance) {
 const replyWait = 60 * time.Second
 
 // dispatchToInstance sends an action to an open window and waits for the
-// handler's result. view:<kind> payloads are resolved to full events first,
-// as napps registering a specific kind are promised a resolved event.
+// handler's result. An npub or nprofile payload goes out as the hex pubkey
+// (see normalizePayload), and view:<kind> payloads are resolved to full
+// events first, as napps registering a specific kind are promised a resolved
+// event.
 func dispatchToInstance(ctx context.Context, ci *Instance, req *actionRequest) (any, error) {
+	req = &actionRequest{name: req.name, payload: normalizePayload(req.name, req.payload)}
 	payload := req.payload
 	if strings.HasPrefix(req.name, "view:") {
 		if resolved, ok := resolveViewPayload(ctx, payload); ok {

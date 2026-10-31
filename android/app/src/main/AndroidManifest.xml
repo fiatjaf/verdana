@@ -34,12 +34,23 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
             <!-- nostr:<npub|nprofile|nevent|naddr|note> links from other
-                 apps: opened like a code pasted in the launcher -->
+                 apps: a user goes to the "profile" action, an event to
+                 view:<kind> (see backend/links.go) -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="nostr" />
+            </intent-filter>
+            <!-- nostrapps.com links naming napps and the actions to fire
+                 to them, or just an action for the user to pick a napp for -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" />
+                <data android:host="nostrapps.com" />
+                <data android:host="www.nostrapps.com" />
             </intent-filter>
         </activity>
 

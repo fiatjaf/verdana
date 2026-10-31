@@ -502,6 +502,10 @@ func OpenCode(input string) (string, error) {
 	return string(data), nil
 }
 
+// OpenLink opens a nostr: link or a nostrapps.com link another app sent us
+// (see backend.OpenLink). Blocks while fetching; call it off the main thread.
+func OpenLink(link string) error { return backend.OpenLink(link) }
+
 // NappIcon is the bytes of a napp's icon, from disk when it is installed and
 // from its author's blossom servers otherwise.
 func NappIcon(id string) ([]byte, error) {
