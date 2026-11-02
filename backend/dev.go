@@ -239,6 +239,10 @@ func LaunchDev(id string) {
 
 // readDevFolder reads metadata.json and indexes every regular file under dir.
 // File contents are only streamed while calculating their hashes.
+//
+// Symlinks are followed: a linked file is indexed under the link's path, and a
+// linked folder is walked as if it were there. A link that points back at one
+// of its own ancestors is skipped, so a cycle can't walk forever.
 func readDevFolder(dir string) (Napp, error) {
 	st, err := os.Stat(dir)
 	if err != nil {
@@ -262,25 +266,7 @@ func readDevFolder(dir string) (Napp, error) {
 	}
 
 	var total int64
-	err = filepath.WalkDir(dir, func(p string, de os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		// hidden files and folders (.git, .env, editor state) are not part
-		// of a napp, and must never be published to public servers
-		if p != dir && strings.HasPrefix(de.Name(), ".") {
-			if de.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !de.Type().IsRegular() {
-			return nil
-		}
-		info, err := de.Info()
-		if err != nil {
-			return err
-		}
+	err = walkDevFolder(dir, func(p string, info os.FileInfo) error {
 		if info.Size() > devFileCap {
 			return fmt.Errorf("%s is bigger than %dMB, refusing", p, devFileCap>>20)
 		}
@@ -332,6 +318,61 @@ func readDevFolder(dir string) (Napp, error) {
 	}
 	sort.Slice(napp.Paths, func(i, j int) bool { return napp.Paths[i].Path < napp.Paths[j].Path })
 	return napp, nil
+}
+
+// walkDevFolder calls visit for every regular file under dir, following
+// symlinks. Hidden files and folders (.git, .env, editor state) are left out:
+// they are not part of a napp, and must never be published to public servers.
+//
+// ancestors holds the canonical paths of the folders being walked, so a link
+// back to one of them is skipped instead of walked forever.
+func walkDevFolder(dir string, visit func(string, os.FileInfo) error) error {
+	root, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return err
+	}
+	ancestors := map[string]bool{root: true}
+
+	var walk func(string) error
+	walk = func(p string) error {
+		entries, err := os.ReadDir(p)
+		if err != nil {
+			return err
+		}
+		for _, de := range entries {
+			if strings.HasPrefix(de.Name(), ".") {
+				continue
+			}
+			child := filepath.Join(p, de.Name())
+			// Stat, not Lstat: a link is whatever it points at. A broken
+			// link names nothing to index or publish.
+			info, err := os.Stat(child)
+			if err != nil {
+				continue
+			}
+			if info.IsDir() {
+				real, err := filepath.EvalSymlinks(child)
+				if err != nil || ancestors[real] {
+					continue
+				}
+				ancestors[real] = true
+				err = walk(child)
+				delete(ancestors, real)
+				if err != nil {
+					return err
+				}
+				continue
+			}
+			if !info.Mode().IsRegular() {
+				continue
+			}
+			if err := visit(child, info); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	return walk(dir)
 }
 
 // readDevURL normalizes the url and fetches the metadata.json the dev server
