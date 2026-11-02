@@ -654,7 +654,7 @@ private fun InstalledTab(activity: MainActivity, st: LauncherState, theme: Theme
             return
         }
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f)) {
-            items(visible, key = { it.id }) { napp ->
+            items(visible, key = { it.listKey }) { napp ->
                 val busy = st.busy.contains(napp.id)
                 val pinned = st.pinned.any { it.id == napp.id }
                 NappCard(
@@ -785,7 +785,7 @@ private fun DiscoveryTab(
                 )
             }
         }
-        items(visible, key = { it.id }) { napp ->
+        items(visible, key = { it.listKey }) { napp ->
             val b = cardButtons(st, napp)
             NappCard(
                 activity, napp, theme,

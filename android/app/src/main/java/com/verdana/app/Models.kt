@@ -22,7 +22,12 @@ data class Napp(
     val createdAt: Long = 0,
     val paths: List<NappPath>,
     val updateAvailable: Boolean = false,
-)
+    // the event kind that described it: 35130 for a page, 35131 for a module
+    val kind: Int = 35130,
+) {
+    // a key for lazy lists: a page and a module can share the same id
+    val listKey: String get() = "$kind:$id"
+}
 
 data class ProfileDetail(
     val pubkey: String,
@@ -410,6 +415,8 @@ fun parseNapp(n: JSONObject): Napp {
         requires = n.strings("requires"),
         servers = n.strings("servers"),
         createdAt = n.optLong("created_at"),
+        // zero (omitted) reads as a page, like backend.Napp.Kind
+        kind = n.optInt("kind").takeIf { it != 0 } ?: 35130,
         // backend carries newer event object here; presence is flag.
         updateAvailable = n.has("updateAvailable") && !n.isNull("updateAvailable"),
         paths = (0 until pathsArr.length()).map {

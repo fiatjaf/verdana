@@ -4,7 +4,6 @@ import (
 	"context"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"fiatjaf.com/nostr"
@@ -27,7 +26,6 @@ func Discover() {
 	cancelDiscover = cancel
 
 	var collected []Napp
-	var eosed atomic.Bool
 
 	events, eose := sys.Pool.SubscribeManyNotifyEOSE(ctx, urls,
 		nostr.Filter{
@@ -39,22 +37,41 @@ func Discover() {
 		},
 	)
 
-	go func() {
-		<-eose
-		log.Info().Int("count", len(collected)).Msg("fetch complete")
-		eosed.Store(true)
-		setDiscovery(collected)
-		setFetching(false)
-	}()
-
-	for re := range events {
-		collected = append(collected, nappFromEvent(re.Event))
-		if eosed.Load() {
+	// relays can hold different versions of the same napp (an older one a
+	// relay never replaced, or the same d as both kinds): keep only the
+	// newest per napp id, in the slot the first one came in. GUIs key their
+	// lists by id, and Compose crashes on a repeated key.
+	index := make(map[string]int)
+	eosed := false
+	for {
+		select {
+		case <-eose:
+			// nil blocks forever, so this case fires once
+			eose = nil
+			eosed = true
+			log.Info().Int("count", len(collected)).Msg("fetch complete")
 			setDiscovery(collected)
+			setFetching(false)
+		case re, ok := <-events:
+			if !ok {
+				log.Info().Err(context.Cause(ctx)).Msg("discovery subscription ended")
+				return
+			}
+			n := nappFromEvent(re.Event)
+			if i, ok := index[n.ID]; ok {
+				if collected[i].CreatedAt >= n.CreatedAt {
+					continue
+				}
+				collected[i] = n
+			} else {
+				index[n.ID] = len(collected)
+				collected = append(collected, n)
+			}
+			if eosed {
+				setDiscovery(collected)
+			}
 		}
 	}
-
-	log.Info().Err(context.Cause(ctx)).Msg("discovery subscription ended")
 }
 
 func nappFromEvent(evt nostr.Event) Napp {

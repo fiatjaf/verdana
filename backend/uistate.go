@@ -476,6 +476,8 @@ func setFetching(fetching bool) {
 }
 
 func setDiscovery(list []Napp) {
+	// a copy: the sort below is in place, and Discover keeps filling list
+	list = append([]Napp(nil), list...)
 	ls.mu.Lock()
 	ls.discovery = list
 	ls.sortDiscovery()
