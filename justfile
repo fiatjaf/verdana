@@ -10,6 +10,18 @@ build:
 prod:
     cd desktop && go build -o child/child ./child && go build -o wasmchild/wasmchild ./wasmchild && go build -o verdana .
 
+# installs the desktop app for the current user (binary, menu entry and icon
+# under ~/.local, or /usr/local when run as root), the same way the release
+# tarballs do.
+install: prod
+    #!/bin/sh
+    set -eu
+    tmp=$(mktemp -d)
+    trap 'rm -rf "$tmp"' EXIT
+    cp desktop/verdana packaging/linux/install.sh packaging/linux/com.verdana.app.desktop "$tmp/"
+    cp desktop/assets/icon.png "$tmp/com.verdana.app.png"
+    sh "$tmp/install.sh"
+
 # the ui kit carries the launcher's own face (desktop/assets/*.ttf is
 # Verdana, in three faces) as woff2, inlined by backend/webview/embed.go.
 # Regenerate them when those ttf files change.
@@ -27,7 +39,7 @@ aar:
 apk: aar
     cd android && ./gradlew assembleDebug
 
-install: aar
+install-android: aar
     cd android && ./gradlew installDebug
 
 # linux packaging lives in packaging/linux: this builds the flatpak from the
