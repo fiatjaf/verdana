@@ -14,6 +14,7 @@ import (
 	_ "image/png"
 	"io"
 	"math"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -42,7 +43,56 @@ const maxBody = 16 << 20
 // size.
 const maxSide = 1024
 
-var httpClient = &http.Client{Timeout: 20 * time.Second}
+// fetchDialContext is the dialer http_fetch's client uses. It is a variable
+// so tests can serve from local httptest servers without the guard in the
+// way; the real value keeps loopback and link-local out of reach.
+var fetchDialContext = guardedDial
+
+var httpClient = &http.Client{
+	Timeout: 20 * time.Second,
+	// fetches run on the host's network stack, so a wasm napp gets the
+	// machine's own reach: dial-time checks keep loopback and link-local
+	// addresses out of reach (this machine's own services — the launcher's
+	// local ports — and cloud metadata endpoints), however the url spelled
+	// them. Private LAN ranges stay reachable: self-hosted relays and
+	// blossom servers are a legitimate use.
+	Transport: &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return fetchDialContext(ctx, network, addr)
+		},
+	},
+}
+
+// guardedDial is net.Dialer.DialContext with an address check after
+// resolution: whatever the hostname resolved to, the connection itself
+// must not target loopback or link-local space.
+func guardedDial(ctx context.Context, network, addr string) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, err
+	}
+	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	if len(ips) == 0 {
+		return nil, &net.DNSError{Err: "no addresses", Name: host, IsNotFound: true}
+	}
+	for _, ip := range ips {
+		if isForbiddenIP(ip.IP) {
+			return nil, errors.New("http_fetch: " + host + " resolves to a local address napps may not reach")
+		}
+	}
+	return (&net.Dialer{Timeout: 20 * time.Second}).DialContext(ctx, network, net.JoinHostPort(ips[0].IP.String(), port))
+}
+
+// isForbiddenIP reports addresses a napp's fetch must not touch: this
+// machine (loopback) and the link-local ranges where DHCP networks and
+// cloud metadata endpoints live.
+func isForbiddenIP(ip net.IP) bool {
+	return ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified()
+}
 
 // httpCall answers http_fetch and http_fetch_image; ok is false for every
 // other method.
@@ -243,6 +293,9 @@ func webURL(raw string) (string, error) {
 	}
 	if u.Scheme != "https" && u.Scheme != "http" {
 		return "", fmt.Errorf("http_fetch: only http and https urls, not %s:", u.Scheme)
+	}
+	if host := u.Hostname(); host == "localhost" {
+		return "", fmt.Errorf("http_fetch: %q is local, and napps may not fetch it", raw)
 	}
 	return u.String(), nil
 }

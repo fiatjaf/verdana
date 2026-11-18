@@ -8,6 +8,7 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -57,6 +58,8 @@ func bitmapOf(t *testing.T, raw []byte) (int, int, []byte) {
 }
 
 func TestHTTPFetchImage(t *testing.T) {
+	restore := plainDialForTests(t)
+	defer restore()
 	srv := pictureServer(t)
 
 	// Natural size, unpremultiplied: the blue half keeps its full blue.
@@ -104,6 +107,8 @@ func TestHTTPFetchImage(t *testing.T) {
 }
 
 func TestHTTPFetch(t *testing.T) {
+	restore := plainDialForTests(t)
+	defer restore()
 	srv := pictureServer(t)
 	res, err := httpFetch([]byte(`{"url":"` + srv.URL + `/echo","method":"post","body":"hello"}`))
 	if err != nil {
@@ -114,4 +119,41 @@ func TestHTTPFetch(t *testing.T) {
 		raw, _ := json.Marshal(res)
 		t.Fatalf("unexpected answer %s", raw)
 	}
+}
+
+func TestIsForbiddenIP(t *testing.T) {
+	for ip, want := range map[string]bool{
+		"127.0.0.1":         true,
+		"::1":               true,
+		"0.0.0.0":           true,
+		"169.254.169.254":   true,
+		"fe80::1":           true,
+		"8.8.8.8":           false,
+		"192.168.1.10":      false,
+		"10.0.0.2":          false,
+		"2620:0:2d0:200::7": false,
+	} {
+		if got := isForbiddenIP(net.ParseIP(ip)); got != want {
+			t.Errorf("isForbiddenIP(%s) = %v, want %v", ip, got, want)
+		}
+	}
+}
+
+func TestWebURLRejectsLocalhost(t *testing.T) {
+	if _, err := webURL("http://localhost:8080/x"); err == nil {
+		t.Error("webURL(http://localhost:8080/x) should reject localhost")
+	}
+	if _, err := webURL("https://relay.example.com"); err != nil {
+		t.Errorf("webURL(https://relay.example.com) = %v, want nil", err)
+	}
+}
+
+// plainDialForTests swaps the fetch guard for an unfiltered dialer for the
+// duration of a test: the tests exercise the proxy against local httptest
+// servers, which the guard exists to keep napps away from. It restores the
+// guard on the way out.
+func plainDialForTests(t *testing.T) func() {
+	old := fetchDialContext
+	fetchDialContext = (&net.Dialer{}).DialContext
+	return func() { fetchDialContext = old }
 }
