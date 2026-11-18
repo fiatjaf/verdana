@@ -221,11 +221,20 @@ func startNappServer(root string) string {
 		log.Error().Err(err).Str("root", root).Msg("failed to listen for napp server")
 		return ""
 	}
+	// addr is what this server answers on; requests carrying a different
+	// Host are someone other than the webview — a DNS-rebinding page (an
+	// outside origin pointed at 127.0.0.1 to read the napp's files) names
+	// its own host in the Host header, and gets nothing.
+	addr := ln.Addr().String()
 	fs := http.FileServer(http.Dir(root))
 	handler := http.HandlerFunc(func(wr http.ResponseWriter, r *http.Request) {
-		// Keep top-level navigation inside this napp origin. External URLs must
-		// be opened through window.napp.link(), which goes through the host.
-		wr.Header().Set("Content-Security-Policy", "navigate-to 'self'")
+		// Top-level navigation is kept inside this napp origin by the
+		// origin guard injected at document start (see OriginGuardScript):
+		// "navigate-to" would say it in CSP, but no browser ships it.
+		if r.Host != addr {
+			http.Error(wr, "forbidden", http.StatusForbidden)
+			return
+		}
 		clean := filepath.Join(root, filepath.FromSlash(path.Clean("/"+r.URL.Path)))
 		if st, statErr := os.Stat(clean); statErr != nil || st.IsDir() {
 			if r.URL.Path != "/" && !strings.Contains(path.Base(r.URL.Path), ".") {
