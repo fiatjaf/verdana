@@ -32,6 +32,10 @@ const (
 	PermSaveFile Permission = "save_file"
 	PermCopyText Permission = "copy_text"
 
+	// PermDeleteEvents is nostrdb.remove: the only destructive write into
+	// the shared local event store.
+	PermDeleteEvents Permission = "delete_events"
+
 	// PermDevInstall is napp.dev.installLocal installing a napp's files as a
 	// local napp, for napps that declare `requires: ["dev"]`.
 	PermDevInstall Permission = "dev_install"
