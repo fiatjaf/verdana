@@ -53,6 +53,16 @@ var (
 	pending   = xsync.NewMapOf[int, chan wireMsg]()
 	reqSerial atomic.Int64
 	log       zerolog.Logger
+
+	// navViolated is set the moment the window reports it is no longer on
+	// the origin the shell picked for it (see the origin guard). From then
+	// on the bridge refuses everything this window asks: the document now
+	// on screen is not the napp, whatever it looks like.
+	navViolated atomic.Bool
+
+	// wRef is the window itself, set once in main before the event loop
+	// runs and only read afterwards.
+	wRef webview.WebView
 )
 
 func main() {
@@ -91,6 +101,7 @@ func main() {
 	w.SetSize(windowWidth(), windowHeight(), webview.HintNone)
 	_ = w.Bind("__bridge_rpc", rpcBound)
 	_ = w.Bind("__verdana_prompt_answer", promptAnswer)
+	_ = w.Bind("__verdana_nav_violation", navViolation)
 
 	// window.name is where bridge.js picks up window.napp.instance, and it
 	// survives same-origin navigations — so a reload keeps the instance id.
@@ -107,18 +118,24 @@ func main() {
 	if kit := nappbridge.UIKitScript(meta.Requires); kit != "" {
 		w.Init(kit)
 	}
-	// the very same bridge.js the Android app injects
-	w.Init(nappbridge.JS())
-
-	// a dev napp navigates straight to its page (its dev-server url, or the
-	// launcher's throwaway server): the bridge bindings below don't depend
-	// on the page's origin, so nothing else changes.
+	// The origin guard goes in ahead of the bridge: it runs at document
+	// start on every navigation, and on the first page that is not on the
+	// origin this shell chose for the napp it disables the bridge before
+	// that page's own scripts get a say (see OriginGuardScript).
 	url := meta.URL
 	if url == "" {
 		url = startNappServer(meta.Dir)
 	}
+	if guard := nappbridge.OriginGuardScript(nappbridge.ExpectedOrigin(url)); guard != "" {
+		w.Init(guard)
+	}
+
+	// the very same bridge.js the Android app injects
+	w.Init(nappbridge.JS())
+
 	w.Navigate(url)
 
+	wRef = w
 	go reader(w)
 
 	w.Run()
@@ -249,6 +266,9 @@ func startNappServer(root string) string {
 }
 
 func rpcBound(method string, params string) string {
+	if navViolated.Load() {
+		return `{"__bridge_error":"this window left the napp origin; the bridge is off"}`
+	}
 	result, err := rpc(method, params)
 	if err != nil {
 		wrapped, _ := json.Marshal(map[string]string{"__bridge_error": err.Error()})
@@ -374,8 +394,30 @@ type promptView struct {
 // backend.Scope) — the launcher files the wider ones away and stops asking.
 // skip is the indexes of the items (relays) the user unticked.
 func promptAnswer(id int, ok bool, scope string, skip []int) {
+	if navViolated.Load() {
+		return
+	}
 	b, _ := json.Marshal(map[string]any{"ok": ok, "scope": scope, "skip": skip})
 	writeMsg(wireMsg{T: "promptAnswer", ID: id, Params: string(b)})
+}
+
+// navViolation is what the origin guard calls when the window has landed
+// somewhere other than the napp's own origin. It answers synchronously so
+// the flag is up before the guard's caller — and any script after it — can
+// use the bridge, then reports to the launcher and strips the bindings.
+func navViolation() string {
+	navViolated.Store(true)
+	writeMsg(wireMsg{T: "navViolation"})
+	if wRef != nil {
+		wRef.Dispatch(func() {
+			_ = wRef.Unbind("__bridge_rpc")
+			_ = wRef.Unbind("__verdana_prompt_answer")
+			_ = wRef.Unbind("__verdana_nav_violation")
+		})
+	}
+	log.Warn().Str("napp", meta.ID).Str("instance", meta.Instance).
+		Msg("window navigated off the napp origin; bridge disabled")
+	return "ok"
 }
 
 func promptOverlayCode(pv promptView) string {
