@@ -2,7 +2,11 @@ package main
 
 import (
 	"bufio"
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -21,34 +25,44 @@ import (
 // way.
 
 // forwarded is what a second launcher sends the running one over the port.
+// secret is the per-run capability from launcher.port: the listener accepts
+// nothing without it, so a random local process (or a compromised renderer)
+// cannot fire bundle tokens — which open napps and dispatch their actions —
+// at the running launcher.
 type forwarded struct {
-	Token string   `json:"token"`
-	Links []string `json:"links,omitempty"`
+	Token  string   `json:"token"`
+	Secret string   `json:"secret"`
+	Links  []string `json:"links,omitempty"`
 }
 
 func portFilePath(dataDir string) string {
 	return filepath.Join(dataDir, "launcher.port")
 }
 
-func readPort(dataDir string) int {
+// readForwardTarget reads the port and per-run secret out of launcher.port,
+// which holds "<port>:<secret>". A file without the secret half is an older launcher:
+// callers treat a missing secret as "forwarding will be refused".
+func readForwardTarget(dataDir string) (int, string) {
 	raw, err := os.ReadFile(portFilePath(dataDir))
 	if err != nil {
-		return 0
+		return 0, ""
 	}
-	port, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	portPart, secretPart, _ := strings.Cut(strings.TrimSpace(string(raw)), ":")
+	port, err := strconv.Atoi(strings.TrimSpace(portPart))
 	if err != nil || port <= 0 || port > 65535 {
-		return 0
+		return 0, ""
 	}
-	return port
+	return port, strings.TrimSpace(secretPart)
 }
 
 // forwardToInstance sends msg to a launcher already running, if there is
 // one, answering true when it did (the caller should exit).
 func forwardToInstance(dataDir string, msg forwarded) bool {
-	port := readPort(dataDir)
-	if port == 0 {
+	port, secret := readForwardTarget(dataDir)
+	if port == 0 || secret == "" {
 		return false
 	}
+	msg.Secret = secret
 	conn, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)), time.Second)
 	if err != nil {
 		return false // the launcher of that port is gone; we are the new one
@@ -58,7 +72,10 @@ func forwardToInstance(dataDir string, msg forwarded) bool {
 	if err := json.NewEncoder(conn).Encode(msg); err != nil {
 		return false
 	}
-	if _, err := bufio.NewReader(conn).ReadString('\n'); err != nil {
+	answer, err := bufio.NewReader(conn).ReadString('\n')
+	if err != nil || strings.TrimSpace(answer) != "ok" {
+		// refused (a launcher from before this protocol, or a secret
+		// mismatch): the caller starts a launcher of its own
 		return false
 	}
 	return true
@@ -74,7 +91,17 @@ func startInstanceListener(dataDir string) {
 		log.Warn().Err(err).Msg("no instance listener: shortcuts will start a new launcher")
 		return
 	}
-	if err := os.WriteFile(portFilePath(dataDir), []byte(strconv.Itoa(ln.Addr().(*net.TCPAddr).Port)), 0644); err != nil {
+	// the port file carries a per-run capability next to the port: the
+	// listener refuses forwards without it. 0600, like the other files the
+	// launcher writes for itself.
+	secret := make([]byte, 16)
+	if _, err := rand.Read(secret); err != nil {
+		log.Warn().Err(err).Msg("no forwarding secret: shortcuts will start a new launcher")
+		return
+	}
+	forwardSecret = hex.EncodeToString(secret)
+	portFile := fmt.Sprintf("%d:%s", ln.Addr().(*net.TCPAddr).Port, forwardSecret)
+	if err := os.WriteFile(portFilePath(dataDir), []byte(portFile), 0600); err != nil {
 		log.Warn().Err(err).Msg("could not write the launcher port file")
 	}
 
@@ -97,6 +124,11 @@ func serveForward(conn net.Conn) {
 	if err := json.NewDecoder(conn).Decode(&msg); err != nil {
 		return
 	}
+	if subtle.ConstantTimeCompare([]byte(msg.Secret), []byte(forwardSecret)) != 1 {
+		conn.Write([]byte("forbidden\n"))
+		log.Warn().Msg("refused a forward without the run's secret")
+		return
+	}
 	if msg.Token != "" {
 		go runBundleToken(msg.Token)
 	}
@@ -112,6 +144,10 @@ func serveForward(conn net.Conn) {
 // running into a backend that has no napp registry, no stores and no host to
 // open windows with.
 var launcherReady = make(chan struct{})
+
+// forwardSecret is this run's forwarding capability, set by
+// startInstanceListener before the listener accepts.
+var forwardSecret string
 
 // runBundleToken opens a bundle token's napps as soon as this launcher can.
 // Each token gets its own goroutine, so a second shortcut click is never stuck
