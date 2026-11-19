@@ -110,6 +110,15 @@ func loadState() {
 	} else {
 		log.Debug().Err(err).Msg("no existing state file, using defaults")
 	}
+	// a login saved by an older build may be raw key material (an nsec, or
+	// a bunker url with its connection secret): the file it sits in is not
+	// where that belongs, so it is dropped here rather than carried along —
+	// the user logs in again, and the trailing saveState writes the field
+	// back empty.
+	if state.Login != "" && !loginIsResumable(state.Login) {
+		log.Info().Msg("dropping a stored login that carries key material")
+		state.Login = ""
+	}
 	if state.ClientKey == (nostr.SecretKey{}) {
 		state.ClientKey = nostr.Generate()
 		log.Debug().Msg("generated new client key")
