@@ -60,6 +60,12 @@ type Prompt struct {
 	Options  []PromptOption `json:"options"`
 	Remember bool           `json:"remember"`
 
+	// AnswerToken is the secret the answer goes back with: the launcher
+	// drops answers without it, so a forged one (an id guessed by a napp)
+	// settles nothing. It never reaches the napp's module — only this
+	// shell's own overlay buttons see it.
+	AnswerToken string `json:"answerToken"`
+
 	// Countdown is, for a picker, how many milliseconds it waits before
 	// picking its Default option by itself.
 	Countdown int `json:"countdown"`
@@ -495,10 +501,11 @@ func (b *Bridge) CurrentPrompt() *Prompt {
 }
 
 // AnswerPrompt sends the user's answer up and takes the overlay down; if the
-// launcher has another prompt for this window it sends it right back. skip
+// launcher has another prompt for this window it sends it right back. token
+// is the prompt's answerToken — the launcher drops answers without it. skip
 // is the indexes of the items (relays) the user unticked.
-func (b *Bridge) AnswerPrompt(id int, ok bool, index int, scope string, skip []int) {
-	raw, _ := json.Marshal(map[string]any{"ok": ok, "index": index, "scope": scope, "skip": skip})
+func (b *Bridge) AnswerPrompt(id int, token string, ok bool, index int, scope string, skip []int) {
+	raw, _ := json.Marshal(map[string]any{"token": token, "ok": ok, "index": index, "scope": scope, "skip": skip})
 	b.send(WireMsg{T: "promptAnswer", ID: id, Params: string(raw)})
 	b.mu.Lock()
 	if b.prompt != nil && b.prompt.ID == id {

@@ -344,8 +344,12 @@ func writeMsg(m wireMsg) {
 // A prompt fired by this napp is shown over its own screen: an opaque
 // overlay that hides the webview until the user answers it.
 
-// promptView mirrors backend.Prompt as the overlay needs to see it. A
-// picker never comes here: it is a window of its own.
+// promptView mirrors backend.Prompt as the overlay needs to see it. Token is
+// the prompt's answerToken: it lives only in the overlay closure (the data is
+// a closure argument, never a global), and rides on every button answer —
+// the launcher drops answers without it, so a page that finds the binding
+// cannot approve anything by guessing ids. A picker never comes here: it is
+// a window of its own.
 type promptView struct {
 	ID       int      `json:"id"`
 	Title    string   `json:"title"`
@@ -356,6 +360,7 @@ type promptView struct {
 	Summary  string   `json:"summary"`
 	Image    string   `json:"image"`
 	Remember bool     `json:"remember"`
+	Token    string   `json:"answerToken"`
 }
 
 // promptAnswer is the bound call the overlay's buttons make. It sends the
@@ -363,9 +368,12 @@ type promptView struct {
 // another prompt queued for this window it will send it right back. scope is
 // how long the answer holds: "once", "session" or "always" (see
 // backend.Scope) — the launcher files the wider ones away and stops asking.
-// skip is the indexes of the items (relays) the user unticked.
-func promptAnswer(id int, ok bool, scope string, skip []int) {
-	b, _ := json.Marshal(map[string]any{"ok": ok, "scope": scope, "skip": skip})
+// skip is the indexes of the items (relays) the user unticked. token is the
+// prompt's answerToken: everything a page can call is untrusted, so the
+// launcher drops answers that do not carry the secret only the overlay's own
+// buttons know.
+func promptAnswer(id int, token string, ok bool, scope string, skip []int) {
+	b, _ := json.Marshal(map[string]any{"token": token, "ok": ok, "scope": scope, "skip": skip})
 	writeMsg(wireMsg{T: "promptAnswer", ID: id, Params: string(b)})
 }
 
@@ -374,26 +382,27 @@ func promptOverlayCode(pv promptView) string {
 	if err != nil {
 		return ""
 	}
-	return promptLibScript + ";window.__verdana_prompt_lib.show(" + string(data) + ");"
+	// one self-contained closure per prompt: the prompt's data (including its
+	// answer token) is an argument of the closure, never a global, so a page
+	// cannot pre-define anything the overlay would hand its secrets to
+	return "(function(p){" + promptLibScript + "})(" + string(data) + ");"
 }
 
 func promptHideCode() string {
-	return ";if (window.__verdana_prompt_lib) window.__verdana_prompt_lib.hide();"
+	return ";var o=document.getElementById('__verdana_prompt');if(o&&o.parentNode)o.parentNode.removeChild(o);"
 }
 
-// promptLibScript defines the overlay runtime once per page. It draws an
-// opaque full-viewport cover — the napp underneath stays hidden until the
-// user answers.
-const promptLibScript = "(function(){" +
-	"if (window.__verdana_prompt_lib) return;" +
+// promptLibScript is the body of the overlay closure: it draws an opaque
+// full-viewport cover — the napp underneath stays hidden until the user
+// answers — with buttons that answer through __verdana_prompt_answer, each
+// carrying the prompt's token from the closure. The binding is reachable by
+// the page too, which is why the token rides along and the buttons ignore
+// synthetic clicks (isTrusted false): guessing the id alone settles nothing.
+const promptLibScript = "" +
 	"function tok(k, fallback) {" +
 	"try { var v = (window.__nappTheme && window.__nappTheme.vars) || {};" +
 	"return v[k] || fallback } catch(e) { return fallback }" +
 	"};" +
-	"window.__verdana_prompt_lib = {" +
-	"show: function(p) {" +
-	"var old = document.getElementById('__verdana_prompt');" +
-	"if (old && old.parentNode) old.parentNode.removeChild(old);" +
 	"var dark = window.__nappTheme && window.__nappTheme.name === 'dark';" +
 	"var bg = tok('surface', dark ? '#17181b' : '#ffffff');" +
 	"var card = tok('surface-alt', dark ? '#23252b' : '#f2f2f2');" +
@@ -403,12 +412,20 @@ const promptLibScript = "(function(){" +
 	"var accentText = tok('accent-text', '#ffffff');" +
 	"var border = tok('border', dark ? '#3a3d45' : '#cccccc');" +
 	"var danger = tok('danger', dark ? '#ff6b6b' : '#cc2222');" +
+	"var old = document.getElementById('__verdana_prompt');" +
+	"if (old && old.parentNode) old.parentNode.removeChild(old);" +
 	"var o = document.createElement('div');" +
 	"o.id = '__verdana_prompt';" +
 	"o.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;" +
 	"z-index:2147483647;background:' + bg + ';color:' + fg" +
 	"+ ';font:14px sans-serif;overflow:auto;padding:24px;box-sizing:border-box;" +
 	"margin:0;border:0;display:flex;flex-direction:column;';" +
+	// an answer is only ever a real click: a synthetic .click() from the page
+	// (isTrusted false) is ignored, so the page cannot approve itself
+	"function answer(ev, ok, scope) {" +
+	"if (ev && ev.isTrusted === false) return;" +
+	"window.__verdana_prompt_answer(p.id, p.answerToken, ok, scope, skipped())" +
+	"};" +
 	// an image is shown as big as it fits, with what to do about it to
 	// the side (under it, on a narrow window)
 	"if (p.image) {" +
@@ -436,7 +453,7 @@ const promptLibScript = "(function(){" +
 	"b.textContent = label;" +
 	"b.style.cssText = 'padding:10px 14px;border:0;border-radius:8px;font-size:14px;cursor:pointer;" +
 	"background:' + (loud ? accent : card) + ';color:' + (loud ? accentText : fg) + ';';" +
-	"b.onclick = function() { window.__verdana_prompt_answer(p.id, ok, 'once', []) };" +
+	"b.onclick = function(ev) { answer(ev, ok, 'once') };" +
 	"side.appendChild(b);" +
 	"};" +
 	"act('Open in browser', true, true);" +
@@ -519,7 +536,7 @@ const promptLibScript = "(function(){" +
 	";cursor:pointer;';" +
 	"b.textContent = label;" +
 	"b.title = tip(label, ok, scope);" +
-	"b.onclick = function() { window.__verdana_prompt_answer(p.id, ok, scope, skipped()) };" +
+	"b.onclick = function(ev) { answer(ev, ok, scope) };" +
 	"return b;" +
 	"};" +
 	// tip is what an answer button says it does, on hover.
@@ -549,11 +566,4 @@ const promptLibScript = "(function(){" +
 	"box.appendChild(btn('Deny', 'chip', false, 'once'));" +
 	"}" +
 	"o.appendChild(box);" +
-	"document.documentElement.appendChild(o);" +
-	"}," +
-	"hide: function() {" +
-	"var o = document.getElementById('__verdana_prompt');" +
-	"if (o && o.parentNode) o.parentNode.removeChild(o);" +
-	"}" +
-	"};" +
-	"})()"
+	"document.documentElement.appendChild(o);"

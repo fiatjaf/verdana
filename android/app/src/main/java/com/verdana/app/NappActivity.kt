@@ -314,7 +314,7 @@ class NappActivity : ComponentActivity() {
         val opt = p.options.getOrNull(index) ?: return
         pickerPrompt = null
         opening = opt.name.ifBlank { opt.label }
-        Mobile.answerPrompt(p.id, true, index.toLong(), "once", "")
+        Mobile.answerPrompt(p.id, p.answerToken, true, index.toLong(), "once", "")
         if (opt.instance.isNotBlank()) VerdanaHost.surface(opt.instance)
     }
 
@@ -325,7 +325,7 @@ class NappActivity : ComponentActivity() {
             return
         }
         pickerPrompt = null
-        Mobile.answerPrompt(p.id, false, 0, "once", "")
+        Mobile.answerPrompt(p.id, p.answerToken, false, 0, "once", "")
     }
 
     // isPicking says this window is a picker still waiting to become a napp's.

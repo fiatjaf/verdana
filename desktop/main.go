@@ -440,7 +440,7 @@ func gioMain() {
 							{false, backend.ScopeAlways, &promptBtns.alwaysDeny},
 						} {
 							if c.btn.Clicked(gtx) {
-								backend.AnswerPrompt(activePrompt.ID, backend.Answer{OK: c.ok, Scope: c.scope, Skip: promptBtns.skipped()})
+								backend.AnswerPrompt(activePrompt.ID, activePrompt.AnswerToken, backend.Answer{OK: c.ok, Scope: c.scope, Skip: promptBtns.skipped()})
 							}
 						}
 						return layoutPrompt(gtx, th, activePrompt, &promptBtns)

@@ -1,6 +1,8 @@
 package backend
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"slices"
 	"strings"
@@ -10,6 +12,17 @@ import (
 
 	"github.com/puzpuzpuz/xsync/v3"
 )
+
+// newAnswerToken is the secret an answer to a prompt must carry: an
+// unguessable value handed out only with the prompt itself, to whatever
+// draws the question for the user. Everything a napp's page can reach —
+// the wire channel, the desktop overlay's answer binding — is untrusted,
+// so an answer without the right token is dropped rather than acted on.
+func newAnswerToken() string {
+	var b [16]byte
+	rand.Read(b[:])
+	return hex.EncodeToString(b[:])
+}
 
 // Prompts are the launcher's only synchronous conversation with the user: a
 // napp asks for something sensitive (signing, encrypting, saving a file,
@@ -159,6 +172,13 @@ type Prompt struct {
 	// wherever it likes).
 	Instance string `json:"instance"`
 
+	// AnswerToken is the secret an answer must carry: it rides with the
+	// prompt to whatever draws the question (a launcher GUI, or a shell's
+	// prompt overlay), and comes back with the answer. Nothing a napp's
+	// page can read or call knows it, so a forged answer — one no click
+	// produced, or one about another window's question — fails here.
+	AnswerToken string `json:"answerToken"`
+
 	// key is what an answer wider than this prompt is remembered under.
 	// Zero for a picker.
 	key  RuleKey
@@ -202,28 +222,27 @@ func enqueuePrompt(p *Prompt) {
 	syncPromptOverlays()
 }
 
-// AnswerPrompt is what a GUI calls when the user clicks: it remembers the
-// answer when the user asked for it to stick, hands it to the waiting rpc and
-// promotes the next queued prompt.
-func AnswerPrompt(id int, ans Answer) {
-	promptMu.Lock()
-	var p *Prompt
+// pendingPrompt finds the prompt with that id among the active one and the
+// queue, untouched. Callers hold promptMu.
+func pendingPrompt(id int) *Prompt {
 	if promptActive != nil && promptActive.ID == id {
-		p = promptActive
-	} else {
-		for _, q := range promptQueue {
-			if q.ID == id {
-				p = q
-				break
-			}
+		return promptActive
+	}
+	for _, q := range promptQueue {
+		if q.ID == id {
+			return q
 		}
 	}
-	if p == nil || p.done {
-		promptMu.Unlock()
+	return nil
+}
+
+// dequeueLocked takes a settled prompt out of the active slot and the queue,
+// promoting the next one. Callers hold promptMu and have checked p.done.
+func dequeueLocked(p *Prompt) {
+	if p.done {
 		return
 	}
 	p.done = true
-
 	if promptActive == p {
 		if len(promptQueue) > 0 {
 			promptActive = promptQueue[0]
@@ -231,14 +250,34 @@ func AnswerPrompt(id int, ans Answer) {
 		} else {
 			promptActive = nil
 		}
-	} else {
-		for i, q := range promptQueue {
-			if q == p {
-				promptQueue = append(promptQueue[:i], promptQueue[i+1:]...)
-				break
-			}
+		return
+	}
+	for i, q := range promptQueue {
+		if q == p {
+			promptQueue = append(promptQueue[:i], promptQueue[i+1:]...)
+			return
 		}
 	}
+}
+
+// AnswerPrompt is what a GUI calls when the user clicks: it remembers the
+// answer when the user asked for it to stick, hands it to the waiting rpc and
+// promotes the next queued prompt. Token must be the prompt's own AnswerToken
+// — an answer carrying anything else is dropped, so a prompt's page cannot
+// answer itself and a window cannot answer another's question.
+func AnswerPrompt(id int, token string, ans Answer) bool {
+	promptMu.Lock()
+	p := pendingPrompt(id)
+	if p == nil || p.done {
+		promptMu.Unlock()
+		return false
+	}
+	if token == "" || token != p.AnswerToken {
+		promptMu.Unlock()
+		log.Warn().Int("id", id).Msg("dropping a prompt answer with a wrong token")
+		return false
+	}
+	dequeueLocked(p)
 	promptMu.Unlock()
 
 	// before the rpc goes on, so the rule is already in place by the time
@@ -255,6 +294,28 @@ func AnswerPrompt(id int, ans Answer) {
 		host.PromptsChanged()
 	}
 	syncPromptOverlays()
+	return true
+}
+
+// AnswerPromptFromShell is an answer that arrived over a napp shell's wire
+// channel — a path a napp's own page can write to, so it proves nothing but
+// the token and can only ever concern the prompt shown over that very
+// window. Launcher questions (no instance) are never answerable from here.
+func AnswerPromptFromShell(id int, token, instance string, ans Answer) bool {
+	promptMu.Lock()
+	p := pendingPrompt(id)
+	if p == nil || p.done {
+		promptMu.Unlock()
+		return false
+	}
+	if p.Instance == "" || p.Instance != instance {
+		promptMu.Unlock()
+		log.Warn().Str("instance", instance).Int("id", id).
+			Msg("dropping a prompt answer for a prompt of another window")
+		return false
+	}
+	promptMu.Unlock()
+	return AnswerPrompt(id, token, ans)
 }
 
 func (p *Prompt) wait() Answer {
@@ -275,7 +336,7 @@ func (p *Prompt) waitOr(more chan struct{}, then func()) Answer {
 			then()
 		case <-timeout.C:
 			// unanswered is a plain no: nothing is remembered for it
-			AnswerPrompt(p.ID, Answer{})
+			AnswerPrompt(p.ID, p.AnswerToken, Answer{})
 			return Answer{}
 		}
 	}
@@ -319,12 +380,13 @@ func updatePrompt(id int, edit func(*Prompt)) {
 
 func newPrompt(napp, title string, body PromptBody, options []PromptOption) *Prompt {
 	return &Prompt{
-		ID:         int(promptSerial.Add(1)),
-		Napp:       napp,
-		Title:      title,
-		PromptBody: body,
-		Options:    options,
-		resp:       make(chan Answer, 1),
+		ID:          int(promptSerial.Add(1)),
+		Napp:        napp,
+		Title:       title,
+		PromptBody:  body,
+		Options:     options,
+		AnswerToken: newAnswerToken(),
+		resp:        make(chan Answer, 1),
 	}
 }
 
@@ -435,7 +497,7 @@ func askActionHandler(caller *Instance, action string, payload json.RawMessage, 
 	// closing the picker is saying no
 	go func() {
 		<-picker.gone
-		AnswerPrompt(p.ID, Answer{})
+		AnswerPrompt(p.ID, p.AnswerToken, Answer{})
 	}()
 	log.Info().Str("action", action).Int("options", len(options)).
 		Msg("asking the user to pick a handler")
@@ -574,10 +636,15 @@ func syncPromptOverlays() {
 }
 
 // handlePromptAnswer is what a shell sends up when its overlay was clicked.
+// The token (and the window match, see AnswerPromptFromShell) is what makes
+// this worth more than nothing coming from a page that can write here.
 func (ci *Instance) handlePromptAnswer(m WireMsg) {
-	var a Answer
+	var a struct {
+		Answer
+		Token string `json:"token"`
+	}
 	_ = json.Unmarshal([]byte(m.Params), &a)
-	AnswerPrompt(m.ID, a)
+	AnswerPromptFromShell(m.ID, a.Token, ci.instance, a.Answer)
 }
 
 // preview trims an arbitrary payload into something a dialog can show.
