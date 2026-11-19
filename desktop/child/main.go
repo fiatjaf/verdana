@@ -54,6 +54,19 @@ var (
 	pending   = xsync.NewMapOf[int, chan wireMsg]()
 	reqSerial atomic.Int64
 	log       zerolog.Logger
+
+	// originViolated is set the moment the window reports it is no longer
+	// on the origin the shell picked for it (see the origin guard in the
+	// init script). From then on the bridge refuses everything this window
+	// asks: the document now on screen is not the napp, whatever it looks
+	// like. The bindings are host-wide — they exist in every document the
+	// window ever loads — so the refusal lives here, on the host side, and
+	// not only in the page's copy of bridge.js.
+	originViolated atomic.Bool
+
+	// wRef is the window itself, set once in main before the event loop
+	// runs and only read afterwards.
+	wRef webview.WebView
 )
 
 func main() {
@@ -88,10 +101,12 @@ func main() {
 	runtime.LockOSThread()
 
 	w := webview.New(os.Getenv("WEBVIEW_DEBUG") == "true")
+	wRef = w
 	w.SetTitle(windowTitle(meta.Name, os.Getenv("VERDANA_INSTANCE_ID")))
 	w.SetSize(windowWidth(), windowHeight(), webview.HintNone)
 	_ = w.Bind("__bridge_rpc", rpcBound)
 	_ = w.Bind("__verdana_prompt_answer", promptAnswer)
+	_ = w.Bind("__verdana_origin_violation", originViolation)
 
 	// a dev napp navigates straight to its page (its dev-server url, or the
 	// launcher's throwaway server): the bridge bindings don't depend on the
@@ -104,15 +119,23 @@ func main() {
 	// window.name is where bridge.js picks up window.napp.instance, and it
 	// survives same-origin navigations — so a reload keeps the instance id.
 	// window.__nappOrigin is where the bridge is allowed to run: the
-	// injection follows every document this window loads, whatever origin a
-	// page navigated itself to, and bridge.js deactivates itself anywhere
-	// else. window.__nappTheme is where bridge.js picks the launcher's theme
-	// up on every (re)load, so a napp that reloads itself stays in sync.
-	// window.__nappStorage seeds the localStorage shim: the file is the
-	// per-nappId JSON store the backend persists (native localStorage would
-	// be a fresh empty origin on every launch, random port each time).
+	// injection (and the host-wide bindings) follow every document this
+	// window loads, whatever origin a page navigated itself to, so the
+	// guard right after it tears the raw bindings down before any page
+	// script of a document that is somewhere else gets to run — bridge.js
+	// then finds nothing to do on that side either. window.__nappTheme is
+	// where bridge.js picks the launcher's theme up on every (re)load, so
+	// a napp that reloads itself stays in sync. window.__nappStorage seeds
+	// the localStorage shim: the file is the per-nappId JSON store the
+	// backend persists (native localStorage would be a fresh empty origin
+	// on every launch, random port each time).
 	w.Init("window.name = " + jsString(meta.Instance) + ";" +
 		"window.__nappOrigin = " + jsString(originOf(url)) + ";" +
+		"if (window.__nappOrigin && location.origin !== window.__nappOrigin) {" +
+		"delete window.__bridge_rpc;" +
+		"delete window.__verdana_prompt_answer;" +
+		"window.__verdana_origin_violation();" +
+		"}" +
 		"window.__nappDomains = " + jsStringSlice(meta.Requires) + ";" +
 		storageInitScript(os.Getenv("VERDANA_NAPP_STORAGE_FILE")) +
 		themeInitScript(meta.Theme, meta.ThemeVars))
@@ -258,6 +281,9 @@ func startNappServer(root string) string {
 }
 
 func rpcBound(method string, params string) string {
+	if originViolated.Load() {
+		return `{"__bridge_error":"this window left the napp origin; the bridge is off"}`
+	}
 	result, err := rpc(method, params)
 	if err != nil {
 		wrapped, _ := json.Marshal(map[string]string{"__bridge_error": err.Error()})
@@ -383,8 +409,34 @@ type promptView struct {
 // backend.Scope) — the launcher files the wider ones away and stops asking.
 // skip is the indexes of the items (relays) the user unticked.
 func promptAnswer(id int, ok bool, scope string, skip []int) {
+	if originViolated.Load() {
+		return
+	}
 	b, _ := json.Marshal(map[string]any{"ok": ok, "scope": scope, "skip": skip})
 	writeMsg(wireMsg{T: "promptAnswer", ID: id, Params: string(b)})
+}
+
+// originViolation is what the init script's origin guard calls when the
+// window has landed somewhere other than the napp's own origin. The guard
+// has already deleted the raw bindings in that document before any of its
+// page scripts could run; this reports to the launcher — which closes the
+// window — and strips the bindings from the shell side too, so no later
+// document of this window ever grows them again.
+func originViolation() string {
+	if originViolated.Swap(true) {
+		return "ok"
+	}
+	writeMsg(wireMsg{T: "navViolation"})
+	if wRef != nil {
+		wRef.Dispatch(func() {
+			_ = wRef.Unbind("__bridge_rpc")
+			_ = wRef.Unbind("__verdana_prompt_answer")
+			_ = wRef.Unbind("__verdana_origin_violation")
+		})
+	}
+	log.Warn().Str("napp", meta.ID).Str("instance", meta.Instance).
+		Msg("window navigated off the napp origin; bridge disabled")
+	return "ok"
 }
 
 func promptOverlayCode(pv promptView) string {
