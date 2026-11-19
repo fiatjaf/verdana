@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	neturl "net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -92,14 +93,26 @@ func main() {
 	_ = w.Bind("__bridge_rpc", rpcBound)
 	_ = w.Bind("__verdana_prompt_answer", promptAnswer)
 
+	// a dev napp navigates straight to its page (its dev-server url, or the
+	// launcher's throwaway server): the bridge bindings don't depend on the
+	// page's origin, but the bridge itself does — see the __nappOrigin below.
+	url := meta.URL
+	if url == "" {
+		url = startNappServer(meta.Dir)
+	}
+
 	// window.name is where bridge.js picks up window.napp.instance, and it
 	// survives same-origin navigations — so a reload keeps the instance id.
-	// window.__nappTheme is where bridge.js picks the launcher's theme up on
-	// every (re)load, so a napp that reloads itself stays in sync.
+	// window.__nappOrigin is where the bridge is allowed to run: the
+	// injection follows every document this window loads, whatever origin a
+	// page navigated itself to, and bridge.js deactivates itself anywhere
+	// else. window.__nappTheme is where bridge.js picks the launcher's theme
+	// up on every (re)load, so a napp that reloads itself stays in sync.
 	// window.__nappStorage seeds the localStorage shim: the file is the
 	// per-nappId JSON store the backend persists (native localStorage would
 	// be a fresh empty origin on every launch, random port each time).
 	w.Init("window.name = " + jsString(meta.Instance) + ";" +
+		"window.__nappOrigin = " + jsString(originOf(url)) + ";" +
 		"window.__nappDomains = " + jsStringSlice(meta.Requires) + ";" +
 		storageInitScript(os.Getenv("VERDANA_NAPP_STORAGE_FILE")) +
 		themeInitScript(meta.Theme, meta.ThemeVars))
@@ -110,13 +123,6 @@ func main() {
 	// the very same bridge.js the Android app injects
 	w.Init(nappbridge.JS())
 
-	// a dev napp navigates straight to its page (its dev-server url, or the
-	// launcher's throwaway server): the bridge bindings below don't depend
-	// on the page's origin, so nothing else changes.
-	url := meta.URL
-	if url == "" {
-		url = startNappServer(meta.Dir)
-	}
 	w.Navigate(url)
 
 	go reader(w)
@@ -132,6 +138,18 @@ func jsString(s string) string {
 		return `""`
 	}
 	return string(b)
+}
+
+// originOf is a url's origin, the way location.origin spells it: scheme
+// plus host, with the default port left off. "" when there is no usable
+// one, which leaves the bridge's guard switched off (an unexpected url
+// fails the launch later anyway).
+func originOf(raw string) string {
+	u, err := neturl.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	return u.Scheme + "://" + u.Host
 }
 
 // windowWidth/Height are the initial window size in pixels: the napp's

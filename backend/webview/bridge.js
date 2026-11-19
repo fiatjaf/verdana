@@ -1,4 +1,13 @@
 ;(() => {
+  // The bridge is for the napp's own page only. On the desktop the injection
+  // follows every document this window loads — including one the page itself
+  // navigated to somewhere else, since a webview engine here enforces no
+  // same-origin navigation policy — so anything but the origin the shell
+  // named gets nothing: no window.nostr, no window.napp, no store. (Android
+  // scopes its injection to the napp origin already and leaves __nappOrigin
+  // unset, so the guard is inert there.)
+  if (window.__nappOrigin && location.origin !== window.__nappOrigin) return
+
   // Custom localStorage helpers (install runs after rpc is defined below).
   const QUOTA = 5 * 1024 * 1024
   const quotaError = () => {
