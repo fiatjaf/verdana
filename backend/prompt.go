@@ -263,9 +263,11 @@ func dequeueLocked(p *Prompt) {
 // AnswerPrompt is what a GUI calls when the user clicks: it remembers the
 // answer when the user asked for it to stick, hands it to the waiting rpc and
 // promotes the next queued prompt. Token must be the prompt's own AnswerToken
-// — an answer carrying anything else is dropped, so a prompt's page cannot
-// answer itself and a window cannot answer another's question.
+// — an answer carrying anything else is denied and settles the prompt for
+// good, so a page holding only the id cannot probe its way to approval, and
+// a question answered with a forged token is over rather than left open.
 func AnswerPrompt(id int, token string, ans Answer) bool {
+	forged := false
 	promptMu.Lock()
 	p := pendingPrompt(id)
 	if p == nil || p.done {
@@ -273,16 +275,20 @@ func AnswerPrompt(id int, token string, ans Answer) bool {
 		return false
 	}
 	if token == "" || token != p.AnswerToken {
-		promptMu.Unlock()
-		log.Warn().Int("id", id).Msg("dropping a prompt answer with a wrong token")
-		return false
+		// wrong token: the question is over, answered with a plain no. The
+		// real UIs hold the token; only something probing without it loses
+		// anything here, and one denial caps its probing.
+		forged = true
+		ans = Answer{}
+		log.Warn().Int("id", id).Msg("denied a prompt answered with a wrong token")
 	}
 	dequeueLocked(p)
 	promptMu.Unlock()
 
 	// before the rpc goes on, so the rule is already in place by the time
-	// the next question of the same kind comes round
-	if p.key.valid() {
+	// the next question of the same kind comes round. A forged answer has
+	// no verdict in it that deserves remembering.
+	if !forged && p.key.valid() {
 		remember(p.key, Rule{Decision: decisionOf(ans.OK)}, ans.Scope)
 	}
 
@@ -294,7 +300,9 @@ func AnswerPrompt(id int, token string, ans Answer) bool {
 		host.PromptsChanged()
 	}
 	syncPromptOverlays()
-	return true
+	// true only for an answer taken as the user gave it; a forged one
+	// settled the prompt as a denial, and reports false.
+	return !forged
 }
 
 // AnswerPromptFromShell is an answer that arrived over a napp shell's wire

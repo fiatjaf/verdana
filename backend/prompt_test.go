@@ -41,26 +41,29 @@ func unanswered(t *testing.T, p *Prompt) {
 func TestAnswerPromptWantsTheToken(t *testing.T) {
 	p := newPrompt("notes", "notes wants to sign", PromptBody{}, nil)
 	p.Instance = "abcd1234"
+	p.key = RuleKey{Napp: "notes", Permission: PermSign}
 	enqueuePrompt(p)
 	defer settlePrompt(t, p)
 
-	// a forged answer — a guessed id, no token — settles nothing
+	// a forged answer — a guessed id, no token — is a plain no, and it is
+	// final: nothing reaches the caller that looks like an approval, the
+	// waiting rpc is let go rather than left hanging, and nothing is
+	// remembered for the asking napp (a forged denial must not file a
+	// rule either).
 	if AnswerPrompt(p.ID, "", Answer{OK: true, Scope: ScopeAlways}) {
 		t.Fatal("an answer with no token was accepted")
 	}
-	unanswered(t, p)
-
-	if AnswerPrompt(p.ID, "0000000000000000000000000000000", Answer{OK: true, Scope: ScopeAlways}) {
-		t.Fatal("an answer with a wrong token was accepted")
+	if a := answered(t, p); a.OK || a.Scope != "" {
+		t.Fatalf("a forged answer produced %+v, want a bare denial", a)
 	}
-	unanswered(t, p)
-
-	// the prompt's own token goes through
-	if !AnswerPrompt(p.ID, p.AnswerToken, Answer{OK: true, Scope: ScopeOnce}) {
-		t.Fatal("the prompt's own token was not accepted")
+	if rule, ok := lookupRule(RuleKey{Napp: "notes", Permission: PermSign}); ok {
+		t.Fatalf("a forged answer filed a rule anyway: %+v", rule)
 	}
-	if a := answered(t, p); !a.OK || a.Scope != ScopeOnce {
-		t.Fatalf("the answer came back wrong: %+v", a)
+
+	// one denial caps probing: the prompt is settled, a second guess —
+	// even with the right token — finds nothing to answer
+	if AnswerPrompt(p.ID, p.AnswerToken, Answer{OK: true, Scope: ScopeOnce}) {
+		t.Fatal("the prompt outlived a forged answer")
 	}
 }
 
