@@ -10,7 +10,8 @@ import (
 
 // A state file written by an older build can carry raw key material in the
 // login field: loading it must drop the secret, and write the file back
-// without it.
+// without it. dataDir is pointed at the test's own directory first, so
+// loadState reads and rewrites the crafted file by its usual path.
 func TestLoadStateDropsSecretLogin(t *testing.T) {
 	dir := t.TempDir()
 	nsec := "nsec1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqz"
@@ -19,23 +20,23 @@ func TestLoadStateDropsSecretLogin(t *testing.T) {
 		"login":      nsec,
 		"relays":     []string{"relay.example.com"},
 	})
-	statePath = filepath.Join(dir, "state.json")
-	if err := os.WriteFile(statePath, raw, 0600); err != nil {
+	oldDir, oldPath, oldState := dataDir, statePath, state
+	dataDir = dir
+	state = AppState{}
+	t.Cleanup(func() { dataDir, statePath, state = oldDir, oldPath, oldState })
+
+	path := filepath.Join(dir, "state.json")
+	if err := os.WriteFile(path, raw, 0600); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { statePath = "" })
 
-	state = AppState{}
 	loadState()
 	if StoredLogin() != "" {
 		t.Fatalf("a secret login survived the load: %q", StoredLogin())
 	}
-	back, err := os.ReadFile(statePath)
+	back, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if string(back) == string(raw) {
-		t.Fatal("the state file was rewritten with the secret still in it")
 	}
 	if strings.Contains(string(back), nsec) {
 		t.Fatal("the secret is still in the rewritten state file")
