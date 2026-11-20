@@ -48,6 +48,12 @@ const maxSide = 1024
 // way; the real value keeps loopback and link-local out of reach.
 var fetchDialContext = guardedDial
 
+// testAllowedAddr, set by tests, is the one address the guard lets through
+// despite being loopback: their own server's. Everything else — including
+// where that server redirects — goes through the full check, which is how
+// the redirect re-checking is tested end to end.
+var testAllowedAddr string
+
 var httpClient = &http.Client{
 	Timeout: 20 * time.Second,
 	// fetches run on the host's network stack, so a wasm napp gets the
@@ -66,8 +72,13 @@ var httpClient = &http.Client{
 
 // guardedDial is net.Dialer.DialContext with an address check after
 // resolution: whatever the hostname resolved to, the connection itself
-// must not target loopback or link-local space.
+// must not target loopback or link-local space. Checking here — per
+// connection, not per url — is what keeps a redirect's target to the same
+// rules as the fetch's own target.
 func guardedDial(ctx context.Context, network, addr string) (net.Conn, error) {
+	if addr == testAllowedAddr {
+		return (&net.Dialer{Timeout: 20 * time.Second}).DialContext(ctx, network, addr)
+	}
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		return nil, err

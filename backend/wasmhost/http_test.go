@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -156,4 +157,46 @@ func plainDialForTests(t *testing.T) func() {
 	old := fetchDialContext
 	fetchDialContext = (&net.Dialer{}).DialContext
 	return func() { fetchDialContext = old }
+}
+
+// allowTestServer keeps the guard fully on and admits exactly one address —
+// the test's own server — so everything else the fetch reaches for, a
+// redirect target included, meets the guard for real.
+func allowTestServer(t *testing.T, srv *httptest.Server) {
+	t.Helper()
+	old := testAllowedAddr
+	testAllowedAddr = srv.Listener.Addr().String()
+	t.Cleanup(func() { testAllowedAddr = old })
+}
+
+// The guard refuses loopback on its own: a fetch aimed straight at this
+// machine never dials, whatever port it names.
+func TestGuardedDialRefusesLoopback(t *testing.T) {
+	_, err := httpFetch([]byte(`{"url":"http://127.0.0.1:9/x"}`))
+	if err == nil || !strings.Contains(err.Error(), "local address") {
+		t.Fatalf("a loopback fetch was not refused by the guard: %v", err)
+	}
+}
+
+// A redirect's target meets the same guard as the fetch's own url: the
+// allowed server answers with a 302 to another loopback server, and the
+// hop toward it must refuse rather than follow. This is the end-to-end
+// proof that re-checking happens per connection, not once per fetch.
+func TestRedirectTargetIsGuarded(t *testing.T) {
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("the redirect target's server was reached")
+		w.WriteHeader(200)
+	}))
+	defer other.Close()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, other.URL+"/secret", http.StatusFound)
+	}))
+	defer srv.Close()
+	allowTestServer(t, srv)
+
+	_, err := httpFetch([]byte(`{"url":"` + srv.URL + `/start"}`))
+	if err == nil || !strings.Contains(err.Error(), "local address") {
+		t.Fatalf("a redirect to a local address was not refused by the guard: %v", err)
+	}
 }
