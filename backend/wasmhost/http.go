@@ -52,6 +52,10 @@ var fetchDialContext = guardedDial
 // despite being loopback: their own server's. Everything else — including
 // where that server redirects — goes through the full check, which is how
 // the redirect re-checking is tested end to end.
+//
+// A plain var, mutated by tests and read from dial goroutines: wasmhost's
+// tests must not run parallel (none do — no t.Parallel in the package), or
+// this and fetchDialContext need to become atomic.
 var testAllowedAddr string
 
 var httpClient = &http.Client{
@@ -75,6 +79,11 @@ var httpClient = &http.Client{
 // must not target loopback or link-local space. Checking here — per
 // connection, not per url — is what keeps a redirect's target to the same
 // rules as the fetch's own target.
+//
+// The test-allowance shortcut must stay ahead of the parse: it compares the
+// raw dial address against the test's server, and in production
+// testAllowedAddr is empty so the shortcut is unreachable and every dial
+// goes through the full check below.
 func guardedDial(ctx context.Context, network, addr string) (net.Conn, error) {
 	if addr == testAllowedAddr {
 		return (&net.Dialer{Timeout: 20 * time.Second}).DialContext(ctx, network, addr)
@@ -305,6 +314,10 @@ func webURL(raw string) (string, error) {
 	if u.Scheme != "https" && u.Scheme != "http" {
 		return "", fmt.Errorf("http_fetch: only http and https urls, not %s:", u.Scheme)
 	}
+	// only the name "localhost" gets an early, friendly refusal here; an IP
+	// literal (or anything else that resolves local) is caught just as dead
+	// by the dial-time guard, which is the real defense — this check exists
+	// so the common case fails with a clearer message.
 	if host := u.Hostname(); host == "localhost" {
 		return "", fmt.Errorf("http_fetch: %q is local, and napps may not fetch it", raw)
 	}
