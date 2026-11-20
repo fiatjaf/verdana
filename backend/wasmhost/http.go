@@ -43,6 +43,12 @@ const maxBody = 16 << 20
 // size.
 const maxSide = 1024
 
+// maxMegapixels is the largest decoded image http_fetch_image will accept,
+// in 1024x1024 units: a decompression bomb's compressed bytes fit the 16MB
+// cap easily, so the header is what has to be checked. 64MP bounds the
+// decoder's allocation to a few hundred MB worst case.
+const maxMegapixels = 64
+
 // fetchDialContext is the dialer http_fetch's client uses. It is a variable
 // so tests can serve from local httptest servers without the guard in the
 // way; the real value keeps loopback and link-local out of reach.
@@ -233,6 +239,20 @@ func httpFetchImage(params []byte) ([]byte, error) {
 	raw, err := readCapped(res.Body)
 	if err != nil {
 		return nil, err
+	}
+
+	// decompression-bomb gate, before decode: the 16MB cap above bounds the
+	// compressed bytes, not the pixels they expand to. DecodeConfig reads
+	// only the header, so a 16MB PNG declaring a hundred-million-pixel
+	// canvas is refused before the decoder allocates for it. (Checking
+	// src.Bounds after image.Decode would be too late - the allocation
+	// happens inside the decode.)
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(raw))
+	if err != nil {
+		return nil, errors.New("http_fetch_image: not an image this launcher can decode")
+	}
+	if int64(cfg.Width)*int64(cfg.Height) > maxMegapixels<<20 {
+		return nil, fmt.Errorf("http_fetch_image: image is too large to decode (%dx%d)", cfg.Width, cfg.Height)
 	}
 
 	src, _, err := image.Decode(bytes.NewReader(raw))

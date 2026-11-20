@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"hash/crc32"
 	"image"
 	"image/color"
 	"image/png"
@@ -149,6 +150,44 @@ func TestWebURLRejectsLocalhost(t *testing.T) {
 	}
 }
 
+// bombPNG is a well-formed PNG header declaring far more pixels than any
+// real image needs: the signature, an IHDR chunk (100000 x 100000, 8-bit
+// RGB) and nothing else. DecodeConfig reads exactly this far, so the test
+// needs no pixel data - it exercises the header gate, not the decoder.
+func bombPNG(t *testing.T) []byte {
+	t.Helper()
+	crc := func(chunk []byte) []byte {
+		table := crc32.MakeTable(crc32.IEEE)
+		return []byte{byte(crc32.Checksum(chunk, table) >> 24),
+			byte(crc32.Checksum(chunk, table) >> 16),
+			byte(crc32.Checksum(chunk, table) >> 8),
+			byte(crc32.Checksum(chunk, table))}
+	}
+	ihdr := []byte{'I', 'H', 'D', 'R',
+		0x00, 0x01, 0x86, 0xA0, // width  100000
+		0x00, 0x01, 0x86, 0xA0, // height 100000
+		8, 2, 0, 0, 0} // 8-bit, truecolor, no interlace
+	png := []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n'}
+	png = append(png, 0, 0, 0, 13)
+	png = append(png, ihdr...)
+	png = append(png, crc(ihdr)...)
+	return png
+}
+
+// A 16MB-compressed body can declare a hundred-million-pixel canvas: the
+// header gate has to refuse it before the decoder allocates for it.
+func TestHTTPFetchImageRejectsDecompressionBomb(t *testing.T) {
+	url := allowTestServer(t, httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		w.Write(bombPNG(t))
+	})))
+
+	_, err := httpFetchImage([]byte(`"` + url + `/bomb.png"`))
+	if err == nil || !strings.Contains(err.Error(), "too large") {
+		t.Fatalf("a decompression bomb was not refused: %v", err)
+	}
+}
+
 // plainDialForTests swaps the fetch guard for an unfiltered dialer for the
 // duration of a test: the tests exercise the proxy against local httptest
 // servers, which the guard exists to keep napps away from. It restores the
@@ -162,11 +201,12 @@ func plainDialForTests(t *testing.T) func() {
 // allowTestServer keeps the guard fully on and admits exactly one address —
 // the test's own server — so everything else the fetch reaches for, a
 // redirect target included, meets the guard for real.
-func allowTestServer(t *testing.T, srv *httptest.Server) {
+func allowTestServer(t *testing.T, srv *httptest.Server) string {
 	t.Helper()
 	old := testAllowedAddr
 	testAllowedAddr = srv.Listener.Addr().String()
 	t.Cleanup(func() { testAllowedAddr = old })
+	return srv.URL
 }
 
 // The guard refuses loopback on its own: a fetch aimed straight at this
