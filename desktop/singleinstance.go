@@ -74,8 +74,11 @@ func startInstanceListener(dataDir string) {
 		log.Warn().Err(err).Msg("no instance listener: shortcuts will start a new launcher")
 		return
 	}
-	if err := os.WriteFile(portFilePath(dataDir), []byte(strconv.Itoa(ln.Addr().(*net.TCPAddr).Port)), 0644); err != nil {
+	// 0600: the file names an IPC endpoint on this user's loopback; another
+	// account on the host has no business reading it.
+	if err := os.WriteFile(portFilePath(dataDir), []byte(strconv.Itoa(ln.Addr().(*net.TCPAddr).Port)), 0600); err != nil {
 		log.Warn().Err(err).Msg("could not write the launcher port file")
+		return
 	}
 	thisPortFile = portFilePath(dataDir)
 
