@@ -77,6 +77,7 @@ func startInstanceListener(dataDir string) {
 	if err := os.WriteFile(portFilePath(dataDir), []byte(strconv.Itoa(ln.Addr().(*net.TCPAddr).Port)), 0644); err != nil {
 		log.Warn().Err(err).Msg("could not write the launcher port file")
 	}
+	thisPortFile = portFilePath(dataDir)
 
 	go func() {
 		defer ln.Close()
@@ -89,6 +90,23 @@ func startInstanceListener(dataDir string) {
 		}
 	}()
 }
+
+// stopInstanceListener takes the port file with the listener on the way out:
+// a dead port and a stale secret should not linger in the data dir until the
+// next run overwrites them. Best effort — an unlinked file nobody needed is
+// the norm, an unremoved one only waits to be overwritten.
+func stopInstanceListener() {
+	if thisPortFile == "" {
+		return
+	}
+	if err := os.Remove(thisPortFile); err != nil && !os.IsNotExist(err) {
+		log.Debug().Err(err).Msg("could not remove the launcher port file")
+	}
+}
+
+// thisPortFile is where this run's port file was written, set by
+// startInstanceListener and read by stopInstanceListener.
+var thisPortFile string
 
 func serveForward(conn net.Conn) {
 	defer conn.Close()
