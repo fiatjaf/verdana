@@ -187,6 +187,7 @@ func main() {
 		backend.CloseAllWindows()
 		killAllShells()
 		closeStores()
+		stopInstanceListener()
 		os.Exit(0)
 	}()
 	app.Main()
