@@ -97,11 +97,23 @@ func main() {
 	runtime.LockOSThread()
 
 	w := webview.New(os.Getenv("WEBVIEW_DEBUG") == "true")
+	wRef = w
 	w.SetTitle(windowTitle(meta.Name, os.Getenv("VERDANA_INSTANCE_ID")))
 	w.SetSize(windowWidth(), windowHeight(), webview.HintNone)
 	_ = w.Bind("__bridge_rpc", rpcBound)
 	_ = w.Bind("__verdana_prompt_answer", promptAnswer)
 	_ = w.Bind("__verdana_nav_violation", navViolation)
+
+	url := meta.URL
+	if url == "" {
+		url = startNappServer(meta.Dir)
+	}
+	// The origin guard MUST run FIRST at document start, before storage/theme,
+	// UIKit, or bridge.js, so off-origin pages and subframes never receive
+	// __nappStorage or host-wide bindings.
+	if guard := nappbridge.OriginGuardScript(nappbridge.ExpectedOrigin(url)); guard != "" {
+		w.Init(guard)
+	}
 
 	// window.name is where bridge.js picks up window.napp.instance, and it
 	// survives same-origin navigations — so a reload keeps the instance id.
@@ -110,24 +122,15 @@ func main() {
 	// window.__nappStorage seeds the localStorage shim: the file is the
 	// per-nappId JSON store the backend persists (native localStorage would
 	// be a fresh empty origin on every launch, random port each time).
-	w.Init("window.name = " + jsString(meta.Instance) + ";" +
-		"window.__nappDomains = " + jsStringSlice(meta.Requires) + ";" +
-		storageInitScript(os.Getenv("VERDANA_NAPP_STORAGE_FILE")) +
-		themeInitScript(meta.Theme, meta.ThemeVars))
+	w.Init(nappbridge.GateToExpectedOrigin(
+		"window.name = " + jsString(meta.Instance) + ";" +
+			"window.__nappDomains = " + jsStringSlice(meta.Requires) + ";" +
+			storageInitScript(os.Getenv("VERDANA_NAPP_STORAGE_FILE")) +
+			themeInitScript(meta.Theme, meta.ThemeVars),
+	))
 	// the napp-ui kit, for the napps that ask for it with requires: ["ui"]
 	if kit := nappbridge.UIKitScript(meta.Requires); kit != "" {
-		w.Init(kit)
-	}
-	// The origin guard goes in ahead of the bridge: it runs at document
-	// start on every navigation, and on the first page that is not on the
-	// origin this shell chose for the napp it disables the bridge before
-	// that page's own scripts get a say (see OriginGuardScript).
-	url := meta.URL
-	if url == "" {
-		url = startNappServer(meta.Dir)
-	}
-	if guard := nappbridge.OriginGuardScript(nappbridge.ExpectedOrigin(url)); guard != "" {
-		w.Init(guard)
+		w.Init(nappbridge.GateToExpectedOrigin(kit))
 	}
 
 	// the very same bridge.js the Android app injects
@@ -135,7 +138,6 @@ func main() {
 
 	w.Navigate(url)
 
-	wRef = w
 	go reader(w)
 
 	w.Run()
@@ -401,12 +403,15 @@ func promptAnswer(id int, ok bool, scope string, skip []int) {
 	writeMsg(wireMsg{T: "promptAnswer", ID: id, Params: string(b)})
 }
 
-// navViolation is what the origin guard calls when the window has landed
-// somewhere other than the napp's own origin. It answers synchronously so
-// the flag is up before the guard's caller — and any script after it — can
-// use the bridge, then reports to the launcher and strips the bindings.
+// navViolation is what the origin guard calls when the main frame has landed
+// somewhere other than the napp's own origin. go-webview runs bound callbacks
+// asynchronously in a goroutine (the guard script synchronously deletes the
+// JS bindings first); this permanently disables host-side RPCs, reports the
+// violation once, and unbinds the native bindings.
 func navViolation() string {
-	navViolated.Store(true)
+	if navViolated.Swap(true) {
+		return ""
+	}
 	writeMsg(wireMsg{T: "navViolation"})
 	if wRef != nil {
 		wRef.Dispatch(func() {
