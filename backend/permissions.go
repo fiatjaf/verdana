@@ -86,10 +86,11 @@ func (k RuleKey) String() string {
 }
 
 // ruleID is the key as state.json files it. Napp ids and action names are
-// whatever the network said, so the parts are joined with a separator neither
-// can hold rather than with a readable one.
+// network-controlled, so embedded \x1f bytes are stripped before joining to
+// prevent a crafted napp id or subject from colliding with another key.
 func (k RuleKey) ruleID() string {
-	return strings.Join([]string{k.Napp, string(k.Permission), k.Subject}, "\x1f")
+	clean := func(s string) string { return strings.ReplaceAll(s, "\x1f", "") }
+	return strings.Join([]string{clean(k.Napp), clean(string(k.Permission)), clean(k.Subject)}, "\x1f")
 }
 
 func ruleKeyFromID(id string) RuleKey {

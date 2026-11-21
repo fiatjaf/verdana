@@ -35,7 +35,7 @@ func IsLink(link string) bool {
 		return true
 	}
 	u, err := url.Parse(link)
-	return err == nil && (u.Scheme == "https" || u.Scheme == "http") &&
+	return err == nil && strings.EqualFold(u.Scheme, "https") &&
 		strings.TrimPrefix(strings.ToLower(u.Host), "www.") == nostrAppsHost
 }
 
@@ -50,7 +50,7 @@ func OpenLink(link string) error {
 	if err != nil {
 		return err
 	}
-	if strings.TrimPrefix(strings.ToLower(u.Host), "www.") != nostrAppsHost {
+	if !strings.EqualFold(u.Scheme, "https") || strings.TrimPrefix(strings.ToLower(u.Host), "www.") != nostrAppsHost {
 		return errors.New("not a link verdana opens")
 	}
 	return openNostrAppsLink(u.Fragment)
@@ -199,8 +199,13 @@ func previewAndDispatch(ctx context.Context, e linkEntry) error {
 	if devLookup(n.ID) == nil {
 		if local, ok := InstalledNapp(n.ID); ok {
 			n = local
-		} else if err := downloadPreview(ctx, n); err != nil {
-			return err
+		} else {
+			if !confirmLinkPreview(n) {
+				return errors.New("opening link napp was denied")
+			}
+			if err := downloadPreview(ctx, n); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -209,6 +214,26 @@ func previewAndDispatch(ctx context.Context, e linkEntry) error {
 		actions[i] = resolveLinkAction(ctx, act)
 	}
 	return openAndDispatch(ctx, n, actions)
+}
+
+// confirmLinkPreview asks the user before downloading and executing an
+// uninstalled napp referenced by an external nostrapps.com deep link.
+func confirmLinkPreview(n Napp) bool {
+	label := n.Label()
+	if label == "" {
+		label = n.ID
+	}
+	detail := "A link wants to download and run “" + label + "”, which is not installed on this device."
+	if n.AuthorName != "" {
+		detail += " Published by " + n.AuthorName + "."
+	}
+	p := newPrompt("launcher", "Open untrusted napp from link?", PromptBody{
+		Detail: detail,
+		Code:   n.ID,
+	}, nil)
+	log.Info().Str("napp", n.ID).Msg("asking user before previewing napp from link")
+	enqueuePrompt(p)
+	return p.wait().OK
 }
 
 // nappFromRef fetches the napp an naddr or nevent points at.

@@ -1,23 +1,21 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"errors"
-	"image"
-	_ "image/gif"
-	_ "image/jpeg"
-	_ "image/png"
 	"io"
 	"net/http"
 	"sync"
 	"sync/atomic"
 	"time"
 	"verdana/backend"
+	"verdana/backend/wasmhost"
 
 	"gioui.org/op/paint"
 	"github.com/dgraph-io/ristretto/v2"
 )
+
+const maxCachedImageBytes = 16 << 20
 
 type imgEntry struct {
 	once   sync.Once
@@ -74,7 +72,7 @@ func cachedImage(key string, load func(context.Context) ([]byte, error)) (paint.
 				e.failed.Store(true)
 				return
 			}
-			img, _, err := image.Decode(bytes.NewReader(data))
+			img, err := wasmhost.SafeDecodeImage(data)
 			if err != nil {
 				log.Error().Err(err).Str("image", key).Msg("image decode failed")
 				e.failed.Store(true)
@@ -93,14 +91,19 @@ func cachedImage(key string, load func(context.Context) ([]byte, error)) (paint.
 	return paint.ImageOp{}, false
 }
 
-// getImage loads an image off the web (profile pictures and the like).
+// getImage loads an image off the web (profile pictures and prompt previews)
+// using the SSRF-guarded HTTP client and a 16MB body cap.
 func getImage(url string) (paint.ImageOp, bool) {
 	return cachedImage(url, func(ctx context.Context) ([]byte, error) {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		target, err := wasmhost.ValidateWebURL(url)
 		if err != nil {
 			return nil, err
 		}
-		resp, err := http.DefaultClient.Do(req)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+		if err != nil {
+			return nil, err
+		}
+		resp, err := wasmhost.GuardedHTTPClient().Do(req)
 		if err != nil {
 			return nil, err
 		}
@@ -108,7 +111,14 @@ func getImage(url string) (paint.ImageOp, bool) {
 		if resp.StatusCode != http.StatusOK {
 			return nil, errors.New("status " + resp.Status)
 		}
-		return io.ReadAll(resp.Body)
+		data, err := io.ReadAll(io.LimitReader(resp.Body, maxCachedImageBytes+1))
+		if err != nil {
+			return nil, err
+		}
+		if len(data) > maxCachedImageBytes {
+			return nil, errors.New("image exceeds size limit")
+		}
+		return data, nil
 	})
 }
 
