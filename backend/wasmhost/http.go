@@ -16,6 +16,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strings"
 	"time"
@@ -43,11 +44,22 @@ const maxBody = 16 << 20
 // size.
 const maxSide = 1024
 
-// maxMegapixels is the largest decoded image http_fetch_image will accept,
-// in 1024x1024 units: a decompression bomb's compressed bytes fit the 16MB
-// cap easily, so the header is what has to be checked. 64MP bounds the
-// decoder's allocation to a few hundred MB worst case.
-const maxMegapixels = 64
+// maxMegapixels is the largest decoded image accepted, in 1024x1024 units:
+// a decompression bomb's compressed bytes fit the 16MB cap easily, so the
+// header is what has to be checked. 16MP bounds the decoder's allocation
+// to ~128MB worst case even for 16-bit/channel images.
+const maxMegapixels = 16
+
+// maxImageDim caps either image axis so int64(w)*int64(h) cannot overflow
+// and extreme strip images are rejected before allocation.
+const maxImageDim = 16384
+
+// fetchSem bounds concurrent in-flight fetches/decodes so a napp cannot
+// trigger OOM by issuing hundreds of parallel requests.
+var fetchSem = make(chan struct{}, 8)
+
+// fetchPending bounds queued fetch goroutines waiting for fetchSem.
+var fetchPending = make(chan struct{}, 64)
 
 // fetchDialContext is the dialer http_fetch's client uses. It is a variable
 // so tests can serve from local httptest servers without the guard in the
@@ -78,6 +90,69 @@ var httpClient = &http.Client{
 			return fetchDialContext(ctx, network, addr)
 		},
 	},
+	CheckRedirect: checkRedirect,
+}
+
+func checkRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	if _, err := webURL(req.URL.String()); err != nil {
+		return err
+	}
+	prev := via[len(via)-1].URL
+	if strings.EqualFold(prev.Scheme, "https") && !strings.EqualFold(req.URL.Scheme, "https") {
+		return errors.New("http_fetch: refusing redirect downgrade from https to " + req.URL.Scheme)
+	}
+	if !sameOrigin(prev, req.URL) {
+		req.Header.Del("Authorization")
+		req.Header.Del("Proxy-Authorization")
+		req.Header.Del("Cookie")
+	}
+	return nil
+}
+
+func sameOrigin(a, b *url.URL) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	return strings.EqualFold(a.Scheme, b.Scheme) && strings.EqualFold(a.Host, b.Host)
+}
+
+// GuardedHTTPClient returns the SSRF-guarded HTTP client shared across
+// untrusted fetches (wasm http_fetch, prompt image previews, etc.).
+func GuardedHTTPClient() *http.Client { return httpClient }
+
+// GuardedDialContext dials network/addr only after verifying every resolved
+// IP is permitted by IsForbiddenIP.
+func GuardedDialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	return fetchDialContext(ctx, network, addr)
+}
+
+// ValidateWebURL validates that raw is an http(s) URL not targeting localhost.
+func ValidateWebURL(raw string) (string, error) { return webURL(raw) }
+
+// SafeDecodeImage checks image dimensions before decoding to block
+// decompression bombs, then decodes and verifies non-empty bounds.
+func SafeDecodeImage(raw []byte) (image.Image, error) {
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(raw))
+	if err != nil {
+		return nil, errors.New("http_fetch_image: not an image this launcher can decode")
+	}
+	if cfg.Width <= 0 || cfg.Height <= 0 ||
+		cfg.Width > maxImageDim || cfg.Height > maxImageDim ||
+		int64(cfg.Width)*int64(cfg.Height) > maxMegapixels<<20 {
+		return nil, fmt.Errorf("http_fetch_image: image is too large to decode (%dx%d)", cfg.Width, cfg.Height)
+	}
+	src, _, err := image.Decode(bytes.NewReader(raw))
+	if err != nil {
+		return nil, errors.New("http_fetch_image: not an image this launcher can decode")
+	}
+	sb := src.Bounds()
+	if sb.Dx() <= 0 || sb.Dy() <= 0 {
+		return nil, errors.New("http_fetch_image: the image is empty")
+	}
+	return src, nil
 }
 
 // guardedDial is net.Dialer.DialContext with an address check after
@@ -113,11 +188,54 @@ func guardedDial(ctx context.Context, network, addr string) (net.Conn, error) {
 	return (&net.Dialer{Timeout: 20 * time.Second}).DialContext(ctx, network, net.JoinHostPort(ips[0].IP.String(), port))
 }
 
-// isForbiddenIP reports addresses a napp's fetch must not touch: this
-// machine (loopback) and the link-local ranges where DHCP networks and
-// cloud metadata endpoints live.
+var (
+	nat64WellKnown = netip.MustParsePrefix("64:ff9b::/96")
+	nat64Local     = netip.MustParsePrefix("64:ff9b:1::/48")
+)
+
+// IsForbiddenIP reports addresses a napp's fetch must not touch: loopback,
+// link-local (DHCP / cloud metadata), multicast, unspecified, IPv4-mapped /
+// IPv4-compatible IPv6 encodings of forbidden IPv4 addresses, and NAT64
+// prefixes embedding forbidden IPv4 targets.
+func IsForbiddenIP(ip net.IP) bool {
+	return isForbiddenIP(ip)
+}
+
 func isForbiddenIP(ip net.IP) bool {
-	return ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified()
+	if ip == nil {
+		return true
+	}
+	if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified() {
+		return true
+	}
+	addr, ok := netip.AddrFromSlice(ip)
+	if !ok {
+		return true
+	}
+	addr = addr.Unmap()
+	if addr.Is4() {
+		v4 := addr.As4()
+		raw := net.IP(v4[:])
+		return raw.IsLoopback() || raw.IsLinkLocalUnicast() || raw.IsLinkLocalMulticast() || raw.IsMulticast() || raw.IsUnspecified()
+	}
+	// IPv6 forms that embed an IPv4 address in the low 32 bits:
+	// - IPv4-compatible IPv6 (::/96, deprecated RFC 4291)
+	// - NAT64 well-known (64:ff9b::/96) and local-use (64:ff9b:1::/48)
+	b := addr.As16()
+	isV4Compat := true
+	for i := 0; i < 12; i++ {
+		if b[i] != 0 {
+			isV4Compat = false
+			break
+		}
+	}
+	if isV4Compat || nat64WellKnown.Contains(addr) || nat64Local.Contains(addr) {
+		embedded := net.IPv4(b[12], b[13], b[14], b[15])
+		if isForbiddenIP(embedded) {
+			return true
+		}
+	}
+	return false
 }
 
 // httpCall answers http_fetch and http_fetch_image; ok is false for every
@@ -125,12 +243,26 @@ func isForbiddenIP(ip net.IP) bool {
 func (b *Bridge) httpCall(id int32, method string, params []byte) (ok bool) {
 	switch method {
 	case "http_fetch":
+		select {
+		case fetchPending <- struct{}{}:
+		default:
+			b.answer(id, nil, errors.New("http_fetch: too many concurrent requests"))
+			return true
+		}
 		go func() {
+			defer func() { <-fetchPending }()
 			result, err := httpFetch(params)
 			b.answer(id, result, err)
 		}()
 	case "http_fetch_image":
+		select {
+		case fetchPending <- struct{}{}:
+		default:
+			b.answer(id, nil, errors.New("http_fetch_image: too many concurrent requests"))
+			return true
+		}
 		go func() {
+			defer func() { <-fetchPending }()
 			bitmap, err := httpFetchImage(params)
 			if err != nil {
 				b.answer(id, nil, err)
@@ -161,6 +293,9 @@ type httpFetchResult struct {
 }
 
 func httpFetch(params []byte) (*httpFetchResult, error) {
+	fetchSem <- struct{}{}
+	defer func() { <-fetchSem }()
+
 	var p httpFetchParams
 	if err := unmarshalURLParams(params, &p.URL, &p); err != nil {
 		return nil, errors.New("http_fetch: params must be {url, method?, headers?, body?}")
@@ -220,6 +355,9 @@ type httpImageParams struct {
 // message's bytes: width and height as little-endian uint32s, then RGBA rows
 // top-down, alpha not premultiplied.
 func httpFetchImage(params []byte) ([]byte, error) {
+	fetchSem <- struct{}{}
+	defer func() { <-fetchSem }()
+
 	var p httpImageParams
 	if err := unmarshalURLParams(params, &p.URL, &p); err != nil {
 		return nil, errors.New("http_fetch_image: params must be {url, width?, height?, fit?}")
@@ -241,28 +379,13 @@ func httpFetchImage(params []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	// decompression-bomb gate, before decode: the 16MB cap above bounds the
-	// compressed bytes, not the pixels they expand to. DecodeConfig reads
-	// only the header, so a 16MB PNG declaring a hundred-million-pixel
-	// canvas is refused before the decoder allocates for it. (Checking
-	// src.Bounds after image.Decode would be too late - the allocation
-	// happens inside the decode.)
-	cfg, _, err := image.DecodeConfig(bytes.NewReader(raw))
+	// decompression-bomb gate, before decode: SafeDecodeImage inspects
+	// DecodeConfig first so huge canvases are refused before allocation.
+	src, err := SafeDecodeImage(raw)
 	if err != nil {
-		return nil, errors.New("http_fetch_image: not an image this launcher can decode")
-	}
-	if int64(cfg.Width)*int64(cfg.Height) > maxMegapixels<<20 {
-		return nil, fmt.Errorf("http_fetch_image: image is too large to decode (%dx%d)", cfg.Width, cfg.Height)
-	}
-
-	src, _, err := image.Decode(bytes.NewReader(raw))
-	if err != nil {
-		return nil, errors.New("http_fetch_image: not an image this launcher can decode")
+		return nil, err
 	}
 	sb := src.Bounds()
-	if sb.Dx() <= 0 || sb.Dy() <= 0 {
-		return nil, errors.New("http_fetch_image: the image is empty")
-	}
 	from, w, h := placement(sb, p)
 
 	// NRGBA is unpremultiplied, which is what the message carries; draw
@@ -331,14 +454,14 @@ func webURL(raw string) (string, error) {
 	if err != nil || u.Host == "" {
 		return "", fmt.Errorf("http_fetch: not a url: %q", raw)
 	}
-	if u.Scheme != "https" && u.Scheme != "http" {
+	scheme := strings.ToLower(u.Scheme)
+	if scheme != "https" && scheme != "http" {
 		return "", fmt.Errorf("http_fetch: only http and https urls, not %s:", u.Scheme)
 	}
-	// only the name "localhost" gets an early, friendly refusal here; an IP
-	// literal (or anything else that resolves local) is caught just as dead
-	// by the dial-time guard, which is the real defense — this check exists
-	// so the common case fails with a clearer message.
-	if host := u.Hostname(); host == "localhost" {
+	// Normalize case and trailing DNS root dot so LOCALHOST, localhost.,
+	// and *.localhost are all refused early alongside the dial-time IP guard.
+	host := strings.TrimSuffix(strings.ToLower(u.Hostname()), ".")
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
 		return "", fmt.Errorf("http_fetch: %q is local, and napps may not fetch it", raw)
 	}
 	return u.String(), nil

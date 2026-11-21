@@ -125,15 +125,26 @@ func TestHTTPFetch(t *testing.T) {
 
 func TestIsForbiddenIP(t *testing.T) {
 	for ip, want := range map[string]bool{
-		"127.0.0.1":         true,
-		"::1":               true,
-		"0.0.0.0":           true,
-		"169.254.169.254":   true,
-		"fe80::1":           true,
-		"8.8.8.8":           false,
-		"192.168.1.10":      false,
-		"10.0.0.2":          false,
-		"2620:0:2d0:200::7": false,
+		"127.0.0.1":               true,
+		"::1":                     true,
+		"0.0.0.0":                 true,
+		"::":                      true,
+		"169.254.169.254":         true,
+		"fe80::1":                 true,
+		"224.0.0.1":               true,
+		"ff02::1":                 true,
+		"::ffff:127.0.0.1":        true,
+		"::ffff:169.254.169.254":  true,
+		"::127.0.0.1":             true,
+		"::169.254.169.254":       true,
+		"64:ff9b::127.0.0.1":      true,
+		"64:ff9b::169.254.169.254": true,
+		"64:ff9b:1::127.0.0.1":    true,
+		"8.8.8.8":                 false,
+		"192.168.1.10":            false,
+		"10.0.0.2":                false,
+		"2620:0:2d0:200::7":       false,
+		"64:ff9b::8.8.8.8":        false,
 	} {
 		if got := isForbiddenIP(net.ParseIP(ip)); got != want {
 			t.Errorf("isForbiddenIP(%s) = %v, want %v", ip, got, want)
@@ -142,11 +153,41 @@ func TestIsForbiddenIP(t *testing.T) {
 }
 
 func TestWebURLRejectsLocalhost(t *testing.T) {
-	if _, err := webURL("http://localhost:8080/x"); err == nil {
-		t.Error("webURL(http://localhost:8080/x) should reject localhost")
+	for _, bad := range []string{
+		"http://localhost:8080/x",
+		"HTTP://LOCALHOST:8080/x",
+		"https://LocalHost./x",
+		"http://sub.localhost:9000/x",
+		"http://foo.LOCALHOST./x",
+		"file:///etc/passwd",
+	} {
+		if _, err := webURL(bad); err == nil {
+			t.Errorf("webURL(%q) should have been rejected", bad)
+		}
 	}
 	if _, err := webURL("https://relay.example.com"); err != nil {
 		t.Errorf("webURL(https://relay.example.com) = %v, want nil", err)
+	}
+}
+
+func TestCheckRedirectBlocksDowngradeAndStripsAuth(t *testing.T) {
+	orig, _ := http.NewRequest("GET", "https://a.example/start", nil)
+	orig.Header.Set("Authorization", "Bearer secret")
+	orig.Header.Set("Cookie", "sid=1")
+
+	downgrade, _ := http.NewRequest("GET", "http://a.example/next", nil)
+	if err := checkRedirect(downgrade, []*http.Request{orig}); err == nil {
+		t.Fatal("expected https->http redirect downgrade to be rejected")
+	}
+
+	cross, _ := http.NewRequest("GET", "https://b.example/next", nil)
+	cross.Header.Set("Authorization", "Bearer secret")
+	cross.Header.Set("Cookie", "sid=1")
+	if err := checkRedirect(cross, []*http.Request{orig}); err != nil {
+		t.Fatalf("unexpected error on https->https redirect: %v", err)
+	}
+	if cross.Header.Get("Authorization") != "" || cross.Header.Get("Cookie") != "" {
+		t.Fatal("expected Authorization and Cookie to be stripped on cross-origin redirect")
 	}
 }
 
