@@ -16,3 +16,6 @@ desktop/dist
 desktop/release
 build-flatpak
 .flatpak-builder
+
+# the launcher runtime state, never tracked
+backend/state.json

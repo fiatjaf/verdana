@@ -18,7 +18,7 @@
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:allowBackup="false"
-        android:usesCleartextTraffic="true"
+        android:networkSecurityConfig="@xml/network_security_config"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
         <!-- the launcher: login, the napp lists, the profile. Every napp is
              a window of its own (see NappActivity), never a screen here. -->

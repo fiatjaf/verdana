@@ -53,15 +53,43 @@ func SanitizeFilename(raw string) string {
 		}
 		return r
 	}, base)
-	cleaned = strings.TrimLeft(cleaned, ".") // no ".." and no accidental dotfiles
-	cleaned = strings.TrimSpace(cleaned)
-	if len(cleaned) > 200 {
-		cleaned = cleaned[:200]
+	// Loop trim so inputs like " .." or " .bashrc" or "foo. " cannot smuggle
+	// leading dots/spaces or trailing dots/spaces past a single pass.
+	for {
+		next := strings.TrimSpace(cleaned)
+		next = strings.TrimLeft(next, ".")
+		next = strings.TrimRight(next, ". ")
+		if next == cleaned {
+			break
+		}
+		cleaned = next
 	}
-	if cleaned == "" {
+	if len(cleaned) > 200 {
+		cleaned = strings.TrimRight(cleaned[:200], ". ")
+	}
+	if cleaned == "" || cleaned == "." || cleaned == ".." {
 		return "download"
 	}
+	// Avoid Windows reserved DOS device names (CON, PRN, AUX, NUL, COM1-9, LPT1-9).
+	stem := cleaned
+	if dot := strings.IndexByte(stem, '.'); dot >= 0 {
+		stem = stem[:dot]
+	}
+	if isWindowsReservedName(stem) {
+		cleaned = "_" + cleaned
+	}
 	return cleaned
+}
+
+func isWindowsReservedName(stem string) bool {
+	upper := strings.ToUpper(strings.TrimSpace(stem))
+	switch upper {
+	case "CON", "PRN", "AUX", "NUL",
+		"COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+		"LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9":
+		return true
+	}
+	return false
 }
 
 // saveFileForNapp hands the bytes a napp gave us to the platform. The data
@@ -100,17 +128,27 @@ func copyTextForNapp(text string) (map[string]any, error) {
 // openExternalLink hands a url to the platform's browser. Napps can't
 // navigate out of their own webview, so this is the only way out — and it is
 // behind an approval prompt in the bridge.
-func openExternalLink(url string) error {
-	url = strings.TrimSpace(url)
-	if url == "" {
+func openExternalLink(raw string) error {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
 		return errors.New("empty url")
 	}
-	lower := strings.ToLower(url)
-	if !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://") {
+	for _, r := range raw {
+		if r <= 0x20 || r == 0x7f {
+			return errors.New("invalid characters in url")
+		}
+	}
+	u, err := neturl.Parse(raw)
+	if err != nil || u.Host == "" || u.Hostname() == "" {
+		return errors.New("invalid url")
+	}
+	scheme := strings.ToLower(u.Scheme)
+	if scheme != "http" && scheme != "https" {
 		return errors.New("only http(s) links can be opened")
 	}
-	log.Info().Str("url", url).Msg("opening external link")
-	return host.OpenLink(url)
+	safe := u.String()
+	log.Info().Str("url", safe).Msg("opening external link")
+	return host.OpenLink(safe)
 }
 
 // imageExts are the extensions napp.link takes for an image.

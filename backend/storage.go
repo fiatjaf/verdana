@@ -1,6 +1,8 @@
 package backend
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"os"
@@ -26,10 +28,20 @@ type nappStorage struct {
 
 var storages = xsync.NewMapOf[string, *nappStorage]()
 
-// storageFileFor maps a napp id to its storage file. Napp ids are
-// "<16hex>~<d-tag>" or "dev~<id>": the d-tag is author-controlled and may
-// contain slashes, so anything outside a safe alphabet is escaped.
+// storageFileFor maps a napp id to a collision-free storage file. Napp ids
+// contain author-controlled d-tags, so appending a SHA-256 digest suffix
+// prevents two distinct napp IDs whose sanitized prefixes match (e.g. "a/b"
+// vs "a_b") from sharing a localStorage file.
 func storageFileFor(nappID string) string {
+	sum := sha256.Sum256([]byte(nappID))
+	return filepath.Join(dataDir, "storage", safeStoragePrefix(nappID)+"-"+hex.EncodeToString(sum[:8])+".json")
+}
+
+func legacyStorageFileFor(nappID string) string {
+	return filepath.Join(dataDir, "storage", safeStoragePrefix(nappID)+".json")
+}
+
+func safeStoragePrefix(nappID string) string {
 	var b strings.Builder
 	for _, r := range nappID {
 		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' ||
@@ -40,12 +52,14 @@ func storageFileFor(nappID string) string {
 		}
 	}
 	name := b.String()
-	if name == "" {
+	if name == "" || name == "." || name == ".." {
 		name = "_"
 	}
-	// belt and suspenders against ".." tricks: filepath.Base strips separators
 	name = filepath.Base(name)
-	return filepath.Join(dataDir, "storage", name+".json")
+	if len(name) > 80 {
+		name = name[:80]
+	}
+	return name
 }
 
 // StorageFile is the path of a napp's localStorage file, so platforms that
@@ -59,9 +73,13 @@ func storageFor(nappID string) *nappStorage {
 
 func loadStorage(nappID string) *nappStorage {
 	s := &nappStorage{data: make(map[string]string)}
-	// read the JSON file into memory on first access; missing/corrupt
-	// means start empty rather than fail the window
-	if raw, err := os.ReadFile(storageFileFor(nappID)); err == nil && len(raw) > 0 {
+	// read the JSON file into memory on first access; fall back to the legacy
+	// unsuffixed filename once if a pre-migration file exists on disk.
+	raw, err := os.ReadFile(storageFileFor(nappID))
+	if err != nil && os.IsNotExist(err) {
+		raw, err = os.ReadFile(legacyStorageFileFor(nappID))
+	}
+	if err == nil && len(raw) > 0 {
 		var disk map[string]string
 		if err := json.Unmarshal(raw, &disk); err == nil {
 			for k, v := range disk {
@@ -74,6 +92,13 @@ func loadStorage(nappID string) *nappStorage {
 		}
 	}
 	return s
+}
+
+// deleteStorage removes a napp's persisted and in-memory localStorage.
+func deleteStorage(nappID string) {
+	storages.Delete(nappID)
+	_ = os.Remove(storageFileFor(nappID))
+	_ = os.Remove(legacyStorageFileFor(nappID))
 }
 
 // storageSnapshot returns a copy of a napp's store for injection at
@@ -101,7 +126,7 @@ func StorageSnapshotJSON(nappID string) string {
 
 func storagePersistLocked(nappID string, data map[string]string) {
 	dir := filepath.Join(dataDir, "storage")
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0700); err != nil {
 		log.Error().Err(err).Msg("could not create storage dir")
 		return
 	}
