@@ -10,23 +10,24 @@ import (
 
 // signRelayAuth signs a NIP-42 AUTH event as the logged-in user.
 func signRelayAuth(ctx context.Context, evt *nostr.Event) error {
-	if userKeyer == nil {
+	k, _ := currentKeyer()
+	if k == nil {
 		return errors.New("not logged in")
 	}
-	return userKeyer.SignEvent(ctx, evt)
+	return k.SignEvent(ctx, evt)
 }
 
 // applyReadAuth decides whether relays that answer "auth-required:" to a
 // query or a subscription get an AUTH: only with someone logged in and the
-// user not having turned it off. The pool's handler is left nil otherwise,
-// rather than one that refuses, because a relay connection only ever tries
-// AUTH once: a refused one would keep a later publish from authenticating.
+// user having explicitly opted in. Read auth defaults OFF so untrusted napps
+// cannot silently trigger NIP-42 kind:22242 signing against arbitrary relays.
 func applyReadAuth() {
 	stateMu.Lock()
-	off := state.NoReadAuth
+	on := state.ReadAuth
 	stateMu.Unlock()
 
-	if userKeyer != nil && !off {
+	k, _ := currentKeyer()
+	if k != nil && on {
 		sys.Pool.AuthRequiredHandler = signRelayAuth
 	} else {
 		sys.Pool.AuthRequiredHandler = nil
@@ -37,15 +38,15 @@ func applyReadAuth() {
 func ReadAuth() bool {
 	stateMu.Lock()
 	defer stateMu.Unlock()
-	return !state.NoReadAuth
+	return state.ReadAuth
 }
 
 // SetReadAuth turns authenticating to relays when reading on or off.
 // Publishing authenticates regardless.
 func SetReadAuth(on bool) {
 	stateMu.Lock()
-	changed := state.NoReadAuth == on
-	state.NoReadAuth = !on
+	changed := state.ReadAuth != on
+	state.ReadAuth = on
 	if changed {
 		saveState()
 	}
@@ -60,13 +61,26 @@ func SetReadAuth(on bool) {
 
 // publishToRelays is sys.Pool.PublishMany, but a relay that answers
 // "auth-required:" always gets an AUTH from the logged-in user and the event
-// again, whatever the read auth setting says.
+// again, whatever the read auth setting says. Forbidden local relay URLs are
+// refused before dialing.
 func publishToRelays(ctx context.Context, urls []string, evt nostr.Event) chan nostr.PublishResult {
 	out := make(chan nostr.PublishResult, len(urls))
 	go func() {
 		defer close(out)
-		for res := range sys.Pool.PublishMany(ctx, urls, evt) {
-			if res.Error != nil && res.Relay != nil && userKeyer != nil &&
+		allowed := make([]string, 0, len(urls))
+		for _, u := range urls {
+			if err := isAllowedRelayURL(ctx, u); err != nil {
+				out <- nostr.PublishResult{RelayURL: u, Error: err}
+				continue
+			}
+			allowed = append(allowed, u)
+		}
+		if len(allowed) == 0 {
+			return
+		}
+		for res := range sys.Pool.PublishMany(ctx, allowed, evt) {
+			k, _ := currentKeyer()
+			if res.Error != nil && res.Relay != nil && k != nil &&
 				strings.HasPrefix(res.Error.Error(), "msg: auth-required:") {
 				if err := res.Relay.Auth(ctx, signRelayAuth); err != nil {
 					res.Error = errors.New("failed to auth: " + err.Error())

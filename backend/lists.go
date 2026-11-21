@@ -766,6 +766,10 @@ func loadRelayInfo(ctx context.Context, url string) map[string]any {
 
 	fetchCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
+	if err := isAllowedRelayURL(fetchCtx, normalized); err != nil {
+		log.Warn().Err(err).Str("relay", normalized).Msg("refused loadRelayInfo for forbidden address")
+		return nil
+	}
 	info, err := nip11.Fetch(fetchCtx, normalized)
 	if err != nil {
 		log.Debug().Err(err).Str("relay", normalized).Msg("loadRelayInfo failed")

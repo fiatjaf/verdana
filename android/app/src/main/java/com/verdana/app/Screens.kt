@@ -210,6 +210,12 @@ fun LoginScreen(activity: MainActivity, st: LauncherState) {
         OutlinedButton(onClick = { activity.loginWithGoogle() }, modifier = Modifier.fillMaxWidth()) {
             Text("Log in with Google", color = theme.fg)
         }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "Uses Pomegranate remote signing; first-time setup publishes a salted hash of your email (kind:16440) to public relays.",
+            color = theme.muted,
+            style = MaterialTheme.typography.bodySmall,
+        )
         if (st.loginStatus.isNotBlank()) {
             Spacer(Modifier.height(8.dp))
             Text(st.loginStatus, color = theme.subtle, style = MaterialTheme.typography.bodySmall)
@@ -1583,8 +1589,19 @@ private fun Napp.iconHash(): String = paths.firstOrNull { p ->
     icon.isNotBlank() && p.path.trimStart('/') == icon.trimStart('/')
 }?.sha256 ?: ""
 
-private fun ByteArray.decodeBitmap(): ImageBitmap? =
-    BitmapFactory.decodeByteArray(this, 0, size)?.asImageBitmap()
+private const val MAX_IMAGE_BYTES = 16 * 1024 * 1024
+private const val MAX_IMAGE_PIXELS = 16L * 1024 * 1024
+private const val MAX_IMAGE_DIM = 16384
+
+private fun ByteArray.decodeBitmap(): ImageBitmap? {
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeByteArray(this, 0, size, bounds)
+    val w = bounds.outWidth
+    val h = bounds.outHeight
+    if (w <= 0 || h <= 0 || w > MAX_IMAGE_DIM || h > MAX_IMAGE_DIM) return null
+    if (w.toLong() * h.toLong() > MAX_IMAGE_PIXELS) return null
+    return BitmapFactory.decodeByteArray(this, 0, size)?.asImageBitmap()
+}
 
 @Composable
 private fun NappIcon(img: ImageBitmap?, theme: Theme, size: Int) {
@@ -1623,19 +1640,95 @@ fun Avatar(url: String, theme: Theme, size: Int) {
     }
 }
 
-// fetchImageBitmap pulls a profile picture off the web once. Call it from a
-// background dispatcher only.
-private fun fetchImageBitmap(url: String): ImageBitmap? = try {
-    val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
-    conn.connectTimeout = 8000
-    conn.readTimeout = 8000
-    conn.instanceFollowRedirects = true
-    if (conn.responseCode == 200) {
-        val bytes = conn.inputStream.use { it.readBytes() }
-        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
-    } else null
-} catch (_: Exception) {
-    null
+private fun isForbiddenAddress(addr: java.net.InetAddress): Boolean {
+    if (addr.isLoopbackAddress ||
+        addr.isLinkLocalAddress ||
+        addr.isAnyLocalAddress ||
+        addr.isMulticastAddress
+    ) {
+        return true
+    }
+    val bytes = addr.address
+    if (bytes.size == 16) {
+        val isV4Compat = (0 until 12).all { bytes[it] == 0.toByte() }
+        val isV4Mapped = (0 until 10).all { bytes[it] == 0.toByte() } &&
+            bytes[10] == 0xff.toByte() && bytes[11] == 0xff.toByte()
+        val isNat64WellKnown = bytes[0] == 0x00.toByte() && bytes[1] == 0x64.toByte() &&
+            bytes[2] == 0xff.toByte() && bytes[3] == 0x9b.toByte() &&
+            (4 until 12).all { bytes[it] == 0.toByte() }
+        val isNat64Local = bytes[0] == 0x00.toByte() && bytes[1] == 0x64.toByte() &&
+            bytes[2] == 0xff.toByte() && bytes[3] == 0x9b.toByte() &&
+            bytes[4] == 0x00.toByte() && bytes[5] == 0x01.toByte()
+        if (isV4Compat || isV4Mapped || isNat64WellKnown || isNat64Local) {
+            val embedded = java.net.InetAddress.getByAddress(bytes.copyOfRange(12, 16))
+            return isForbiddenAddress(embedded)
+        }
+    }
+    return false
+}
+
+private fun validateImageURL(raw: String, prevScheme: String? = null): java.net.URL? {
+    val parsed = java.net.URL(raw.trim())
+    val scheme = parsed.protocol.lowercase()
+    if (scheme != "https" && scheme != "http") return null
+    if (prevScheme == "https" && scheme != "https") return null
+    val host = parsed.host.trimEnd('.').lowercase()
+    if (host.isEmpty() || host == "localhost" || host.endsWith(".localhost")) return null
+    val addrs = java.net.InetAddress.getAllByName(host)
+    if (addrs.isEmpty() || addrs.any { isForbiddenAddress(it) }) return null
+    return parsed
+}
+
+// fetchImageBitmap pulls a profile picture or prompt image off the web with
+// SSRF validation on every redirect hop, a 16MB body cap, and a header-first
+// decompression-bomb gate. Call it from a background dispatcher only.
+private fun fetchImageBitmap(url: String): ImageBitmap? {
+    return try {
+        var current = validateImageURL(url) ?: return null
+        var conn: java.net.HttpURLConnection? = null
+        try {
+            for (hop in 0 until 5) {
+                val c = (current.openConnection() as? java.net.HttpURLConnection) ?: return null
+                conn = c
+                c.connectTimeout = 8000
+                c.readTimeout = 8000
+                c.instanceFollowRedirects = false
+                val code = c.responseCode
+                when (code) {
+                    301, 302, 303, 307, 308 -> {
+                        val loc = c.getHeaderField("Location") ?: return null
+                        val next = java.net.URL(current, loc).toString()
+                        val prevScheme = current.protocol.lowercase()
+                        c.disconnect()
+                        conn = null
+                        current = validateImageURL(next, prevScheme) ?: return null
+                        continue
+                    }
+                    200 -> {}
+                    else -> return null
+                }
+                if (c.contentLengthLong > MAX_IMAGE_BYTES) return null
+                val out = java.io.ByteArrayOutputStream()
+                val buf = ByteArray(16384)
+                var total = 0
+                c.inputStream.use { stream ->
+                    while (true) {
+                        val n = stream.read(buf)
+                        if (n < 0) break
+                        total += n
+                        if (total > MAX_IMAGE_BYTES) return null
+                        out.write(buf, 0, n)
+                    }
+                }
+                return out.toByteArray().decodeBitmap()
+            }
+            null
+        } finally {
+            conn?.disconnect()
+        }
+    } catch (_: Exception) {
+        null
+    }
 }
 
 @Composable

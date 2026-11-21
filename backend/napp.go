@@ -280,8 +280,6 @@ func (n Napp) BlossomServers(ctx context.Context) []string {
 		}
 	}
 
-	add("https://relay.nostrapps.com")
-
 	for _, srv := range n.Servers {
 		add(srv)
 	}
@@ -297,6 +295,7 @@ func (n Napp) BlossomServers(ctx context.Context) []string {
 			Msg("loaded the author's blossom servers")
 	}
 
+	add("https://relay.nostrapps.com")
 	add("https://nostr.download")
 
 	return servers

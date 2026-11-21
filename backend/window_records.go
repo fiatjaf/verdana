@@ -49,6 +49,21 @@ func loadWindowRecords() {
 	log.Info().Int("windows", len(recs)).Msg("window records loaded")
 }
 
+// forgetWindowsForNapp removes persisted/in-memory window records belonging
+// to an uninstalled napp so its history does not linger or leak on reinstall.
+func forgetWindowsForNapp(nappID string) {
+	removed := false
+	for inst, w := range windows.Range {
+		if w.NappID == nappID {
+			windows.Delete(inst)
+			removed = true
+		}
+	}
+	if removed {
+		saveWindowRecords()
+	}
+}
+
 // saveWindowRecords schedules a write of the records, if they are kept.
 func saveWindowRecords() {
 	if !persistWindows {

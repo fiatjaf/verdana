@@ -2,12 +2,11 @@ package backend
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
-
-	mrand "math/rand"
 
 	"fiatjaf.com/nostr"
 	"github.com/puzpuzpuz/xsync/v3"
@@ -131,10 +130,12 @@ func sigFromHex(s string) ([64]byte, error) {
 	return sig, nil
 }
 
-// shortID is the per-request token the answer comes back under.
+// shortID is a cryptographically random per-request token (128 bits).
 func shortID() string {
-	var b [8]byte
-	mrand.Read(b[:])
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		panic("crypto/rand failed: " + err.Error())
+	}
 	return hex.EncodeToString(b[:])
 }
 

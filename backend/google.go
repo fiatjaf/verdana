@@ -258,31 +258,15 @@ func googleToken(ctx context.Context) (string, error) {
 	}
 	defer ln.Close()
 
+	addr := ln.Addr().String()
 	nonce := shortID()
 	tokens := make(chan string, 1)
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /"+nonce, func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		googlePage.Execute(w, map[string]string{"Central": pomegranateCentral, "Nonce": nonce})
-	})
-	mux.HandleFunc("POST /"+nonce+"/token", func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(io.LimitReader(r.Body, 64*1024))
-		token := strings.TrimSpace(string(body))
-		if _, err := tokenEmail(token); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		select {
-		case tokens <- token:
-		default:
-		}
-	})
-	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	srv := &http.Server{Handler: googleCallbackHandler(addr, nonce, tokens), ReadHeaderTimeout: 5 * time.Second}
 	go srv.Serve(ln)
 	defer srv.Close()
 
-	page := "http://" + ln.Addr().String() + "/" + nonce
+	page := "http://" + addr + "/" + nonce
 	if err := host.OpenLink(page); err != nil {
 		return "", fmt.Errorf("could not open the browser: %w", err)
 	}
@@ -296,6 +280,46 @@ func googleToken(ctx context.Context) (string, error) {
 		}
 		return "", ctx.Err()
 	}
+}
+
+// googleCallbackHandler serves the loopback OAuth bridge page and token
+// endpoint with strict Host and Origin checks against DNS rebinding and CSRF.
+func googleCallbackHandler(addr, nonce string, tokens chan<- string) http.Handler {
+	expectedOrigin := "http://" + addr
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /"+nonce, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("X-Frame-Options", "DENY")
+		googlePage.Execute(w, map[string]string{"Central": pomegranateCentral, "Nonce": nonce})
+	})
+	mux.HandleFunc("POST /"+nonce+"/token", func(w http.ResponseWriter, r *http.Request) {
+		if orig := r.Header.Get("Origin"); orig != expectedOrigin {
+			http.Error(w, "forbidden origin", http.StatusForbidden)
+			return
+		}
+		if site := r.Header.Get("Sec-Fetch-Site"); site != "" && site != "same-origin" {
+			http.Error(w, "forbidden cross-site request", http.StatusForbidden)
+			return
+		}
+		body, _ := io.ReadAll(io.LimitReader(r.Body, 64*1024))
+		token := strings.TrimSpace(string(body))
+		if _, err := tokenEmail(token); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		select {
+		case tokens <- token:
+		default:
+		}
+	})
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Host != addr {
+			http.Error(w, "misdirected request", http.StatusMisdirectedRequest)
+			return
+		}
+		mux.ServeHTTP(w, r)
+	})
 }
 
 var googlePage = template.Must(template.New("google").Parse(`<!doctype html>

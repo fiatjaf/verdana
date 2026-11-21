@@ -74,6 +74,48 @@ func listCall(params string, fn func(context.Context, nostr.PubKey) any, empty a
 	return fn(ctx, pk), nil
 }
 
+// isHighImpactSignKind reports event kinds that alter identity, social graph,
+// relay/Blossom routing, authentication tokens, or executable napp/config
+// manifests. A blanket "always allow" PermSign rule never auto-approves these.
+func isHighImpactSignKind(k nostr.Kind) bool {
+	switch k {
+	case 0, 3, 10002, 10063, 22242, 24133, 27235, 35130, 35131, 35133:
+		return true
+	}
+	return false
+}
+
+// askSignApproval asks the user before signing evt. High-impact kinds always
+// prompt one-shot (Remember=false) even if the napp has a blanket PermSign
+// allow rule, while still honoring an explicit deny rule.
+func askSignApproval(ci *Instance, evt nostr.Event) bool {
+	title := "sign " + aKind(evt.Kind, "event")
+	if !isHighImpactSignKind(evt.Kind) {
+		return askApprovalFor(ci, PermSign, title, func() PromptBody {
+			return describeEvent(evt).body(".", nil)
+		}).OK
+	}
+	name := "A napp"
+	nappID := ""
+	if ci != nil {
+		nappID = ci.napp.ID
+		if ci.napp.Label() != "" {
+			name = ci.napp.Label()
+		}
+	}
+	if rule, ok := lookupRule(RuleKey{Napp: nappID, Permission: PermSign}); ok && !rule.Decision.granted() {
+		return false
+	}
+	p := newPrompt(name, name+" wants to "+title, describeEvent(evt).body(".", nil), nil)
+	p.Remember = false
+	if ci != nil {
+		p.Instance = ci.instance
+	}
+	log.Info().Str("napp", name).Int("kind", int(evt.Kind)).Msg("asking one-shot approval for high-impact sign")
+	enqueuePrompt(p)
+	return p.wait().OK
+}
+
 func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 	return func(method string, params string) (any, error) {
 		log.Debug().Str("method", method).Str("instance", ci.instance).Msg("bridge rpc call")
@@ -82,42 +124,43 @@ func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 		// ─── window.nostr ────────────────────────────────────────
 		case "getPublicKey":
 			// answers from the cached account key and never prompts
-			if userKeyer == nil {
+			k, pkCached := currentKeyer()
+			if k == nil {
 				return "", errors.New("not logged in")
 			}
-			if userPubkey != (nostr.PubKey{}) {
-				return userPubkey.Hex(), nil
+			if pkCached != (nostr.PubKey{}) {
+				return pkCached.Hex(), nil
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
-			pk, err := userKeyer.GetPublicKey(ctx)
+			pk, err := k.GetPublicKey(ctx)
 			if err != nil {
 				return "", err
 			}
 			return pk.Hex(), nil
 
 		case "signEvent":
-			if userKeyer == nil {
+			k, _ := currentKeyer()
+			if k == nil {
 				return nil, errors.New("not logged in")
 			}
 			var evt nostr.Event
 			if err := json.Unmarshal([]byte(params), &evt); err != nil {
 				return nil, err
 			}
-			if !askApprovalFor(ci, PermSign, "sign "+aKind(evt.Kind, "event"), func() PromptBody {
-				return describeEvent(evt).body(".", nil)
-			}).OK {
+			if !askSignApproval(ci, evt) {
 				return nil, errors.New("denied by the user")
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer cancel()
-			if err := userKeyer.SignEvent(ctx, &evt); err != nil {
+			if err := k.SignEvent(ctx, &evt); err != nil {
 				return nil, keyerErr(err)
 			}
 			return evt, nil
 
 		case "nip04.encrypt", "nip04.decrypt", "nip44.encrypt", "nip44.decrypt":
-			if userKeyer == nil {
+			k, _ := currentKeyer()
+			if k == nil {
 				return "", errors.New("not logged in")
 			}
 			var p struct {
@@ -151,16 +194,16 @@ func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 			defer cancel()
 			switch method {
 			case "nip04.encrypt":
-				res, err := userKeyer.Nip04Encrypt(ctx, p.Plaintext, pk)
+				res, err := k.Nip04Encrypt(ctx, p.Plaintext, pk)
 				return res, keyerErr(err)
 			case "nip04.decrypt":
-				res, err := userKeyer.Nip04Decrypt(ctx, p.Ciphertext, pk)
+				res, err := k.Nip04Decrypt(ctx, p.Ciphertext, pk)
 				return res, keyerErr(err)
 			case "nip44.encrypt":
-				res, err := userKeyer.Encrypt(ctx, p.Plaintext, pk)
+				res, err := k.Encrypt(ctx, p.Plaintext, pk)
 				return res, keyerErr(err)
 			default:
-				res, err := userKeyer.Decrypt(ctx, p.Ciphertext, pk)
+				res, err := k.Decrypt(ctx, p.Ciphertext, pk)
 				return res, keyerErr(err)
 			}
 
@@ -248,6 +291,17 @@ func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 			}
 			if err := json.Unmarshal([]byte(params), &p); err != nil {
 				return nil, err
+			}
+			// the store is shared with the launcher and every napp: deleting
+			// from it is the one destructive write, so it asks like the
+			// other sensitive calls do
+			if len(p.IDs) == 0 {
+				return []string{}, nil
+			}
+			if !askApproval(ci, PermDeleteEvents,
+				"delete "+strconv.Itoa(len(p.IDs))+" event(s) from your local database",
+				PromptBody{Detail: "Removed events stay gone from this device (relays keep their own copies)."}) {
+				return nil, errors.New("denied by the user")
 			}
 			removed := []string{}
 			for _, raw := range p.IDs {

@@ -85,9 +85,11 @@ type AppState struct {
 	// every napp window is told to track.
 	Theme string `json:"theme"`
 
-	// NoReadAuth stops the launcher from authenticating (NIP-42) to relays
-	// that ask for it when reading. Publishing authenticates regardless.
-	NoReadAuth bool `json:"no_read_auth,omitempty"`
+	// ReadAuth opts in to authenticating (NIP-42) to relays that ask for it
+	// when reading. Defaults OFF so untrusted napps cannot silently trigger
+	// kind:22242 signing against arbitrary relays. Publishing authenticates
+	// regardless.
+	ReadAuth bool `json:"read_auth,omitempty"`
 
 	// Welcomed is set once the user answered the welcome screen of their
 	// first login (see Welcome), whichever way.
@@ -109,6 +111,15 @@ func loadState() {
 		json.Unmarshal(data, &state)
 	} else {
 		log.Debug().Err(err).Msg("no existing state file, using defaults")
+	}
+	// a login saved by an older build may be raw key material (an nsec, or
+	// a bunker url with its connection secret): the file it sits in is not
+	// where that belongs, so it is dropped here rather than carried along —
+	// the user logs in again, and the trailing saveState writes the field
+	// back empty.
+	if state.Login != "" && !loginIsResumable(state.Login) {
+		log.Info().Msg("dropping a stored login that carries key material")
+		state.Login = ""
 	}
 	if state.ClientKey == (nostr.SecretKey{}) {
 		state.ClientKey = nostr.Generate()
@@ -189,6 +200,8 @@ func saveState() {
 
 // Relays are the relays napps are discovered on.
 func Relays() []string {
+	stateMu.Lock()
+	defer stateMu.Unlock()
 	return append([]string(nil), state.Relays...)
 }
 
@@ -217,6 +230,8 @@ func SetRelays(relays []string) {
 
 // StoredLogin is the nsec/bunker input the user logged in with last time.
 func StoredLogin() string {
+	stateMu.Lock()
+	defer stateMu.Unlock()
 	return strings.TrimSpace(state.Login)
 }
 

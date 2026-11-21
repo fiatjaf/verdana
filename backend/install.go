@@ -91,8 +91,12 @@ func Uninstall(id string) {
 	stateMu.Unlock()
 
 	// a napp that isn't installed can't be anyone's habitual handler, and
-	// whatever the next one installed under that id shouldn't inherit it
+	// whatever the next one installed under that id shouldn't inherit its
+	// permissions, localStorage, or window history
 	forgetActionUsage(id)
+	ForgetPermission(id, "")
+	deleteStorage(id)
+	forgetWindowsForNapp(id)
 
 	refreshInstalled()
 	log.Info().Str("napp", id).Msg("uninstall complete")
@@ -242,6 +246,10 @@ func fetchNappAsset(ctx context.Context, servers []string, base string, p NappPa
 	return nil
 }
 
+// maxBlobBytes caps any single downloaded napp asset blob so a hostile
+// Blossom server cannot OOM the launcher across parallel downloads.
+const maxBlobBytes = 64 << 20
+
 // blobAttemptTimeout bounds a single server attempt. Without it a server that
 // accepts the connection and then stalls holds the download until the whole
 // context is gone, taking the other servers down with it: one bad server
@@ -270,7 +278,15 @@ func downloadBlob(ctx context.Context, servers []string, sha string) ([]byte, er
 			lastErr = err
 			continue
 		}
-		data, err := io.ReadAll(resp.Body)
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			cancel()
+			lastErr = errors.New(srv + ": status " + resp.Status)
+			log.Debug().Str("server", srv).Str("last_error", lastErr.Error()).
+				Msg("blob server does not have it, trying the next")
+			continue
+		}
+		data, err := io.ReadAll(io.LimitReader(resp.Body, maxBlobBytes+1))
 		resp.Body.Close()
 		cancel()
 		if err != nil {
@@ -278,10 +294,10 @@ func downloadBlob(ctx context.Context, servers []string, sha string) ([]byte, er
 			lastErr = err
 			continue
 		}
-		if resp.StatusCode != http.StatusOK {
-			lastErr = errors.New(srv + ": status " + resp.Status)
+		if len(data) > maxBlobBytes {
+			lastErr = fmt.Errorf("%s: blob exceeds %dMB cap", srv, maxBlobBytes>>20)
 			log.Debug().Str("server", srv).Str("last_error", lastErr.Error()).
-				Msg("blob server does not have it, trying the next")
+				Msg("blob too large, trying the next")
 			continue
 		}
 		sum := sha256.Sum256(data)

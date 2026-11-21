@@ -32,6 +32,10 @@ const (
 	PermSaveFile Permission = "save_file"
 	PermCopyText Permission = "copy_text"
 
+	// PermDeleteEvents is nostrdb.remove: the only destructive write into
+	// the shared local event store.
+	PermDeleteEvents Permission = "delete_events"
+
 	// PermDevInstall is napp.dev.installLocal installing a napp's files as a
 	// local napp, for napps that declare `requires: ["dev"]`.
 	PermDevInstall Permission = "dev_install"
@@ -82,10 +86,11 @@ func (k RuleKey) String() string {
 }
 
 // ruleID is the key as state.json files it. Napp ids and action names are
-// whatever the network said, so the parts are joined with a separator neither
-// can hold rather than with a readable one.
+// network-controlled, so embedded \x1f bytes are stripped before joining to
+// prevent a crafted napp id or subject from colliding with another key.
 func (k RuleKey) ruleID() string {
-	return strings.Join([]string{k.Napp, string(k.Permission), k.Subject}, "\x1f")
+	clean := func(s string) string { return strings.ReplaceAll(s, "\x1f", "") }
+	return strings.Join([]string{clean(k.Napp), clean(string(k.Permission)), clean(k.Subject)}, "\x1f")
 }
 
 func ruleKeyFromID(id string) RuleKey {
@@ -135,7 +140,9 @@ func lookupRule(key RuleKey) (Rule, bool) {
 		return r, true
 	}
 	if r, ok := storedRule(key); ok {
-		return r, true
+		if !(key.Permission == PermDevInstall && r.Decision == DecisionAllow) {
+			return r, true
+		}
 	}
 	if d := NappPolicy(key.Permission); d != DecisionAsk {
 		return Rule{Decision: d}, true
@@ -152,6 +159,11 @@ func lookupRule(key RuleKey) (Rule, bool) {
 // saved answer does replace the session's, which would otherwise keep shadowing
 // it for the rest of the run.
 func remember(key RuleKey, r Rule, scope Scope) {
+	// PermDevInstall installs executable napp code on disk; cap "always allow"
+	// to this session so a single click never survives across restarts.
+	if key.Permission == PermDevInstall && r.Decision == DecisionAllow && scope == ScopeAlways {
+		scope = ScopeSession
+	}
 	switch scope {
 	case ScopeSession:
 		setSessionRule(key, r)
@@ -171,6 +183,13 @@ func setSessionRule(key RuleKey, r Rule) {
 
 func clearSessionRule(key RuleKey) {
 	sessionRules.Delete(key.ruleID())
+}
+
+// clearAllSessionRules drops every in-memory session permission rule (called
+// on Logout so a subsequent account does not inherit the previous user's
+// session grants).
+func clearAllSessionRules() {
+	sessionRules.Clear()
 }
 
 func storedRule(key RuleKey) (Rule, bool) {

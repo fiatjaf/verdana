@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"time"
 
 	"fiatjaf.com/nostr"
@@ -11,6 +12,7 @@ import (
 )
 
 var (
+	loginMu    sync.RWMutex
 	userKeyer  nostr.Keyer
 	userPubkey nostr.PubKey
 
@@ -21,6 +23,38 @@ var (
 	// sign/encrypt fail with "context canceled".
 	sessionCancel context.CancelFunc
 )
+
+func currentKeyer() (nostr.Keyer, nostr.PubKey) {
+	loginMu.RLock()
+	defer loginMu.RUnlock()
+	return userKeyer, userPubkey
+}
+
+func setSessionCancel(cancel context.CancelFunc) {
+	loginMu.Lock()
+	prev := sessionCancel
+	sessionCancel = cancel
+	loginMu.Unlock()
+	if prev != nil {
+		prev()
+	}
+}
+
+func clearSessionCancel(cancel context.CancelFunc) {
+	loginMu.Lock()
+	sessionCancel = nil
+	loginMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
+func setLoggedInKeyer(k nostr.Keyer, pk nostr.PubKey) {
+	loginMu.Lock()
+	userKeyer = k
+	userPubkey = pk
+	loginMu.Unlock()
+}
 
 // loginAmber finishes logging in through a NIP-55 signer app: the Android
 // side already got the key's pubkey and the signer's package from the app
@@ -39,9 +73,8 @@ func loginAmber(input string) {
 
 	// no handshake to wait on: the signer app is the session, and it holds
 	// the key whether we are online or not
-	userKeyer = AmberSigner{PubKey: pk, Package: pkg}
-	userPubkey = pk
-	sessionCancel = nil
+	setSessionCancel(nil)
+	setLoggedInKeyer(AmberSigner{PubKey: pk, Package: pkg}, pk)
 
 	stateMu.Lock()
 	if state.Login != input {
@@ -73,20 +106,18 @@ func Login(input string) {
 	setPhase(PhaseLoading)
 
 	// A new login ends any previous session first.
-	if sessionCancel != nil {
-		sessionCancel()
-		sessionCancel = nil
-	}
-	userKeyer = nil
+	setLoggedInKeyer(nil, nostr.PubKey{})
 	applyReadAuth()
 
 	// The keyer outlives the handshake: a bunker signer listens for its
 	// responses on a subscription tied to this ctx, so it stays open
 	// until logout or the next login.
 	sessionCtx, cancelSession := context.WithCancel(context.Background())
-	sessionCancel = cancelSession
+	setSessionCancel(cancelSession)
 
+	stateMu.Lock()
 	clientKey := state.ClientKey
+	stateMu.Unlock()
 
 	// keyer.New blocks on the bunker's "connect" answer, so race it
 	// against the login deadline instead of handing it a ctx that dies
@@ -110,16 +141,14 @@ func Login(input string) {
 	select {
 	case res := <-keyerDone:
 		if res.err != nil {
-			cancelSession()
-			sessionCancel = nil
+			clearSessionCancel(cancelSession)
 			log.Error().Err(res.err).Msg("login failed")
 			setLoginErr(res.err.Error())
 			return
 		}
 		k = res.k
 	case <-time.After(20 * time.Second):
-		cancelSession()
-		sessionCancel = nil
+		clearSessionCancel(cancelSession)
 		log.Error().Msg("login timed out")
 		setLoginErr("login timed out")
 		return
@@ -130,24 +159,35 @@ func Login(input string) {
 
 	pk, err := k.GetPublicKey(ctx)
 	if err != nil {
-		cancelSession()
-		sessionCancel = nil
+		clearSessionCancel(cancelSession)
 		log.Error().Err(err).Msg("get public key failed")
 		setLoginErr(err.Error())
 		return
 	}
 
-	userKeyer = k
-	userPubkey = pk
+	setLoggedInKeyer(k, pk)
 
-	stateMu.Lock()
-	if state.Login != input {
-		state.Login = input
-		saveState()
+	// raw key material is never written down: it lives in this process for
+	// the session and the user logs in again next time (see loginIsResumable)
+	if loginIsResumable(input) {
+		stateMu.Lock()
+		if state.Login != input {
+			state.Login = input
+			saveState()
+		}
+		stateMu.Unlock()
 	}
-	stateMu.Unlock()
 
 	setProfileFromUser(ctx, pk)
+}
+
+// loginIsResumable says whether a login input may be persisted for the next
+// startup. Fail closed: only NIP-55 signer references (amber:<pkg>:<pubkey>)
+// are pointers to an external signer app rather than key material. Everything
+// else — nsec (any case), ncryptsec, raw hex, bunker:// (any case, carrying
+// connection secrets), or unknown future formats — stays in memory only.
+func loginIsResumable(input string) bool {
+	return strings.HasPrefix(strings.TrimSpace(input), "amber:")
 }
 
 // setProfileFromUser is the tail every login shares: fetch that key's
@@ -173,12 +213,9 @@ func setProfileFromUser(ctx context.Context, pk nostr.PubKey) {
 func Logout() {
 	CloseAllWindows()
 
-	if sessionCancel != nil {
-		sessionCancel()
-		sessionCancel = nil
-	}
-	userKeyer = nil
-	userPubkey = nostr.PubKey{}
+	setSessionCancel(nil)
+	setLoggedInKeyer(nil, nostr.PubKey{})
+	clearAllSessionRules()
 	applyReadAuth()
 	resetContacts()
 
@@ -202,12 +239,16 @@ func keyerErr(err error) error {
 }
 
 // LoggedIn says whether there is a signer to sign with.
-func LoggedIn() bool { return userKeyer != nil }
+func LoggedIn() bool {
+	k, _ := currentKeyer()
+	return k != nil
+}
 
 // UserPubkey is the logged-in user's pubkey in hex, or "".
 func UserPubkey() string {
-	if userPubkey == nostr.ZeroPK {
+	_, pk := currentKeyer()
+	if pk == nostr.ZeroPK {
 		return ""
 	}
-	return userPubkey.Hex()
+	return pk.Hex()
 }

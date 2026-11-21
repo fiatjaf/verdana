@@ -334,6 +334,14 @@ func HandleMessage(instance string, m WireMsg) {
 		ci.handlePromptAnswer(m)
 	case "rpc":
 		go ci.handleRPC(m)
+	case "navViolation":
+		// the shell's origin guard fired: the window is no longer on the
+		// origin the shell picked for this napp, its bridge is already
+		// dead on that side — close it and say so.
+		log.Warn().Str("instance", instance).Str("napp", ci.napp.ID).
+			Msg("napp window left its origin; bridge disabled, window closed")
+		SetFetchErr(ci.napp.Label() + " left its own origin — window closed")
+		ci.send(WireMsg{T: "close"})
 	default:
 		log.Debug().Str("instance", instance).Str("t", m.T).Msg("ignoring message from napp")
 	}
@@ -886,16 +894,24 @@ func runNappAction(
 		viewing = nil
 	}
 
-	// an explicit instance skips every choice: route it straight there
+	// an explicit instance skips the picker, but still enforces dispatch deny
+	// rules, rejects picker windows, and requires the target napp to declare
+	// the action when called by another napp.
 	if opts.Instance != "" {
 		takeView(true)
+		if rule, ok := lookupRule(RuleKey{Napp: callerID, Permission: PermDispatch, Subject: req.name}); ok && rule.Decision == DecisionDeny {
+			return nil, errors.New("dispatch denied by the rules")
+		}
 		ci := lookupInstance(opts.Instance)
-		if ci == nil {
+		if ci == nil || ci.picker {
 			return nil, fmt.Errorf("no open instance %q", opts.Instance)
 		}
-		log.Info().Str("from", callerName).Str("action", name).
+		if caller != nil && !ci.napp.Handles(req.name) {
+			return nil, fmt.Errorf("instance %q does not handle %q", opts.Instance, req.name)
+		}
+		log.Info().Str("from", callerName).Str("action", req.name).
 			Str("instance", ci.instance).Msg("dispatching action to instance")
-		return dispatchTo(ctx, callerID, name, ci, req)
+		return dispatchTo(ctx, callerID, req.name, ci, req)
 	}
 
 	candidates, open = findHandlersForAction(name)
