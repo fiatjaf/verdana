@@ -249,6 +249,17 @@ func bridgeRPC(ci *Instance) func(string, string) (any, error) {
 			if err := json.Unmarshal([]byte(params), &p); err != nil {
 				return nil, err
 			}
+			// the store is shared with the launcher and every napp: deleting
+			// from it is the one destructive write, so it asks like the
+			// other sensitive calls do
+			if len(p.IDs) == 0 {
+				return []string{}, nil
+			}
+			if !askApproval(ci, PermDeleteEvents,
+				"delete "+strconv.Itoa(len(p.IDs))+" event(s) from your local database",
+				PromptBody{Detail: "Removed events stay gone from this device (relays keep their own copies)."}) {
+				return nil, errors.New("denied by the user")
+			}
 			removed := []string{}
 			for _, raw := range p.IDs {
 				id, err := nostr.IDFromHex(strings.TrimSpace(raw))

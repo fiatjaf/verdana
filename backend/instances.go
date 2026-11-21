@@ -334,6 +334,14 @@ func HandleMessage(instance string, m WireMsg) {
 		ci.handlePromptAnswer(m)
 	case "rpc":
 		go ci.handleRPC(m)
+	case "navViolation":
+		// the shell's origin guard fired: the window is no longer on the
+		// origin the shell picked for this napp, its bridge is already
+		// dead on that side — close it and say so.
+		log.Warn().Str("instance", instance).Str("napp", ci.napp.ID).
+			Msg("napp window left its origin; bridge disabled, window closed")
+		SetFetchErr(ci.napp.Label() + " left its own origin — window closed")
+		ci.send(WireMsg{T: "close"})
 	default:
 		log.Debug().Str("instance", instance).Str("t", m.T).Msg("ignoring message from napp")
 	}

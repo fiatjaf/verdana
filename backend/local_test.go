@@ -59,4 +59,17 @@ func TestInstallLocal(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "js", "app.js")); !os.IsNotExist(err) {
 		t.Error("a reinstall should replace the folder, not merge into it")
 	}
+
+	// PermDevInstall "always allow" must be capped to session-only and never
+	// persist in state.Rules across restarts.
+	remember(key, Rule{Decision: DecisionAllow}, ScopeAlways)
+	if _, persisted := storedRule(key); persisted {
+		t.Error("PermDevInstall allow should not be persisted across restarts")
+	}
+	clearSessionRule(key)
+	storeRule(key, Rule{Decision: DecisionAllow})
+	defer ForgetPermission(caller.napp.ID, PermDevInstall)
+	if r, ok := lookupRule(key); ok && r.Decision == DecisionAllow {
+		t.Errorf("legacy stored PermDevInstall allow should not auto-grant: %+v", r)
+	}
 }

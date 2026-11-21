@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/puzpuzpuz/xsync/v3"
 	"verdana/backend/wasm"
 
 	"fiatjaf.com/nostr"
@@ -135,10 +137,13 @@ func installLocalForNapp(ci *Instance, raw []installLocalFile) (any, error) {
 	}
 
 	// The first install asks; the napp that installed it may replace it
-	// again without asking, which is what a napp building another one does
-	// on every change.
+	// again without asking within the same launcher run, which is what a
+	// napp building another one does on every change. After a restart the
+	// ask comes back: silent replacement must not survive a session, or a
+	// one-time approval would let the installer swap the napp's code for
+	// something else whenever it likes.
 	prev, installed := InstalledNapp(id)
-	if !installed || prev.InstalledBy != ci.napp.ID {
+	if !installed || prev.InstalledBy != ci.napp.ID || !localInstallsThisSessionHas(id) {
 		name := meta.Title
 		if name == "" {
 			name = meta.ID
@@ -159,10 +164,21 @@ func installLocalForNapp(ci *Instance, raw []installLocalFile) (any, error) {
 	if err != nil {
 		return nil, fmt.Errorf("installLocal: %w", err)
 	}
+	localInstallsThisSession.Store(napp.ID, true)
 	if err := openLocalNapp(napp); err != nil {
 		return nil, fmt.Errorf("installLocal: installed, but %w", err)
 	}
 	return map[string]any{"nappId": napp.ID}, nil
+}
+
+// localInstallsThisSession remembers the local napps installed during this
+// launcher run, so their installer may replace them without asking until
+// the launcher quits (see installLocalForNapp).
+var localInstallsThisSession = xsync.NewMapOf[string, bool]()
+
+func localInstallsThisSessionHas(id string) bool {
+	_, ok := localInstallsThisSession.Load(id)
+	return ok
 }
 
 // localMetadata reads and checks the metadata.json among a local napp's files,
