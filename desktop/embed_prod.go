@@ -3,11 +3,8 @@
 package main
 
 import (
-	"crypto/sha256"
 	_ "embed"
 	"fmt"
-	"os"
-	"path/filepath"
 )
 
 // The two napp shells, one per kind of window. They go into the launcher
@@ -26,41 +23,17 @@ var shellBinaries = map[string][]byte{
 	"wasmchild": wasmChildBinary,
 }
 
-// extractShell writes a shell to a temp directory and returns its path,
-// named after the contents so a new build replaces the old one and an
-// unchanged one is unpacked once.
+// extractShell writes a shell to a user-private cache directory (0700) and
+// returns its path, verified by full SHA-256 and written atomically so no
+// other local user can pre-create or tamper with the extracted binary.
 func extractShell(name string) (string, error) {
 	data, ok := shellBinaries[name]
 	if !ok {
 		return "", fmt.Errorf("no such napp shell: %s", name)
 	}
-	hash := sha256.Sum256(data)
-
-	dir := filepath.Join(os.TempDir(), "verdana-"+name)
-	path := filepath.Join(dir, fmt.Sprintf("%x", hash[:4]))
-
-	if _, err := os.Stat(path); err == nil {
-		return path, nil
-	}
-
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return "", err
-	}
-
-	f, err := os.Create(path)
+	dir, err := userPrivateCacheDir("bin", name)
 	if err != nil {
 		return "", err
 	}
-	if _, err := f.Write(data); err != nil {
-		f.Close()
-		os.Remove(f.Name())
-		return "", err
-	}
-	if err := f.Chmod(0755); err != nil {
-		f.Close()
-		os.Remove(f.Name())
-		return "", err
-	}
-	f.Close()
-	return path, nil
+	return extractBinary(dir, data)
 }

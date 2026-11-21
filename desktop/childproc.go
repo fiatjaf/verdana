@@ -120,7 +120,11 @@ func nappEnv(spec backend.WindowSpec) []string {
 // and wires its stdout to the backend.
 func spawnShell(exe, instance string, env []string) (*shellTransport, error) {
 	cmd := exec.Command(exe)
-	cmd.Env = append(os.Environ(), env...)
+	baseEnv := os.Environ()
+	if tmpDir, err := userPrivateCacheDir("tmp"); err == nil {
+		baseEnv = withPrivateTempEnv(baseEnv, tmpDir)
+	}
+	cmd.Env = append(baseEnv, env...)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err

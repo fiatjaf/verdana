@@ -23,7 +23,7 @@ func writeShortcutFile(name, exe, token string) (string, error) {
 			exe = resolved
 		}
 	}
-	data := fmt.Sprintf(desktopTemplate, name, execPrefix(exe), quoteExecField(token), iconLine())
+	data := fmt.Sprintf(desktopTemplate, stripControlChars(name), execPrefix(exe), quoteExecField(token), iconLine())
 	if err := os.MkdirAll(applicationsDir(), 0755); err != nil {
 		return "", err
 	}
@@ -48,7 +48,7 @@ func execPrefix(exe string) string {
 // iconLine is the Icon= line for the desktop template, or nothing at all when
 // the icon could not be unpacked -- an entry without an Icon= key still runs.
 func iconLine() string {
-	path := iconFile()
+	path := stripControlChars(iconFile())
 	if path == "" {
 		return ""
 	}
@@ -120,7 +120,7 @@ func parseDesktopShortcut(data []byte) (bundle string, token string, ok bool) {
 	if len(fields) < 2 || strings.TrimSpace(fields[len(fields)-1]) == "" {
 		return bundle, "", false
 	}
-	return bundle, fields[len(fields)-1], true
+	return bundle, strings.ReplaceAll(fields[len(fields)-1], "%%", "%"), true
 }
 
 // splitExecFields splits a desktop entry Exec line into its fields, undoing
@@ -166,14 +166,17 @@ func applicationsDir() string {
 }
 
 // quoteExecField wraps one value of an Exec= line, per the desktop entry
-// spec: double quotes with backslash escapes on the special characters.
+// spec: control chars stripped, double quotes with backslash escapes on
+// special characters, and '%' doubled to '%%' to prevent field-code expansion.
 func quoteExecField(value string) string {
+	cleaned := stripControlChars(value)
 	escaped := strings.NewReplacer(
 		`\`, `\\`,
 		`"`, `\"`,
 		"`", "\\`",
 		`$`, `\$`,
-	).Replace(value)
+		`%`, `%%`,
+	).Replace(cleaned)
 	return `"` + escaped + `"`
 }
 
