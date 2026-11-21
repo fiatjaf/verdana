@@ -172,10 +172,11 @@ object VerdanaHost : UI {
     }
 
     // answer files a prompt's answer. skip is the indexes of the items
-    // (relays) the user unticked.
+    // (relays) the user unticked. The prompt's answerToken goes along: the
+    // backend drops answers without it.
     fun answer(p: Prompt, ok: Boolean, scope: String, skip: List<Int> = listOf()) {
         prompt = null
-        Mobile.answerPrompt(p.id, ok, 0, scope, skip.joinToString(","))
+        Mobile.answerPrompt(p.id, p.answerToken, ok, 0, scope, skip.joinToString(","))
     }
 
     // promptFor is the question this window has to cover, or null: a prompt

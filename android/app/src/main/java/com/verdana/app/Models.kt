@@ -98,6 +98,10 @@ data class Prompt(
     // instance is the window the prompt belongs over, when a napp fired it.
     // Blank for questions the launcher asked itself.
     val instance: String = "",
+    // answerToken is the secret the answer goes back with (the prompt's
+    // answerToken from the backend): an answer without it is dropped, so a
+    // forged one — an id guessed inside a napp — settles nothing.
+    val answerToken: String = "",
     // countdown, in milliseconds, is how long a picker waits before it
     // picks the default option by itself; 0 waits for the user
     val countdown: Long = 0,
@@ -318,6 +322,7 @@ fun parsePrompt(json: String): Prompt? {
         },
         instance = o.optString("instance"),
         countdown = o.optLong("countdown"),
+        answerToken = o.optString("answerToken"),
     )
 }
 

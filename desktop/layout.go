@@ -102,6 +102,40 @@ func layoutPrompt(
 		}),
 	}
 
+	if p.Instance != "" {
+		children = append(children,
+			layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				label := "window " + p.Instance
+				if p.Napp != "" {
+					label = p.Napp + " · " + label
+				}
+				l := material.Caption(th, label)
+				l.Color = currentTheme().muted
+				return l.Layout(gtx)
+			}),
+		)
+	}
+
+	if p.Image != "" {
+		imgOp, ok := getImage(p.Image)
+		children = append(children,
+			layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				maxH := gtx.Dp(unit.Dp(320))
+				if gtx.Constraints.Max.Y > maxH {
+					gtx.Constraints.Max.Y = maxH
+				}
+				if ok {
+					return widget.Image{Src: imgOp, Fit: widget.Contain, Position: layout.Center}.Layout(gtx)
+				}
+				l := material.Body2(th, "Loading image…")
+				l.Color = currentTheme().muted
+				return l.Layout(gtx)
+			}),
+		)
+	}
+
 	if p.Detail != "" {
 		children = append(children,
 			layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
@@ -207,19 +241,25 @@ func layoutPrompt(
 
 	if !p.Remember {
 		// nothing to widen the answer into: a plain yes and a plain no
+		allowLabel, allowTip := "Allow", "Let it go ahead"
+		denyLabel, denyTip := "Deny", "Refuse it"
+		if p.Image != "" {
+			allowLabel, allowTip = "Open in browser", "Open the image in your browser"
+			denyLabel, denyTip = "Close", "Dismiss this preview"
+		}
 		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					pointer.CursorPointer.Add(gtx.Ops)
-					return withTooltip(gtx, &btns.allow, "Let it go ahead", material.Button(th, &btns.allow, "Allow").Layout)
+					return withTooltip(gtx, &btns.allow, allowTip, material.Button(th, &btns.allow, allowLabel).Layout)
 				}),
 				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					pointer.CursorPointer.Add(gtx.Ops)
-					b := material.Button(th, &btns.deny, "Deny")
+					b := material.Button(th, &btns.deny, denyLabel)
 					b.Background = currentTheme().chipBg
 					b.Color = currentTheme().chipFg
-					return withTooltip(gtx, &btns.deny, "Refuse it", b.Layout)
+					return withTooltip(gtx, &btns.deny, denyTip, b.Layout)
 				}),
 			)
 		}))

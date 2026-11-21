@@ -405,12 +405,12 @@ func runWindow(picking bool, became <-chan struct{}) {
 					w.Option(app.Title(pv.Title))
 				}
 				picker.Layout(gtx, pv, br.ThemeName(), func(id int, ok bool, index int) {
-					br.AnswerPrompt(id, ok, index, "once", nil)
+					br.AnswerPrompt(id, pv.AnswerToken, ok, index, "once", nil)
 					w.Invalidate()
 				})
 			} else if pv != nil {
 				prompt.Layout(gtx, pv, br.ThemeName(), func(id int, ok bool, scope string, skip []int) {
-					br.AnswerPrompt(id, ok, 0, scope, skip)
+					br.AnswerPrompt(id, pv.AnswerToken, ok, 0, scope, skip)
 					w.Invalidate()
 				})
 			} else {

@@ -244,21 +244,22 @@ func CurrentPrompt() string {
 	return string(data)
 }
 
-// AnswerPrompt answers the prompt with that id. index picks an option for a
-// picker prompt and is ignored otherwise. scope is how long the answer holds:
-// "once" (this prompt only), "session" (until the launcher quits) or "always"
-// (written to state, until the user takes it back). Anything else is taken as
-// "once", and the scopes are ignored for prompts that can't be remembered.
-// skip is the indexes of the prompt's items the user unticked, separated by
-// commas ("" for none).
-func AnswerPrompt(id int, ok bool, index int, scope string, skip string) {
+// AnswerPrompt answers the prompt with that id. token is the prompt's
+// answerToken, as CurrentPrompt handed it over — an answer without it is
+// dropped. index picks an option for a picker prompt and is ignored
+// otherwise. scope is how long the answer holds: "once" (this prompt only),
+// "session" (until the launcher quits) or "always" (written to state, until
+// the user takes it back). Anything else is taken as "once", and the scopes
+// are ignored for prompts that can't be remembered. skip is the indexes of
+// the prompt's items the user unticked, separated by commas ("" for none).
+func AnswerPrompt(id int, token string, ok bool, index int, scope string, skip string) {
 	ans := backend.Answer{OK: ok, Index: index, Scope: backend.Scope(scope)}
 	for _, s := range strings.Split(skip, ",") {
 		if i, err := strconv.Atoi(strings.TrimSpace(s)); err == nil {
 			ans.Skip = append(ans.Skip, i)
 		}
 	}
-	backend.AnswerPrompt(id, ans)
+	backend.AnswerPrompt(id, token, ans)
 }
 
 // ─── launcher actions ────────────────────────────────────────────
