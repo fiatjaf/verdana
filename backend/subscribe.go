@@ -47,7 +47,12 @@ func startSubscription(ctx context.Context, ci *Instance, p subscribeParams) err
 	filters := make(map[string]nostr.Filter, len(p.Relays))
 	for _, url := range p.Relays {
 		if url = strings.TrimSpace(url); url != "" {
-			filters[nostr.NormalizeURL(url)] = p.Filter
+			normalized := nostr.NormalizeURL(url)
+			if err := isAllowedRelayURL(ctx, normalized); err != nil {
+				log.Warn().Err(err).Str("relay", normalized).Msg("refused subscription to forbidden relay address")
+				continue
+			}
+			filters[normalized] = p.Filter
 		}
 	}
 	if len(filters) == 0 {

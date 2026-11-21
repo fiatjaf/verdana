@@ -33,15 +33,16 @@ func DevPublishDefaults() (servers, relays []string) {
 	servers = []string{"https://relay.nostrapps.com", "https://nostr.download"}
 	relays = Relays()
 
-	if sys != nil && userPubkey != nostr.ZeroPK {
+	_, pk := currentKeyer()
+	if sys != nil && pk != nostr.ZeroPK {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		for _, server := range sys.FetchBlossomServerList(ctx, userPubkey).Items {
+		for _, server := range sys.FetchBlossomServerList(ctx, pk).Items {
 			servers = nostr.AppendUnique(servers, server.Value())
 		}
 
-		for _, relay := range sys.FetchWriteRelays(ctx, userPubkey) {
+		for _, relay := range sys.FetchWriteRelays(ctx, pk) {
 			relays = nostr.AppendUnique(relays, relay)
 		}
 	}
@@ -93,7 +94,8 @@ func PublishDev(ctx context.Context, id string, servers, relays []string, protec
 			onStep(fmt.Sprintf(format, args...))
 		}
 	}
-	if userKeyer == nil {
+	k, _ := currentKeyer()
+	if k == nil {
 		return 0, 0, errors.New("not logged in")
 	}
 	if sys == nil {
@@ -134,7 +136,7 @@ func PublishDev(ctx context.Context, id string, servers, relays []string, protec
 				step("  failed: cannot open file: %v", openErr)
 				continue
 			}
-			client := blossom.NewClient(server, userKeyer)
+			client := blossom.NewClient(server, k)
 			descriptor, uploadErr := client.UploadBlob(ctx, f, mime.TypeByExtension(filepath.Ext(path)))
 			f.Close()
 			switch {
@@ -194,7 +196,7 @@ func PublishDev(ctx context.Context, id string, servers, relays []string, protec
 	tags = append(tags, nostr.Tag{"d", napp.D})
 	step("signing kind:%d event (%d tags, %d path tags)...", napp.KindOf(), len(tags), len(napp.Paths))
 	event := nostr.Event{Kind: napp.KindOf(), CreatedAt: nostr.Now(), Tags: tags}
-	if err := userKeyer.SignEvent(ctx, &event); err != nil {
+	if err := k.SignEvent(ctx, &event); err != nil {
 		step("signing failed: %v", err)
 		return 0, 0, fmt.Errorf("signing manifest: %w", err)
 	}

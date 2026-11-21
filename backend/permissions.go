@@ -185,6 +185,13 @@ func clearSessionRule(key RuleKey) {
 	sessionRules.Delete(key.ruleID())
 }
 
+// clearAllSessionRules drops every in-memory session permission rule (called
+// on Logout so a subsequent account does not inherit the previous user's
+// session grants).
+func clearAllSessionRules() {
+	sessionRules.Clear()
+}
+
 func storedRule(key RuleKey) (Rule, bool) {
 	stateMu.Lock()
 	defer stateMu.Unlock()

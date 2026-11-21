@@ -317,6 +317,12 @@ func layoutLogin(
 			pointer.CursorPointer.Add(gtx.Ops)
 			return withTooltip(gtx, googleBtn, "Log in with your Google account in the browser: a remote signer holds a key made for you, no nsec needed", material.Button(th, googleBtn, "Log in with Google").Layout)
 		}),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			l := material.Caption(th, "Uses Pomegranate remote signing; first-time setup publishes a salted hash of your email (kind:16440) to public relays.")
+			l.Color = currentTheme().muted
+			return l.Layout(gtx)
+		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			if loginStatus == "" {
 				return layout.Dimensions{}

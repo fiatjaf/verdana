@@ -210,6 +210,12 @@ fun LoginScreen(activity: MainActivity, st: LauncherState) {
         OutlinedButton(onClick = { activity.loginWithGoogle() }, modifier = Modifier.fillMaxWidth()) {
             Text("Log in with Google", color = theme.fg)
         }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "Uses Pomegranate remote signing; first-time setup publishes a salted hash of your email (kind:16440) to public relays.",
+            color = theme.muted,
+            style = MaterialTheme.typography.bodySmall,
+        )
         if (st.loginStatus.isNotBlank()) {
             Spacer(Modifier.height(8.dp))
             Text(st.loginStatus, color = theme.subtle, style = MaterialTheme.typography.bodySmall)

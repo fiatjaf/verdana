@@ -233,8 +233,9 @@ func storedNapps(authors []nostr.PubKey) []Napp {
 // RefreshContacts reads the contacts' napps and the user's own from the
 // local store again. Cheap: nothing goes out to the relays.
 func RefreshContacts() {
-	if userPubkey != nostr.ZeroPK && sys != nil {
-		refreshContacts(userPubkey)
+	_, pk := currentKeyer()
+	if pk != nostr.ZeroPK && sys != nil {
+		refreshContacts(pk)
 	}
 }
 

@@ -4,16 +4,25 @@ import (
 	"context"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"fiatjaf.com/nostr"
 )
 
-var cancelDiscover context.CancelFunc
+var (
+	discoverMu     sync.Mutex
+	cancelDiscover context.CancelFunc
+)
 
 func Discover() {
-	if cancelDiscover != nil {
-		cancelDiscover()
+	ctx, cancel := context.WithCancel(context.Background())
+	discoverMu.Lock()
+	prev := cancelDiscover
+	cancelDiscover = cancel
+	discoverMu.Unlock()
+	if prev != nil {
+		prev()
 	}
 
 	urls := Relays()
@@ -21,9 +30,6 @@ func Discover() {
 
 	setFetching(true)
 	defer setFetching(false)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancelDiscover = cancel
 
 	var collected []Napp
 

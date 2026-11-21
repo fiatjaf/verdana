@@ -177,7 +177,7 @@ data class LauncherState(
     // the last action fired with no napp to handle it, until dismissed: the
     // launcher offers to look for one in Explore (see UnhandledNotice)
     val unhandledAction: String = "",
-    val readAuth: Boolean = true,
+    val readAuth: Boolean = false,
     // what napps get when they ask to sign or publish and the user has not
     // answered for them: "ask", "allow" or "deny"
     val signPolicy: String = "ask",
@@ -224,7 +224,7 @@ fun parseState(json: String): LauncherState {
         fetching = o.optBoolean("fetching"),
         theme = o.optString("theme", "light"),
         unhandledAction = o.optString("unhandledAction"),
-        readAuth = o.optBoolean("readAuth", true),
+        readAuth = o.optBoolean("readAuth", false),
         signPolicy = o.optString("signPolicy", "ask"),
         publishPolicy = o.optString("publishPolicy", "ask"),
         openLinks = o.optString("openLinks", "no"),

@@ -162,8 +162,9 @@ func searchUser(ctx context.Context, term string) []map[string]any {
 }
 
 func searchRelayURLs(ctx context.Context) []string {
-	if userPubkey != (nostr.PubKey{}) {
-		res := loadSearchRelays(ctx, userPubkey)
+	_, pk := currentKeyer()
+	if pk != (nostr.PubKey{}) {
+		res := loadSearchRelays(ctx, pk)
 		if items, ok := res["items"].([]any); ok && len(items) > 0 {
 			urls := make([]string, 0, len(items))
 			for _, item := range items {

@@ -91,8 +91,12 @@ func Uninstall(id string) {
 	stateMu.Unlock()
 
 	// a napp that isn't installed can't be anyone's habitual handler, and
-	// whatever the next one installed under that id shouldn't inherit it
+	// whatever the next one installed under that id shouldn't inherit its
+	// permissions, localStorage, or window history
 	forgetActionUsage(id)
+	ForgetPermission(id, "")
+	deleteStorage(id)
+	forgetWindowsForNapp(id)
 
 	refreshInstalled()
 	log.Info().Str("napp", id).Msg("uninstall complete")
