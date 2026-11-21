@@ -322,6 +322,7 @@ fun parsePrompt(json: String): Prompt? {
         },
         instance = o.optString("instance"),
         countdown = o.optLong("countdown"),
+        answerToken = o.optString("answerToken"),
     )
 }
 

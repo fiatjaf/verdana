@@ -200,6 +200,37 @@ func CurrentPrompt() *Prompt {
 	return promptActive
 }
 
+// trustsShellPrompt reports whether ci renders its own prompts inside a
+// trusted native UI (a picker or wasm canvas shell) rather than an untrusted
+// webview DOM. Webview shells must never receive prompt tokens or answer
+// prompts over their wire channel because page scripts share the webview.
+func (ci *Instance) trustsShellPrompt() bool {
+	return ci != nil && (ci.picker || ci.napp.IsWasm())
+}
+
+// CurrentLauncherPrompt returns the next pending prompt that the desktop
+// launcher window should draw itself: launcher-originated prompts (empty
+// Instance) and prompts originating from webview napp windows.
+func CurrentLauncherPrompt() *Prompt {
+	promptMu.Lock()
+	candidates := make([]*Prompt, 0, 1+len(promptQueue))
+	if promptActive != nil {
+		candidates = append(candidates, promptActive)
+	}
+	candidates = append(candidates, promptQueue...)
+	promptMu.Unlock()
+
+	for _, p := range candidates {
+		if p.Instance == "" {
+			return p
+		}
+		if ci := lookupInstance(p.Instance); !ci.trustsShellPrompt() {
+			return p
+		}
+	}
+	return nil
+}
+
 // PendingPrompts is how many are waiting behind the current one.
 func PendingPrompts() int {
 	promptMu.Lock()
@@ -306,10 +337,16 @@ func AnswerPrompt(id int, token string, ans Answer) bool {
 }
 
 // AnswerPromptFromShell is an answer that arrived over a napp shell's wire
-// channel — a path a napp's own page can write to, so it proves nothing but
-// the token and can only ever concern the prompt shown over that very
-// window. Launcher questions (no instance) are never answerable from here.
+// channel. Only trusted native shells (wasm canvas and picker windows) draw
+// prompts on their own window and may answer them over the wire; webview
+// shells share their DOM/JS runtime with untrusted napp code and are always
+// refused here (their prompts are shown in the launcher window instead).
 func AnswerPromptFromShell(id int, token, instance string, ans Answer) bool {
+	if ci := lookupInstance(instance); !ci.trustsShellPrompt() {
+		log.Warn().Str("instance", instance).Int("id", id).
+			Msg("dropping a prompt answer from an untrusted shell")
+		return false
+	}
 	promptMu.Lock()
 	p := pendingPrompt(id)
 	if p == nil || p.done {
@@ -590,23 +627,33 @@ func handlerOptions(candidates []Napp, open []*Instance) []PromptOption {
 // for the same window replaces the one just answered.
 var promptOverlays = xsync.NewMapOf[string, int]()
 
-// syncPromptOverlays makes what each napp window shows match the prompt
-// state: one overlay per window with a pending prompt, none elsewhere.
+// syncPromptOverlays makes what each trusted native shell (wasm canvas or
+// picker) shows match the prompt state: one overlay per window with a pending
+// prompt, none elsewhere. Webview shells are deliberately excluded so prompt
+// payloads and AnswerTokens never cross into an untrusted webview process.
 // Safe to call after any change to the prompt state.
 func syncPromptOverlays() {
 	promptMu.Lock()
-	targets := make(map[string]*Prompt)
+	pending := make([]*Prompt, 0, 1+len(promptQueue))
 	if promptActive != nil && promptActive.Instance != "" {
-		targets[promptActive.Instance] = promptActive
+		pending = append(pending, promptActive)
 	}
 	for _, q := range promptQueue {
 		if q.Instance != "" {
-			if _, ok := targets[q.Instance]; !ok {
-				targets[q.Instance] = q
-			}
+			pending = append(pending, q)
 		}
 	}
 	promptMu.Unlock()
+
+	targets := make(map[string]*Prompt)
+	for _, p := range pending {
+		if _, ok := targets[p.Instance]; ok {
+			continue
+		}
+		if ci := lookupInstance(p.Instance); ci.trustsShellPrompt() {
+			targets[p.Instance] = p
+		}
+	}
 
 	var hide []string
 	var showList []*Prompt
