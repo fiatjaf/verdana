@@ -30,28 +30,14 @@ func writeShortcutFile(name, exe, token string) (string, error) {
 	target := filepath.Join(startMenu, shortcutPrefix+shortcutSlug(name)+".lnk")
 	// IconLocation is "<path>,<index>"; index 0 is the first icon in the file,
 	// which is the 16x16 one we put there.
-	ps := fmt.Sprintf(
-		`$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut('%s'); $s.TargetPath = '%s'; $s.Arguments = '%s'; %s$s.Save()`,
-		target, psSingleQuote(exe), psSingleQuote(token), psIconLocation(),
-	)
-	if out, err := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", ps).CombinedOutput(); err != nil {
+	ps := buildWindowsShortcutPS(target, exe, token, iconFile())
+	if out, err := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-EncodedCommand", encodePSCommand(ps)).CombinedOutput(); err != nil {
 		return target, fmt.Errorf("creating shortcut failed: %v: %s", err, out)
 	}
 	if err := nameLnkFile(target, name); err != nil {
 		log.Warn().Err(err).Str("path", target).Msg("could not name the shortcut file")
 	}
 	return target, nil
-}
-
-// psIconLocation sets the link's icon to the unpacked .ico, or leaves it to
-// COM when the icon could not be unpacked: a link with no IconLocation still
-// runs, it just borrows the target's icon.
-func psIconLocation() string {
-	path := iconFile()
-	if path == "" {
-		return ""
-	}
-	return fmt.Sprintf("$s.IconLocation = '%s,0'; ", psSingleQuote(path))
 }
 
 // nameLnkFile writes the bundle's name into a link COM just wrote. The Start
@@ -122,11 +108,6 @@ func listShortcutFiles() []backend.ShortcutFile {
 		out = append(out, backend.ShortcutFile{Name: name, Path: path, Token: strings.TrimSpace(token)})
 	}
 	return out
-}
-
-// psSingleQuote wraps a string in the powershell single-quote literal form.
-func psSingleQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 }
 
 func userStartMenuPrograms() (string, error) {
