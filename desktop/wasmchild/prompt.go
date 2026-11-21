@@ -71,7 +71,7 @@ type promptImage struct {
 }
 
 // maxPromptImage is the most of an image a prompt will download.
-const maxPromptImage = 32 << 20
+const maxPromptImage = 16 << 20
 
 func loadPromptImage(url string, wake func()) *promptImage {
 	pi := &promptImage{}
@@ -81,14 +81,19 @@ func loadPromptImage(url string, wake func()) *promptImage {
 				wake()
 			}
 		}()
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+		target, err := wasmhost.ValidateWebURL(url)
 		if err != nil {
 			pi.failed.Store(true)
 			return
 		}
-		resp, err := http.DefaultClient.Do(req)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		req, err := http.NewRequestWithContext(ctx, "GET", target, nil)
+		if err != nil {
+			pi.failed.Store(true)
+			return
+		}
+		resp, err := wasmhost.GuardedHTTPClient().Do(req)
 		if err != nil {
 			pi.failed.Store(true)
 			return
@@ -98,7 +103,12 @@ func loadPromptImage(url string, wake func()) *promptImage {
 			pi.failed.Store(true)
 			return
 		}
-		img, _, err := image.Decode(io.LimitReader(resp.Body, maxPromptImage))
+		raw, err := io.ReadAll(io.LimitReader(resp.Body, maxPromptImage+1))
+		if err != nil || len(raw) > maxPromptImage {
+			pi.failed.Store(true)
+			return
+		}
+		img, err := wasmhost.SafeDecodeImage(raw)
 		if err != nil {
 			pi.failed.Store(true)
 			return

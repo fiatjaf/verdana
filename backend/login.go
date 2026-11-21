@@ -140,14 +140,27 @@ func Login(input string) {
 	userKeyer = k
 	userPubkey = pk
 
-	stateMu.Lock()
-	if state.Login != input {
-		state.Login = input
-		saveState()
+	// raw key material is never written down: it lives in this process for
+	// the session and the user logs in again next time (see loginIsResumable)
+	if loginIsResumable(input) {
+		stateMu.Lock()
+		if state.Login != input {
+			state.Login = input
+			saveState()
+		}
+		stateMu.Unlock()
 	}
-	stateMu.Unlock()
 
 	setProfileFromUser(ctx, pk)
+}
+
+// loginIsResumable says whether a login input may be persisted for the next
+// startup. Fail closed: only NIP-55 signer references (amber:<pkg>:<pubkey>)
+// are pointers to an external signer app rather than key material. Everything
+// else — nsec (any case), ncryptsec, raw hex, bunker:// (any case, carrying
+// connection secrets), or unknown future formats — stays in memory only.
+func loginIsResumable(input string) bool {
+	return strings.HasPrefix(strings.TrimSpace(input), "amber:")
 }
 
 // setProfileFromUser is the tail every login shares: fetch that key's
