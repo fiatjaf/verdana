@@ -6,7 +6,7 @@
   // named gets nothing: no window.nostr, no window.napp, no store. (Android
   // scopes its injection to the napp origin already and leaves __nappOrigin
   // unset, so the guard is inert there.)
-  if (window.__nappOrigin && location.origin !== window.__nappOrigin) return
+  if (window.top !== window || (window.__nappOrigin && location.origin !== window.__nappOrigin)) return
 
   // Custom localStorage helpers (install runs after rpc is defined below).
   const QUOTA = 5 * 1024 * 1024

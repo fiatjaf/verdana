@@ -116,32 +116,23 @@ func main() {
 		url = startNappServer(meta.Dir)
 	}
 
-	// window.name is where bridge.js picks up window.napp.instance, and it
-	// survives same-origin navigations — so a reload keeps the instance id.
-	// window.__nappOrigin is where the bridge is allowed to run: the
-	// injection (and the host-wide bindings) follow every document this
-	// window loads, whatever origin a page navigated itself to, so the
-	// guard right after it tears the raw bindings down before any page
-	// script of a document that is somewhere else gets to run — bridge.js
-	// then finds nothing to do on that side either. window.__nappTheme is
-	// where bridge.js picks the launcher's theme up on every (re)load, so
-	// a napp that reloads itself stays in sync. window.__nappStorage seeds
-	// the localStorage shim: the file is the per-nappId JSON store the
-	// backend persists (native localStorage would be a fresh empty origin
-	// on every launch, random port each time).
-	w.Init("window.name = " + jsString(meta.Instance) + ";" +
-		"window.__nappOrigin = " + jsString(originOf(url)) + ";" +
-		"if (window.__nappOrigin && location.origin !== window.__nappOrigin) {" +
-		"delete window.__bridge_rpc;" +
-		"delete window.__verdana_prompt_answer;" +
-		"window.__verdana_origin_violation();" +
-		"}" +
-		"window.__nappDomains = " + jsStringSlice(meta.Requires) + ";" +
-		storageInitScript(os.Getenv("VERDANA_NAPP_STORAGE_FILE")) +
-		themeInitScript(meta.Theme, meta.ThemeVars))
+	// Wrap the init script in an IIFE so an off-origin document or subframe
+	// tears down host-wide bindings and returns BEFORE receiving window.name,
+	// __nappDomains, __nappStorage (persisted per-napp secrets), or theme vars.
+	// Only a top-level navigation off-origin trips __verdana_origin_violation
+	// (so an embedded cross-origin iframe gets no bridge access without killing
+	// its parent napp window).
+	expectedOrigin := originOf(url)
+	w.Init(buildInitScript(
+		meta.Instance,
+		expectedOrigin,
+		meta.Requires,
+		storageInitScript(os.Getenv("VERDANA_NAPP_STORAGE_FILE")),
+		themeInitScript(meta.Theme, meta.ThemeVars),
+	))
 	// the napp-ui kit, for the napps that ask for it with requires: ["ui"]
 	if kit := nappbridge.UIKitScript(meta.Requires); kit != "" {
-		w.Init(kit)
+		w.Init("(function(){if(window.top!==window||(window.__nappOrigin&&location.origin!==window.__nappOrigin))return;" + kit + "})();")
 	}
 	// the very same bridge.js the Android app injects
 	w.Init(nappbridge.JS())
@@ -163,16 +154,60 @@ func jsString(s string) string {
 	return string(b)
 }
 
-// originOf is a url's origin, the way location.origin spells it: scheme
-// plus host, with the default port left off. "" when there is no usable
-// one, which leaves the bridge's guard switched off (an unexpected url
-// fails the launch later anyway).
+// buildInitScript produces the per-document init script. An off-origin
+// top-level document or any subframe synchronously deletes every host-wide
+// binding (including window.__webview__) and returns before any napp state
+// (__nappStorage, __nappDomains, __nappTheme, window.name) is exposed.
+func buildInitScript(instance, expectedOrigin string, requires []string, storageScript, themeScript string) string {
+	return "(function(){" +
+		"var expected = " + jsString(expectedOrigin) + ";" +
+		"window.__nappOrigin = expected;" +
+		"var top = (window.top === window);" +
+		"var badOrigin = !!(expected && location.origin !== expected);" +
+		"if (!top || badOrigin) {" +
+		"try { delete window.__bridge_rpc; } catch(e) {}" +
+		"try { delete window.__verdana_prompt_answer; } catch(e) {}" +
+		"if (top && badOrigin && typeof window.__verdana_origin_violation === 'function') {" +
+		"try { window.__verdana_origin_violation(); } catch(e) {}" +
+		"}" +
+		"try { delete window.__verdana_origin_violation; } catch(e) {}" +
+		"try { delete window.__webview__; } catch(e) {}" +
+		"return;" +
+		"}" +
+		"window.name = " + jsString(instance) + ";" +
+		"window.__nappDomains = " + jsStringSlice(requires) + ";" +
+		storageScript +
+		themeScript +
+		"})();"
+}
+
+// originOf is a url's origin, the way location.origin spells it: lowercased
+// scheme plus lowercased host, with the default port (:80 for http, :443 for
+// https) left off. "" when there is no usable origin.
 func originOf(raw string) string {
 	u, err := neturl.Parse(strings.TrimSpace(raw))
-	if err != nil || u.Host == "" {
+	if err != nil || u.Scheme == "" || u.Host == "" {
 		return ""
 	}
-	return u.Scheme + "://" + u.Host
+	scheme := strings.ToLower(u.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return ""
+	}
+	host := strings.ToLower(u.Hostname())
+	if host == "" {
+		return ""
+	}
+	port := u.Port()
+	if (scheme == "http" && port == "80") || (scheme == "https" && port == "443") {
+		port = ""
+	}
+	if port != "" {
+		return scheme + "://" + net.JoinHostPort(host, port)
+	}
+	if strings.Contains(host, ":") {
+		return scheme + "://[" + host + "]"
+	}
+	return scheme + "://" + host
 }
 
 // windowWidth/Height are the initial window size in pixels: the napp's
