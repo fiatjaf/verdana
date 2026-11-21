@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	neturl "net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -53,6 +54,19 @@ var (
 	pending   = xsync.NewMapOf[int, chan wireMsg]()
 	reqSerial atomic.Int64
 	log       zerolog.Logger
+
+	// originViolated is set the moment the window reports it is no longer
+	// on the origin the shell picked for it (see the origin guard in the
+	// init script). From then on the bridge refuses everything this window
+	// asks: the document now on screen is not the napp, whatever it looks
+	// like. The bindings are host-wide — they exist in every document the
+	// window ever loads — so the refusal lives here, on the host side, and
+	// not only in the page's copy of bridge.js.
+	originViolated atomic.Bool
+
+	// wRef is the window itself, set once in main before the event loop
+	// runs and only read afterwards.
+	wRef webview.WebView
 )
 
 func main() {
@@ -87,36 +101,42 @@ func main() {
 	runtime.LockOSThread()
 
 	w := webview.New(os.Getenv("WEBVIEW_DEBUG") == "true")
+	wRef = w
 	w.SetTitle(windowTitle(meta.Name, os.Getenv("VERDANA_INSTANCE_ID")))
 	w.SetSize(windowWidth(), windowHeight(), webview.HintNone)
 	_ = w.Bind("__bridge_rpc", rpcBound)
 	_ = w.Bind("__verdana_prompt_answer", promptAnswer)
-
-	// window.name is where bridge.js picks up window.napp.instance, and it
-	// survives same-origin navigations — so a reload keeps the instance id.
-	// window.__nappTheme is where bridge.js picks the launcher's theme up on
-	// every (re)load, so a napp that reloads itself stays in sync.
-	// window.__nappStorage seeds the localStorage shim: the file is the
-	// per-nappId JSON store the backend persists (native localStorage would
-	// be a fresh empty origin on every launch, random port each time).
-	w.Init("window.name = " + jsString(meta.Instance) + ";" +
-		"window.__nappDomains = " + jsStringSlice(meta.Requires) + ";" +
-		storageInitScript(os.Getenv("VERDANA_NAPP_STORAGE_FILE")) +
-		themeInitScript(meta.Theme, meta.ThemeVars))
-	// the napp-ui kit, for the napps that ask for it with requires: ["ui"]
-	if kit := nappbridge.UIKitScript(meta.Requires); kit != "" {
-		w.Init(kit)
-	}
-	// the very same bridge.js the Android app injects
-	w.Init(nappbridge.JS())
+	_ = w.Bind("__verdana_origin_violation", originViolation)
 
 	// a dev napp navigates straight to its page (its dev-server url, or the
-	// launcher's throwaway server): the bridge bindings below don't depend
-	// on the page's origin, so nothing else changes.
+	// launcher's throwaway server): the bridge bindings don't depend on the
+	// page's origin, but the bridge itself does — see the __nappOrigin below.
 	url := meta.URL
 	if url == "" {
 		url = startNappServer(meta.Dir)
 	}
+
+	// Wrap the init script in an IIFE so an off-origin document or subframe
+	// tears down host-wide bindings and returns BEFORE receiving window.name,
+	// __nappDomains, __nappStorage (persisted per-napp secrets), or theme vars.
+	// Only a top-level navigation off-origin trips __verdana_origin_violation
+	// (so an embedded cross-origin iframe gets no bridge access without killing
+	// its parent napp window).
+	expectedOrigin := originOf(url)
+	w.Init(buildInitScript(
+		meta.Instance,
+		expectedOrigin,
+		meta.Requires,
+		storageInitScript(os.Getenv("VERDANA_NAPP_STORAGE_FILE")),
+		themeInitScript(meta.Theme, meta.ThemeVars),
+	))
+	// the napp-ui kit, for the napps that ask for it with requires: ["ui"]
+	if kit := nappbridge.UIKitScript(meta.Requires); kit != "" {
+		w.Init("(function(){if(window.top!==window||(window.__nappOrigin&&location.origin!==window.__nappOrigin))return;" + kit + "})();")
+	}
+	// the very same bridge.js the Android app injects
+	w.Init(nappbridge.JS())
+
 	w.Navigate(url)
 
 	go reader(w)
@@ -132,6 +152,62 @@ func jsString(s string) string {
 		return `""`
 	}
 	return string(b)
+}
+
+// buildInitScript produces the per-document init script. An off-origin
+// top-level document or any subframe synchronously deletes every host-wide
+// binding (including window.__webview__) and returns before any napp state
+// (__nappStorage, __nappDomains, __nappTheme, window.name) is exposed.
+func buildInitScript(instance, expectedOrigin string, requires []string, storageScript, themeScript string) string {
+	return "(function(){" +
+		"var expected = " + jsString(expectedOrigin) + ";" +
+		"window.__nappOrigin = expected;" +
+		"var top = (window.top === window);" +
+		"var badOrigin = !!(expected && location.origin !== expected);" +
+		"if (!top || badOrigin) {" +
+		"try { delete window.__bridge_rpc; } catch(e) {}" +
+		"try { delete window.__verdana_prompt_answer; } catch(e) {}" +
+		"if (top && badOrigin && typeof window.__verdana_origin_violation === 'function') {" +
+		"try { window.__verdana_origin_violation(); } catch(e) {}" +
+		"}" +
+		"try { delete window.__verdana_origin_violation; } catch(e) {}" +
+		"try { delete window.__webview__; } catch(e) {}" +
+		"return;" +
+		"}" +
+		"window.name = " + jsString(instance) + ";" +
+		"window.__nappDomains = " + jsStringSlice(requires) + ";" +
+		storageScript +
+		themeScript +
+		"})();"
+}
+
+// originOf is a url's origin, the way location.origin spells it: lowercased
+// scheme plus lowercased host, with the default port (:80 for http, :443 for
+// https) left off. "" when there is no usable origin.
+func originOf(raw string) string {
+	u, err := neturl.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return ""
+	}
+	scheme := strings.ToLower(u.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return ""
+	}
+	host := strings.ToLower(u.Hostname())
+	if host == "" {
+		return ""
+	}
+	port := u.Port()
+	if (scheme == "http" && port == "80") || (scheme == "https" && port == "443") {
+		port = ""
+	}
+	if port != "" {
+		return scheme + "://" + net.JoinHostPort(host, port)
+	}
+	if strings.Contains(host, ":") {
+		return scheme + "://[" + host + "]"
+	}
+	return scheme + "://" + host
 }
 
 // windowWidth/Height are the initial window size in pixels: the napp's
@@ -240,6 +316,9 @@ func startNappServer(root string) string {
 }
 
 func rpcBound(method string, params string) string {
+	if originViolated.Load() {
+		return `{"__bridge_error":"this window left the napp origin; the bridge is off"}`
+	}
 	result, err := rpc(method, params)
 	if err != nil {
 		wrapped, _ := json.Marshal(map[string]string{"__bridge_error": err.Error()})
@@ -365,8 +444,34 @@ type promptView struct {
 // backend.Scope) — the launcher files the wider ones away and stops asking.
 // skip is the indexes of the items (relays) the user unticked.
 func promptAnswer(id int, ok bool, scope string, skip []int) {
+	if originViolated.Load() {
+		return
+	}
 	b, _ := json.Marshal(map[string]any{"ok": ok, "scope": scope, "skip": skip})
 	writeMsg(wireMsg{T: "promptAnswer", ID: id, Params: string(b)})
+}
+
+// originViolation is what the init script's origin guard calls when the
+// window has landed somewhere other than the napp's own origin. The guard
+// has already deleted the raw bindings in that document before any of its
+// page scripts could run; this reports to the launcher — which closes the
+// window — and strips the bindings from the shell side too, so no later
+// document of this window ever grows them again.
+func originViolation() string {
+	if originViolated.Swap(true) {
+		return "ok"
+	}
+	writeMsg(wireMsg{T: "navViolation"})
+	if wRef != nil {
+		wRef.Dispatch(func() {
+			_ = wRef.Unbind("__bridge_rpc")
+			_ = wRef.Unbind("__verdana_prompt_answer")
+			_ = wRef.Unbind("__verdana_origin_violation")
+		})
+	}
+	log.Warn().Str("napp", meta.ID).Str("instance", meta.Instance).
+		Msg("window navigated off the napp origin; bridge disabled")
+	return "ok"
 }
 
 func promptOverlayCode(pv promptView) string {

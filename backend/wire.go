@@ -30,6 +30,10 @@ import "encoding/json"
 // Shell → backend (all through HandleWireMessage):
 //
 //	{t:"rpc", id, method, params}    a window.nostr/nostrdb/napp call
+//	{t:"navViolation"}               the desktop shell's origin guard
+//	                                 fired: the window left the napp's own
+//	                                 origin (desktop shells only; the
+//	                                 launcher closes the window)
 //	{t:"promptAnswer", id, params:{"ok","index","scope","skip"}}  the
 //	                                 user answered the prompt shown over
 //	                                 this window; scope is how long the
