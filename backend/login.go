@@ -2,7 +2,6 @@ package backend
 
 import (
 	"context"
-	"encoding/hex"
 	"errors"
 	"strings"
 	"time"
@@ -156,30 +155,12 @@ func Login(input string) {
 }
 
 // loginIsResumable says whether a login input may be persisted for the next
-// startup. Raw key material — an nsec, or a bunker url whose query carries
-// the connection secret — must not sit in state.json: the file lives in the
-// user's config dir, travels through backups, and outlives the session it
-// belongs to. NIP-55 signer logins (amber:<pkg>:<pubkey>) are a pointer to
-// an app that holds the key: safe to resume from.
+// startup. Fail closed: only NIP-55 signer references (amber:<pkg>:<pubkey>)
+// are pointers to an external signer app rather than key material. Everything
+// else — nsec (any case), ncryptsec, raw hex, bunker:// (any case, carrying
+// connection secrets), or unknown future formats — stays in memory only.
 func loginIsResumable(input string) bool {
-	if strings.HasPrefix(input, "amber:") {
-		return true
-	}
-	if strings.HasPrefix(input, "bunker:") {
-		// the secret query parameter is the credential that opens the bunker
-		return false
-	}
-	if strings.HasPrefix(input, "nsec") {
-		return false
-	}
-	// a bare hex secret key: same rule as nsec
-	trimmed := strings.TrimSpace(input)
-	if len(trimmed) == 64 && !strings.ContainsAny(trimmed, "{}[] \t\n ") {
-		if _, err := hex.DecodeString(trimmed); err == nil {
-			return false
-		}
-	}
-	return true
+	return strings.HasPrefix(strings.TrimSpace(input), "amber:")
 }
 
 // setProfileFromUser is the tail every login shares: fetch that key's
