@@ -265,7 +265,7 @@ for it:
   two sides is a square of that side. An animated image gives its first
   frame.
 
-Both read at most 16MB and give up after 20 seconds. They run beside the
+Both read at most 16MB and give up after 20 seconds, and an image whose header declares more than 64 megapixels is refused without decoding. They run beside the
 frame loop (`backend/wasmhost/http.go`), so a slow server never holds up a
 frame. There is no CORS here, as there is none for a
 web napp's page in verdana; in nostrapps the browser's rules apply.
