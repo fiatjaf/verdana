@@ -489,20 +489,33 @@ func devServerBase() string {
 		log.Error().Err(err).Msg("dev server failed to listen")
 		return ""
 	}
+	addr := ln.Addr().String()
+	go http.Serve(ln, devServerHandler(addr))
+	devSrvBase = "http://" + addr
+	log.Info().Str("addr", devSrvBase).Msg("dev server up")
+	return devSrvBase
+}
+
+// devServerHandler wraps the folder dev-server mux with an exact Host header
+// check so DNS-rebinding pages in a browser cannot reach local dev files.
+func devServerHandler(addr string) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/dev/", serveDevFile)
 	mux.HandleFunc("/", serveDevRootFile)
-	go http.Serve(ln, mux)
-	devSrvBase = "http://" + ln.Addr().String()
-	log.Info().Str("addr", devSrvBase).Msg("dev server up")
-	return devSrvBase
+	return http.HandlerFunc(func(wr http.ResponseWriter, r *http.Request) {
+		if r.Host != addr {
+			http.Error(wr, "misdirected request", http.StatusMisdirectedRequest)
+			return
+		}
+		mux.ServeHTTP(wr, r)
+	})
 }
 
 // serveDevRootFile handles absolute asset URLs such as /index.js. The page's
 // same-origin Referer identifies which folder napp owns the request.
 func serveDevRootFile(wr http.ResponseWriter, r *http.Request) {
 	ref, err := url.Parse(r.Referer())
-	if err != nil {
+	if err != nil || ref.Host != r.Host {
 		http.NotFound(wr, r)
 		return
 	}

@@ -1,4 +1,8 @@
 ;(() => {
+  // Never expose bridge APIs to subframes or off-origin documents on desktop
+  // (Android scopes injection per-origin and leaves __nappOrigin unset).
+  if (window.top !== window || (window.__nappOrigin && location.origin !== window.__nappOrigin)) return
+
   // Custom localStorage helpers (install runs after rpc is defined below).
   const QUOTA = 5 * 1024 * 1024
   const quotaError = () => {
