@@ -1,6 +1,8 @@
 package backend
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -76,5 +78,31 @@ func TestDevFolderFollowsSymlinks(t *testing.T) {
 	}
 	if got["/loop"] || got["/loop/index.html"] {
 		t.Errorf("a looping symlink should be skipped, got %v", got)
+	}
+}
+
+func TestDevServerHostCheck(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.WriteFile(filepath.Join(dir, "metadata.json"), []byte(`{"id":"hosttest","title":"HostTest"}`), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "index.html"), []byte("hello"), 0644)
+	devNapps.Store("dev~hosttest", &devNapp{napp: Napp{ID: "dev~hosttest"}, source: "folder", dir: dir})
+	defer devNapps.Delete("dev~hosttest")
+
+	h := devServerHandler("127.0.0.1:43210")
+
+	badReq := httptest.NewRequest("GET", "http://evil.example:43210/dev/dev~hosttest/index.html", nil)
+	badReq.Host = "evil.example:43210"
+	badRec := httptest.NewRecorder()
+	h.ServeHTTP(badRec, badReq)
+	if badRec.Code != http.StatusMisdirectedRequest {
+		t.Fatalf("wrong Host status = %d, want 421", badRec.Code)
+	}
+
+	okReq := httptest.NewRequest("GET", "http://127.0.0.1:43210/dev/dev~hosttest/index.html", nil)
+	okReq.Host = "127.0.0.1:43210"
+	okRec := httptest.NewRecorder()
+	h.ServeHTTP(okRec, okReq)
+	if okRec.Code != http.StatusOK || okRec.Body.String() != "hello" {
+		t.Fatalf("matching Host got %d %q, want 200 \"hello\"", okRec.Code, okRec.Body.String())
 	}
 }
