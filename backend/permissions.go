@@ -139,7 +139,9 @@ func lookupRule(key RuleKey) (Rule, bool) {
 		return r, true
 	}
 	if r, ok := storedRule(key); ok {
-		return r, true
+		if !(key.Permission == PermDevInstall && r.Decision == DecisionAllow) {
+			return r, true
+		}
 	}
 	if d := NappPolicy(key.Permission); d != DecisionAsk {
 		return Rule{Decision: d}, true
@@ -156,6 +158,11 @@ func lookupRule(key RuleKey) (Rule, bool) {
 // saved answer does replace the session's, which would otherwise keep shadowing
 // it for the rest of the run.
 func remember(key RuleKey, r Rule, scope Scope) {
+	// PermDevInstall installs executable napp code on disk; cap "always allow"
+	// to this session so a single click never survives across restarts.
+	if key.Permission == PermDevInstall && r.Decision == DecisionAllow && scope == ScopeAlways {
+		scope = ScopeSession
+	}
 	switch scope {
 	case ScopeSession:
 		setSessionRule(key, r)
