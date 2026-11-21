@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -16,6 +17,10 @@ import (
 
 	"verdana/backend"
 )
+
+// maxForwardBytes bounds a single forwarded JSON payload on the local
+// single-instance port so a local peer cannot exhaust memory.
+const maxForwardBytes = 1 << 20
 
 // Single-instance forwarding: the first launcher binds a localhost port and
 // writes the number to launcher.port in its data dir. When a shortcut (or the
@@ -96,13 +101,17 @@ func startInstanceListener(dataDir string) {
 	// launcher writes for itself.
 	secret := make([]byte, 16)
 	if _, err := rand.Read(secret); err != nil {
+		ln.Close()
 		log.Warn().Err(err).Msg("no forwarding secret: shortcuts will start a new launcher")
 		return
 	}
 	forwardSecret = hex.EncodeToString(secret)
 	portFile := fmt.Sprintf("%d:%s", ln.Addr().(*net.TCPAddr).Port, forwardSecret)
+	_ = os.MkdirAll(dataDir, 0700)
 	if err := os.WriteFile(portFilePath(dataDir), []byte(portFile), 0600); err != nil {
+		ln.Close()
 		log.Warn().Err(err).Msg("could not write the launcher port file")
+		return
 	}
 
 	go func() {
@@ -121,7 +130,7 @@ func serveForward(conn net.Conn) {
 	defer conn.Close()
 	conn.SetDeadline(time.Now().Add(5 * time.Second))
 	var msg forwarded
-	if err := json.NewDecoder(conn).Decode(&msg); err != nil {
+	if err := json.NewDecoder(io.LimitReader(conn, maxForwardBytes)).Decode(&msg); err != nil {
 		return
 	}
 	if subtle.ConstantTimeCompare([]byte(msg.Secret), []byte(forwardSecret)) != 1 {
